@@ -120,17 +120,24 @@
         "additionalProperties": false,
         "properties": {
           "cursor": {
-            "format": "uuid"
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "limit": {
+            "maximum": 100,
             "minimum": 1,
             "type": "integer"
           },
           "protocol_version": {
-            "const": 1
+            "const": 1,
+            "type": "integer"
           },
           "vault_id": {
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           }
         },
         "required": [
@@ -145,19 +152,49 @@
         "additionalProperties": false,
         "properties": {
           "next_cursor": {
-            "format": "uuid"
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "operations": {
+            "items": {
+              "$ref": "#/components/schemas/EncryptedPushOperation"
+            },
             "type": "array"
           },
           "protocol_version": {
-            "const": 1
+            "const": 1,
+            "type": "integer"
           }
         },
         "required": [
           "protocol_version",
           "operations",
           "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ResnapshotRequired": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "const": "sync_cursor_resnapshot_required",
+            "type": "string"
+          },
+          "protocol_version": {
+            "const": 1,
+            "type": "integer"
+          },
+          "resnapshot_cursor": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "code",
+          "resnapshot_cursor"
         ],
         "type": "object"
       }
@@ -174,7 +211,29 @@
   "paths": {
     "/v1/vaults/{vault_id}/operations": {
       "get": {
-        "summary": "Pull encrypted operations"
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullResponse"
+                }
+              }
+            },
+            "description": "A stable page of encrypted operations"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResnapshotRequired"
+                }
+              }
+            },
+            "description": "The opaque cursor is unknown, belongs to another vault or user, or predates retention; retry with cursor null"
+          }
+        },
+        "summary": "Pull encrypted operations in strictly increasing server revision order"
       },
       "post": {
         "summary": "Push an encrypted operation"

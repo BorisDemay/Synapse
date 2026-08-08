@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub const PROTOCOL_VERSION: u8 = 1;
+pub const MAX_PULL_LIMIT: u32 = 100;
+pub const RESNAPSHOT_REQUIRED_CODE: &str = "sync_cursor_resnapshot_required";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -124,13 +126,44 @@ fn is_ciphertext_hash(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PullRequest {
     pub protocol_version: u8,
     pub vault_id: String,
     pub cursor: Option<SyncCursor>,
     pub limit: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPullRequest {
+    protocol_version: u8,
+    vault_id: String,
+    cursor: Option<SyncCursor>,
+    limit: u32,
+}
+
+impl<'de> Deserialize<'de> for PullRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawPullRequest::deserialize(deserializer)?;
+        if raw.protocol_version != PROTOCOL_VERSION
+            || !is_uuid(&raw.vault_id)
+            || raw.limit == 0
+            || raw.limit > MAX_PULL_LIMIT
+        {
+            return Err(serde::de::Error::custom("pull request is invalid"));
+        }
+
+        Ok(Self {
+            protocol_version: raw.protocol_version,
+            vault_id: raw.vault_id,
+            cursor: raw.cursor,
+            limit: raw.limit,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -139,6 +172,57 @@ pub struct PullResponse {
     pub protocol_version: u8,
     pub operations: Vec<EncryptedPushOperation>,
     pub next_cursor: Option<SyncCursor>,
+}
+
+/// The versioned error body returned with HTTP 409 when a pull cursor cannot
+/// safely resume. Clients must retry the same pull with `cursor: null`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ResnapshotRequired {
+    pub protocol_version: u8,
+    pub code: String,
+    pub resnapshot_cursor: (),
+}
+
+impl ResnapshotRequired {
+    pub fn new() -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            code: RESNAPSHOT_REQUIRED_CODE.into(),
+            resnapshot_cursor: (),
+        }
+    }
+}
+
+impl Default for ResnapshotRequired {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawResnapshotRequired {
+    protocol_version: u8,
+    code: String,
+    resnapshot_cursor: (),
+}
+
+impl<'de> Deserialize<'de> for ResnapshotRequired {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawResnapshotRequired::deserialize(deserializer)?;
+        if raw.protocol_version != PROTOCOL_VERSION || raw.code != RESNAPSHOT_REQUIRED_CODE {
+            return Err(serde::de::Error::custom("resnapshot error is invalid"));
+        }
+
+        Ok(Self {
+            protocol_version: raw.protocol_version,
+            code: raw.code,
+            resnapshot_cursor: raw.resnapshot_cursor,
+        })
+    }
 }
 
 /// The server reports only opaque ciphertext references. A client that has
@@ -170,7 +254,19 @@ pub fn openapi_document() -> Value {
         "paths": {
             "/v1/vaults/{vault_id}/operations": {
                 "post": { "summary": "Push an encrypted operation" },
-                "get": { "summary": "Pull encrypted operations" }
+                "get": {
+                    "summary": "Pull encrypted operations in strictly increasing server revision order",
+                    "responses": {
+                        "200": {
+                            "description": "A stable page of encrypted operations",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PullResponse" } } }
+                        },
+                        "409": {
+                            "description": "The opaque cursor is unknown, belongs to another vault or user, or predates retention; retry with cursor null",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResnapshotRequired" } } }
+                        }
+                    }
+                }
             }
         },
         "components": {
@@ -196,13 +292,19 @@ pub fn openapi_document() -> Value {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["protocol_version", "vault_id", "cursor", "limit"],
-                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "vault_id": { "format": "uuid" }, "cursor": { "format": "uuid" }, "limit": { "type": "integer", "minimum": 1 } }
+                    "properties": { "protocol_version": { "type": "integer", "const": PROTOCOL_VERSION }, "vault_id": { "type": "string", "format": "uuid" }, "cursor": { "type": ["string", "null"], "format": "uuid" }, "limit": { "type": "integer", "minimum": 1, "maximum": MAX_PULL_LIMIT } }
                 },
                 "PullResponse": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["protocol_version", "operations", "next_cursor"],
-                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "operations": { "type": "array" }, "next_cursor": { "format": "uuid" } }
+                    "properties": { "protocol_version": { "type": "integer", "const": PROTOCOL_VERSION }, "operations": { "type": "array", "items": { "$ref": "#/components/schemas/EncryptedPushOperation" } }, "next_cursor": { "type": ["string", "null"], "format": "uuid" } }
+                },
+                "ResnapshotRequired": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["protocol_version", "code", "resnapshot_cursor"],
+                    "properties": { "protocol_version": { "type": "integer", "const": PROTOCOL_VERSION }, "code": { "type": "string", "const": RESNAPSHOT_REQUIRED_CODE }, "resnapshot_cursor": { "type": "null" } }
                 },
                 "Conflict": {
                     "type": "object",

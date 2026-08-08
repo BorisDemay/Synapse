@@ -30,12 +30,40 @@ les déchiffrer et effectuer une fusion trois voies uniquement pour des hunks
 disjoncts ; sinon une résolution manuelle produit une nouvelle révision.
 `rejected` ne retire pas l'opération locale sans action explicite du client.
 
-## Pull et reprise
+## Pull, curseurs et reprise
 
-Un `PullRequest` contient le coffre, un `SyncCursor` opaque facultatif et une
-limite. La réponse est ordonnée de manière stable et fournit `next_cursor` quand
-une page suivante existe. Après une coupure, un redémarrage ou la perte d'un
-signal WebSocket, le client reprend un pull depuis son dernier curseur durable.
+Un `SyncCursor` v1 est un UUID opaque émis exclusivement par le serveur. Il est
+lié côté serveur au triplet `(vault_id, user_id, revision)` et ne contient ni
+révision, ni utilisateur, ni métadonnée en clair. Le client le conserve et le
+renvoie sans l'interpréter. Un curseur reste consommable après une coupure ou
+une reprise tant que sa révision est conservée par le serveur.
+
+Un `PullRequest` contient `protocol_version: 1`, le coffre, un curseur nullable
+et une limite entière de 1 à 100 inclus. `cursor: null` demande un snapshot
+depuis la révision 0. Une réponse `PullResponse` contient seulement des
+opérations chiffrées, dans l'ordre strict des révisions serveur croissantes, et
+un `next_cursor` opaque nullable. Le serveur ne retourne jamais plus de 100
+opérations et n'émet `next_cursor` que lorsqu'une page suivante existe.
+
+Après une coupure, un redémarrage ou la perte d'un signal WebSocket, le client
+reprend un pull depuis son dernier curseur durable.
+
+Si un curseur est inconnu, est lié à un autre `(vault_id, user_id)`, ou pointe
+avant le plancher de rétention, le serveur retourne HTTP `409 Conflict` avec le
+JSON fermé et versionné suivant :
+
+```json
+{
+  "protocol_version": 1,
+  "code": "sync_cursor_resnapshot_required",
+  "resnapshot_cursor": null
+}
+```
+
+Ce code stable n'expose aucune cause, révision ou métadonnée supplémentaire. Le
+client doit abandonner le curseur concerné et réessayer le même pull avec
+`cursor: null`; il ne doit pas déduire de l'erreur l'existence ou l'état d'un
+autre coffre.
 
 WebSocket est uniquement un signal de réveil : il ne constitue ni un accusé de
 réception ni une source de vérité. Toute reprise passe par le pull paginé.
@@ -43,6 +71,6 @@ réception ni une source de vérité. Toute reprise passe par le pull paginé.
 ## Contrat publié
 
 Le document OpenAPI déterministe est versionné dans
-`crates/synapse-protocol/schema/openapi.json`. Le test de contrat vérifie que sa
-génération est stable et que le schéma d'opération chiffrée n'introduit aucun
-champ de contenu en clair.
+`crates/synapse-protocol/schema/openapi.json`. Le test de contrat vérifie que sa génération est stable, que les enveloppes de
+pull et l'erreur de resnapshot refusent les champs inconnus, et qu'aucun schéma
+n'introduit un champ de contenu en clair.

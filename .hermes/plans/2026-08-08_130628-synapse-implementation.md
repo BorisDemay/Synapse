@@ -855,6 +855,16 @@ git commit -m "feat(sync): accept idempotent push operations"
 - Modify: `apps/server/src/http/sync.rs`
 - Test: `apps/server/tests/sync_pull.rs`
 
+**Contrat v1 figé (ADR 0005) :** `cursor` est un UUID opaque émis par le
+serveur et associé au `(vault_id, user_id, revision)` côté serveur. `cursor:
+null` démarre un snapshot depuis la révision 0. Les pages sont strictement
+ordonnées par révision serveur croissante, sans doublon ni trou, et `limit` est
+borné de 1 à 100. Un curseur inconnu, associé à un autre coffre/utilisateur ou
+antérieur au plancher de rétention retourne HTTP 409 avec
+`{"protocol_version":1,"code":"sync_cursor_resnapshot_required","resnapshot_cursor":null}`.
+Le client abandonne alors le curseur et repart avec `cursor: null`; la réponse
+ne divulgue ni révision ni métadonnée.
+
 **Step 1: TDD pull initial paginé.**
 
 **Step 2: TDD curseur suivant** : aucun doublon ni trou entre deux pages.

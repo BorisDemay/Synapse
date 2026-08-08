@@ -1,5 +1,6 @@
 use synapse_protocol::v1::{
-    Conflict, EncryptedPushOperation, PullRequest, PullResponse, SyncCursor, openapi_document,
+    Conflict, EncryptedPushOperation, MAX_PULL_LIMIT, PullRequest, PullResponse,
+    ResnapshotRequired, SyncCursor, openapi_document,
 };
 
 const PLAINTEXT_FIXTURE: &str = "# note secrète";
@@ -48,6 +49,7 @@ fn sync_contracts_round_trip_without_unknown_fields() {
             SyncCursor::new("0198e5de-eeee-7fff-8000-111122223333").expect("valid cursor"),
         ),
     };
+    let resnapshot = ResnapshotRequired::new();
     let conflict = Conflict {
         protocol_version: 1,
         operation_id: operation.operation_id.clone(),
@@ -64,6 +66,7 @@ fn sync_contracts_round_trip_without_unknown_fields() {
         serde_json::to_value(&operation).expect("operation serializes"),
         serde_json::to_value(&request).expect("request serializes"),
         serde_json::to_value(&response).expect("response serializes"),
+        serde_json::to_value(&resnapshot).expect("resnapshot error serializes"),
         serde_json::to_value(&conflict).expect("conflict serializes"),
     ] {
         assert!(!value.to_string().contains(PLAINTEXT_FIXTURE));
@@ -86,6 +89,40 @@ fn sync_contracts_round_trip_without_unknown_fields() {
         invalid_cursor.is_err(),
         "invalid cursors are rejected at the boundary"
     );
+
+    let limit_above_ceiling = serde_json::from_str::<PullRequest>(&format!(
+        r#"{{"protocol_version":1,"vault_id":"0198e5de-1111-7222-8333-444455556666","cursor":null,"limit":{}}}"#,
+        MAX_PULL_LIMIT + 1,
+    ));
+    assert!(
+        limit_above_ceiling.is_err(),
+        "pull pages have a fixed ceiling"
+    );
+}
+
+#[test]
+fn resnapshot_error_is_closed_opaque_and_instructs_null_cursor_retry() {
+    let error = ResnapshotRequired::new();
+    let value = serde_json::to_value(&error).expect("resnapshot error serializes");
+
+    assert_eq!(value["protocol_version"], 1);
+    assert_eq!(value["code"], "sync_cursor_resnapshot_required");
+    assert_eq!(value["resnapshot_cursor"], serde_json::Value::Null);
+    assert!(!value.to_string().contains(PLAINTEXT_FIXTURE));
+
+    let decoded: ResnapshotRequired = serde_json::from_value(value).expect("error deserializes");
+    assert_eq!(decoded, error);
+
+    for payload in [
+        r#"{"protocol_version":1,"code":"sync_cursor_resnapshot_required","resnapshot_cursor":null,"title":"secret"}"#,
+        r#"{"protocol_version":1,"code":"other","resnapshot_cursor":null}"#,
+        r#"{"protocol_version":1,"code":"sync_cursor_resnapshot_required","resnapshot_cursor":"0198e5de-9999-7aaa-8bbb-ccccddddeeee"}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<ResnapshotRequired>(payload).is_err(),
+            "resnapshot errors reject unknown fields and mutable instructions"
+        );
+    }
 }
 
 #[test]
@@ -117,7 +154,23 @@ fn generated_openapi_document_is_stable_and_exposes_only_opaque_payloads() {
         &openapi_document()["components"]["schemas"]["EncryptedPushOperation"]["properties"];
     assert!(properties.get("markdown").is_none());
     assert!(properties.get("title").is_none());
-    for schema in ["PullRequest", "PullResponse", "Conflict"] {
+    let pull_request = &openapi_document()["components"]["schemas"]["PullRequest"];
+    assert_eq!(pull_request["additionalProperties"], false);
+    assert_eq!(
+        pull_request["properties"]["limit"]["maximum"],
+        MAX_PULL_LIMIT
+    );
+    assert_eq!(
+        openapi_document()["paths"]["/v1/vaults/{vault_id}/operations"]["get"]["responses"]["409"]
+            ["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ResnapshotRequired"
+    );
+    for schema in [
+        "PullRequest",
+        "PullResponse",
+        "ResnapshotRequired",
+        "Conflict",
+    ] {
         assert!(
             openapi_document()["components"]["schemas"][schema]["properties"]
                 .as_object()
