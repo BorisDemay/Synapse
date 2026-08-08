@@ -3,6 +3,7 @@ members = [
     "crates/synapse-core",
     "crates/synapse-crypto",
     "crates/synapse-local-store",
+    "crates/synapse-protocol",
 ]
 resolver = "3"
 

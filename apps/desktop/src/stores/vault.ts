@@ -35,6 +35,14 @@ export const useVaultStore = defineStore("vault", {
         label: note.label,
       }));
     },
+    async createNote(path: string, content: string) {
+      await invoke("write_note", { path, content });
+      const notes = await invoke<NoteSummary[]>("list_notes");
+      this.nodes = notes.map((note) => ({
+        id: note.path,
+        label: note.label,
+      }));
+    },
     async searchNotes(query: string) {
       const notes = await invoke<NoteSummary[]>("search_notes", { query });
       this.searchResults = notes.map((note) => ({

@@ -1,0 +1,129 @@
+{
+  "components": {
+    "schemas": {
+      "Conflict": {
+        "additionalProperties": false,
+        "required": [
+          "protocol_version",
+          "operation_id",
+          "vault_id",
+          "note_id",
+          "base_revision",
+          "remote_revision",
+          "base_ciphertext_hash",
+          "local_ciphertext_hash",
+          "remote_ciphertext_hash"
+        ],
+        "type": "object"
+      },
+      "EncryptedPushOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "aad_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "base_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "ciphertext": {
+            "items": {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "ciphertext_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "encrypted_vault_key_envelope": {
+            "items": {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "nonce": {
+            "items": {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 24,
+            "minItems": 24,
+            "type": "array"
+          },
+          "note_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "protocol_version": {
+            "const": 1,
+            "type": "integer"
+          },
+          "vault_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "operation_id",
+          "vault_id",
+          "note_id",
+          "base_revision",
+          "ciphertext",
+          "nonce",
+          "aad_version",
+          "ciphertext_hash"
+        ],
+        "type": "object"
+      },
+      "PullRequest": {
+        "additionalProperties": false,
+        "required": [
+          "protocol_version",
+          "vault_id",
+          "cursor",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "PullResponse": {
+        "additionalProperties": false,
+        "required": [
+          "protocol_version",
+          "operations",
+          "next_cursor"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "license": {
+      "name": "AGPL-3.0-or-later"
+    },
+    "title": "Synapse encrypted sync API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/vaults/{vault_id}/operations": {
+      "get": {
+        "summary": "Pull encrypted operations"
+      },
+      "post": {
+        "summary": "Push an encrypted operation"
+      }
+    }
+  }
+}

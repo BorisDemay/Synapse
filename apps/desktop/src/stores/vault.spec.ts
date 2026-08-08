@@ -44,4 +44,20 @@ describe("vault store", () => {
     ]);
     expect(invoke).toHaveBeenCalledWith("search_notes", { query: "roadmap" });
   });
+
+  it("crée une note puis recharge l'arborescence", async () => {
+    invoke
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ path: "nouvelle.md", label: "nouvelle.md" }]);
+
+    const store = useVaultStore();
+    await store.createNote("nouvelle.md", "# Nouvelle note");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "write_note", {
+      path: "nouvelle.md",
+      content: "# Nouvelle note",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "list_notes");
+    expect(store.nodes).toEqual([{ id: "nouvelle.md", label: "nouvelle.md" }]);
+  });
 });
