@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod fs;
+mod history;
 mod ids;
 mod markdown;
 mod path;
@@ -8,6 +9,7 @@ mod vault;
 mod version;
 mod watcher;
 
+pub use history::{HistoryEntry, HistoryError, NoteHistory};
 pub use ids::{ContentHash, NoteId, OperationId, VaultId};
 pub use markdown::{NoteParseError, ParsedNote, WikiLink, parse_note, parse_note_bytes};
 pub use path::VaultPath;

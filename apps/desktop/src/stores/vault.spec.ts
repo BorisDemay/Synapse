@@ -30,4 +30,18 @@ describe("vault store", () => {
     expect(invoke).toHaveBeenNthCalledWith(1, "open_vault");
     expect(invoke).toHaveBeenNthCalledWith(2, "list_notes");
   });
+
+  it("recherche des notes locales via la commande typée", async () => {
+    invoke.mockResolvedValueOnce([
+      { path: "projets/roadmap.md", label: "roadmap.md" },
+    ]);
+
+    const store = useVaultStore();
+    await store.searchNotes("roadmap");
+
+    expect(store.searchResults).toEqual([
+      { id: "projets/roadmap.md", label: "roadmap.md" },
+    ]);
+    expect(invoke).toHaveBeenCalledWith("search_notes", { query: "roadmap" });
+  });
 });

@@ -131,15 +131,30 @@ impl LocalStore {
     }
 
     pub fn search_paths(&self, query: &str) -> StoreResult<Vec<String>> {
+        self.search_paths_limited(query, usize::MAX)
+    }
+
+    pub fn search_paths_limited(&self, query: &str, limit: usize) -> StoreResult<Vec<String>> {
+        let query = query
+            .split(|character: char| !character.is_alphanumeric())
+            .filter(|term| !term.is_empty())
+            .map(|term| format!("{term}*"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare(
             "SELECT notes.vault_path
              FROM notes_fts
              JOIN notes ON notes.note_id = notes_fts.note_id
              WHERE notes_fts MATCH ?1
-             ORDER BY notes.vault_path",
+             ORDER BY notes.vault_path
+             LIMIT ?2",
         )?;
         let paths = statement
-            .query_map([query], |row| row.get(0))?
+            .query_map(params![query, limit], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(paths)
@@ -254,5 +269,20 @@ impl LocalStore {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(links)
+    }
+
+    pub fn backlink_paths(&self, target: &str) -> StoreResult<Vec<String>> {
+        let mut statement = self.connection.prepare(
+            "SELECT notes.vault_path
+             FROM links
+             JOIN notes ON notes.note_id = links.source_note_id
+             WHERE links.target = ?1
+             ORDER BY notes.vault_path",
+        )?;
+        let paths = statement
+            .query_map([target], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(paths)
     }
 }

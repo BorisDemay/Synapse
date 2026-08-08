@@ -1,6 +1,12 @@
 export { default as AppShell } from "./components/AppShell.vue";
+export { default as BacklinksPanel } from "./components/BacklinksPanel.vue";
+export { default as HistoryPanel } from "./components/HistoryPanel.vue";
 export { default as MarkdownEditor } from "./components/MarkdownEditor.vue";
 export { default as MarkdownPreview } from "./components/MarkdownPreview.vue";
+export { default as SearchPalette } from "./components/SearchPalette.vue";
 export { default as VaultTree } from "./components/VaultTree.vue";
+export type { Backlink } from "./components/BacklinksPanel.vue";
+export type { HistoryPanelEntry } from "./components/HistoryPanel.vue";
+export type { SearchResult } from "./components/SearchPalette.vue";
 export type { VaultTreeNode } from "./components/VaultTree.vue";
 import "./styles/tokens.css";
