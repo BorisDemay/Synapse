@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/synapse-core", "crates/synapse-local-store"]
+members = [
+    "crates/synapse-core",
+    "crates/synapse-crypto",
+    "crates/synapse-local-store",
+]
 resolver = "3"
 
 [workspace.package]
