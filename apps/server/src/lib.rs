@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod config;
 pub mod http;
+pub mod repository;
 
 use std::sync::Arc;
 
@@ -52,6 +53,8 @@ pub fn router_with_clock(pool: Option<PgPool>, clock: Arc<dyn auth::session::Clo
         .route("/health/live", get(http::health::live))
         .route("/health/ready", get(http::health::ready))
         .route("/auth/logout", post(http::auth::logout))
+        .route("/vaults", post(http::vaults::create))
+        .route("/vaults/{vault_id}", get(http::vaults::read))
         .nest("/auth", auth_routes)
         .with_state(state)
 }
@@ -62,6 +65,11 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         .await?;
     sqlx::raw_sql(include_str!(
         "../../../migrations/0002_add_user_admin_privilege.sql"
+    ))
+    .execute(pool)
+    .await?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0003_enforce_vault_owner_membership.sql"
     ))
     .execute(pool)
     .await
