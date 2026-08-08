@@ -72,6 +72,50 @@ fn password_hash_is_argon2id_salted_and_verifiable() {
 }
 
 #[tokio::test]
+async fn bootstrap_initial_admin_creates_one_verifiable_account_without_replacing_it() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+
+    synapse_server::auth::bootstrap_initial_admin(
+        &pool,
+        "initial-admin@example.test",
+        "initial bootstrap password",
+    )
+    .await
+    .expect("initial administrator is created");
+    let initial: (String, Vec<u8>) = sqlx::query_as("SELECT id::text, password_hash FROM users")
+        .fetch_one(&pool)
+        .await
+        .expect("initial administrator is stored");
+    let initial_hash = String::from_utf8(initial.1.clone()).expect("password hash is text");
+    assert!(initial_hash.starts_with("$argon2id$"));
+    assert!(
+        synapse_server::auth::password::verify("initial bootstrap password", &initial_hash).is_ok()
+    );
+
+    synapse_server::auth::bootstrap_initial_admin(
+        &pool,
+        "replacement-admin@example.test",
+        "replacement bootstrap password",
+    )
+    .await
+    .expect("repeated initialization is harmless");
+    let stored: (String, Vec<u8>) = sqlx::query_as("SELECT id::text, password_hash FROM users")
+        .fetch_one(&pool)
+        .await
+        .expect("administrator remains stored");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .expect("user count"),
+        1
+    );
+    assert_eq!(stored, initial);
+}
+
+#[tokio::test]
 async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
     let _guard = auth_test_lock().await;
     let pool = PgPoolOptions::new()
