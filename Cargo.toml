@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "apps/server",
     "crates/synapse-core",
     "crates/synapse-crypto",
     "crates/synapse-local-store",
