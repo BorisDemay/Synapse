@@ -7,12 +7,12 @@ use tokio::time::timeout;
 #[tokio::test]
 async fn reports_an_externally_created_markdown_note() {
     let directory = tempdir().unwrap();
-    let mut watcher = VaultWatcher::watch(directory.path()).unwrap();
     let path = VaultPath::parse("notes/external.md").unwrap();
 
     tokio::fs::create_dir(directory.path().join("notes"))
         .await
         .unwrap();
+    let mut watcher = VaultWatcher::watch(directory.path()).unwrap();
     tokio::fs::write(directory.path().join(path.as_str()), "# External")
         .await
         .unwrap();
