@@ -19,7 +19,7 @@ tokio = { version = "1.48.0", features = ["macros", "net", "rt-multi-thread", "s
 # MIT/Apache-2.0 Tower middleware provides standards-compliant auth throttling.
 tower_governor = { version = "0.8.0", default-features = false, features = ["axum"] }
 
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
+uuid = { version = "1.18.1", features = ["v4", "v7", "serde"] }
 
 [dev-dependencies]
 http-body-util = "0.1.3"

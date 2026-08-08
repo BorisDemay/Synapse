@@ -35,7 +35,7 @@ impl PushOperation {
         {
             return Err(ApplyError::Invalid);
         }
-        let operation_id = canonical_uuid(&self.operation_id).ok_or(ApplyError::Invalid)?;
+        let operation_id = canonical_uuid_v7(&self.operation_id).ok_or(ApplyError::Invalid)?;
         let vault_id = canonical_uuid(&self.vault_id).ok_or(ApplyError::Invalid)?;
         let note_id = canonical_uuid(&self.note_id).ok_or(ApplyError::Invalid)?;
         if vault_id != route_vault_id || note_id.is_nil() || operation_id.is_nil() {
@@ -195,4 +195,9 @@ pub async fn apply(
 fn canonical_uuid(value: &str) -> Option<Uuid> {
     let id = Uuid::parse_str(value).ok()?;
     (id.to_string() == value).then_some(id)
+}
+
+fn canonical_uuid_v7(value: &str) -> Option<Uuid> {
+    let id = canonical_uuid(value)?;
+    (id.get_version() == Some(uuid::Version::SortRand)).then_some(id)
 }

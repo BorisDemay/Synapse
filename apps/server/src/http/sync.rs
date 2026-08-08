@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode},
 };
 use serde::Serialize;
@@ -25,8 +25,9 @@ pub async fn push(
     State(state): State<AppState>,
     Path(vault_id): Path<String>,
     headers: HeaderMap,
-    Json(operation): Json<PushOperation>,
+    operation: Result<Json<PushOperation>, JsonRejection>,
 ) -> Result<(StatusCode, Json<PushAckResponse>), StatusCode> {
+    let Json(operation) = operation.map_err(|_| StatusCode::BAD_REQUEST)?;
     let vault_id = Uuid::parse_str(&vault_id).map_err(|_| StatusCode::BAD_REQUEST)?;
     let pool = state.pool.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let blob_store = state.blob_store.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
