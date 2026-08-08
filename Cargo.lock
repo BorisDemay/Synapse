@@ -650,6 +650,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "synapse-vault-service"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "synapse-core",
+ "synapse-crypto",
+ "synapse-local-store",
+ "synapse-protocol",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

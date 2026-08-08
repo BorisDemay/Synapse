@@ -302,7 +302,7 @@ git commit -m "feat(core): parse markdown metadata and wikilinks"
 
 ### Task 5: Construire le stockage local SQLite
 
-**Objective:** Persister l’index, les révisions et la file d’opérations hors ligne dans SQLite.
+**Objective:** Persister l’index local et une outbox générique de payloads opaques dans SQLite, sans construire de protocole ou de ciphertext dans cette couche.
 
 **Files:**
 - Create: `crates/synapse-local-store/Cargo.toml`
@@ -310,6 +310,7 @@ git commit -m "feat(core): parse markdown metadata and wikilinks"
 - Create: `crates/synapse-local-store/src/schema.rs`
 - Create: `crates/synapse-local-store/migrations/0001_initial.sql`
 - Test: `crates/synapse-local-store/tests/store.rs`
+- Test: `crates/synapse-local-store/tests/transaction.rs`
 
 **Step 1: Écrire un test d’ouverture/migration** utilisant une base temporaire réelle.
 
@@ -326,25 +327,36 @@ async fn migration_creates_operation_queue() {
 Run: `cargo test -p synapse-local-store --test store migration_creates_operation_queue`
 Expected: FAIL, crate/API absente.
 
-**Step 3: Implémenter la migration minimale** avec `notes`, `links`, `revisions`, `pending_operations`, `sync_cursors` et une table virtuelle FTS5.
+**Step 3: Implémenter la migration minimale** avec `notes`, `links`, `revisions`, `pending_operations`, `sync_cursors` et une table virtuelle FTS5. La table d’outbox stocke un payload binaire opaque et des identifiants/versionnements validés ; elle ne connaît pas le Markdown et ne fabrique pas de payload de synchronisation.
 
-**Step 4: Ajouter un cycle TDD par opération** : upsert atomique d’une note, suppression, recherche, enqueue, ack, reprise après réouverture et rollback sur erreur.
+**Step 4: Ajouter un cycle TDD par opération locale** : upsert atomique d’une note, suppression, recherche, insertion d’un payload opaque déjà construit par l’orchestrateur, ack, reprise après réouverture et rollback sur erreur. Ajouter une primitive publique unique, par exemple :
+
+```rust
+pub fn persist_note_and_operation(
+    &mut self,
+    note: &IndexedNote,
+    links: &[String],
+    operation: &PendingOperation,
+) -> StoreResult<()>
+```
+
+Cette méthode ouvre une transaction SQLite mutable, met à jour `notes`, `revisions`, `links` et `pending_operations`, puis committe une seule fois. Une erreur sur n’importe quelle instruction provoque un rollback ; elle ne chiffre ni ne fabrique le payload.
 
 **Step 5: Vérifier GREEN**
 
-Run: `cargo test -p synapse-local-store --test store`
-Expected: tous les tests passent avec une vraie transaction SQLite.
+Run: `cargo test -p synapse-local-store --test store --test transaction`
+Expected: tous les tests passent avec une vraie transaction SQLite ; le test d’échec volontaire prouve que l’index, les liens, la révision et l’outbox restent inchangés.
 
 **Step 6: Commit**
 
 ```bash
 git add Cargo.toml crates/synapse-local-store/
-git commit -m "feat(storage): add sqlite local index and operation queue"
+git commit -m "feat(storage): add sqlite local index and opaque operation outbox"
 ```
 
 ### Task 6: Implémenter le service de coffre local
 
-**Objective:** Relier le système de fichiers, le parseur et SQLite avec des écritures atomiques et sûres.
+**Objective:** Fournir uniquement les opérations filesystem sûres et atomiques du coffre, sans dépendance SQLite, crypto, réseau ou protocole.
 
 **Files:**
 - Create: `crates/synapse-core/src/vault.rs`
@@ -365,20 +377,20 @@ async fn create_note_writes_markdown_inside_vault() {
 
 **Step 2: Vérifier RED**, implémenter écriture dans un fichier temporaire adjacent, `fsync`, puis renommage atomique.
 
-**Step 3: Répéter TDD** pour lecture, renommage, suppression vers corbeille interne, collision, symlink sortant, permissions refusées et fichier modifié entre lecture/écriture.
+**Step 3: Répéter TDD** pour lecture, renommage, suppression vers corbeille interne, collision, symlink sortant, permissions refusées, fichier modifié entre lecture/écriture, limites de taille et chemins multi-plateformes.
 
-**Step 4: Ajouter la mise à jour transactionnelle de l’index et l’enqueue après succès disque.**
+**Step 4: Ne pas ajouter d’index SQLite ni d’enqueue dans cette tâche.** L’orchestration disque → index → outbox chiffrée appartient à la Task 12a et au crate `synapse-vault-service`, conformément à `docs/adr/0004-local-vault-orchestration-boundary.md`.
 
 **Step 5: Vérifier**
 
 Run: `cargo test -p synapse-core --test vault_service`
-Expected: tous les tests passent, aucun fichier n’est créé hors du répertoire temporaire.
+Expected: tous les tests passent, aucun fichier n’est créé hors du répertoire temporaire et `synapse-core` ne dépend pas de `synapse-local-store`.
 
 **Step 6: Commit**
 
 ```bash
 git add crates/synapse-core/ tests/fixtures/vault/
-git commit -m "feat(core): add safe local vault service"
+git commit -m "feat(core): add safe local vault filesystem service"
 ```
 
 ### Task 7: Surveiller les modifications externes
@@ -638,6 +650,46 @@ Expected: tests verts, aucun champ de contenu en clair et génération stable.
 ```bash
 git add crates/synapse-protocol/ docs/architecture/sync-v1.md
 git commit -m "feat(protocol): define encrypted versioned sync contracts"
+```
+
+### Task 12a: Orchestrer le coffre local, l’index et l’outbox chiffrée
+
+**Objective:** Relier le service filesystem, SQLite, la crypto et le protocole sans créer de dépendance circulaire ni prétendre à une transaction ACID inter-systèmes.
+
+**Files:**
+- Create: `crates/synapse-vault-service/Cargo.toml`
+- Create: `crates/synapse-vault-service/src/lib.rs`
+- Create: `crates/synapse-vault-service/src/reconcile.rs`
+- Modify: `crates/synapse-local-store/src/lib.rs`
+- Test: `crates/synapse-local-store/tests/transaction.rs`
+- Test: `crates/synapse-vault-service/tests/mutation.rs`
+- Test: `crates/synapse-vault-service/tests/recovery.rs`
+- Modify: `Cargo.toml`
+- Modify: `docs/adr/0004-local-vault-orchestration-boundary.md`
+
+**Step 1: Écrire le test de mutation complète** : écrire atomiquement le fichier local, parser/indexer dans SQLite local, construire le payload protocolaire chiffré avec la clé de coffre, puis insérer l’outbox et l’index dans une transaction SQLite unique.
+
+**Step 2: Vérifier RED**
+
+Run: `cargo test -p synapse-vault-service --test mutation`
+Expected: FAIL, crate d’orchestration absente.
+
+**Step 3: Implémenter la couche minimale** avec les dépendances `synapse-core`, `synapse-local-store`, `synapse-crypto` et `synapse-protocol`. Valider `note`, parser les liens, chiffrer/serializer le payload puis appeler l’unique primitive mutable `LocalStore::persist_note_and_operation(&mut self, &note, &links, &operation)`. `synapse-core` et `synapse-local-store` ne dépendent jamais de cette couche.
+
+**Step 4: TDD récupération** : simuler un crash après le renommage filesystem mais avant le commit SQLite ; au redémarrage, le reconciler détecte l’écart, réindexe la note et crée l’outbox chiffrée exactement une fois grâce à l’empreinte/opération idempotente.
+
+**Step 5: TDD rollback** : injecter une erreur dans la mutation SQLite après l’upsert mais avant le commit ; vérifier que `notes`, `revisions`, `links` et `pending_operations` restent dans leur état précédent. Une panne après le commit SQLite mais avant l’ack est récupérée par rejeu idempotent.
+
+**Step 6: Vérifier**
+
+Run: `cargo test -p synapse-vault-service --test mutation --test recovery && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
+Expected: flux complet, crash recovery, idempotence et dépendances acycliques verts ; aucun payload en clair dans `pending_operations`.
+
+**Step 7: Commit**
+
+```bash
+git add Cargo.toml Cargo.lock crates/synapse-vault-service/ docs/adr/0004-local-vault-orchestration-boundary.md
+git commit -m "feat(vault): orchestrate local index and encrypted outbox"
 ```
 
 ### Task 13: Initialiser le serveur Axum et PostgreSQL
@@ -1293,7 +1345,7 @@ Tasks 4–11 et 11a. Sortie : client desktop hors ligne capable d’éditer, rec
 
 ### Milestone 2 — Synchronisation serveur chiffrée et fiable
 
-Tasks 12–22. Sortie : authentification multi-utilisateur, stockage opaque, push/pull idempotent, conflits chiffrés préservés, reprise et notifications temps réel.
+Tasks 12, 12a–22. Sortie : protocole chiffré, orchestration locale sans cycle Cargo, authentification multi-utilisateur, stockage opaque, push/pull idempotent, conflits chiffrés préservés, reprise et notifications temps réel.
 
 ### Milestone 3 — Accès web chiffré et offline
 

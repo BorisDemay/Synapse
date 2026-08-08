@@ -66,6 +66,14 @@ pub struct EncryptedContent {
     ciphertext: Vec<u8>,
 }
 
+impl EncryptedContent {
+    /// Returns only transport-safe encrypted material; plaintext and vault keys
+    /// are never exposed.
+    pub fn into_transport_parts(self) -> ([u8; 24], Vec<u8>) {
+        (self.nonce, self.ciphertext)
+    }
+}
+
 impl fmt::Debug for EncryptedContent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

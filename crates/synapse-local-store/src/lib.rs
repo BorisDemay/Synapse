@@ -112,6 +112,76 @@ impl LocalStore {
         Ok(())
     }
 
+    /// Persists one local index update and its already-encrypted outbox entry in
+    /// a single SQLite transaction. The payload is opaque to this storage layer.
+    pub fn persist_note_and_operation(
+        &mut self,
+        note: &IndexedNote,
+        links: &[String],
+        operation: &PendingOperation,
+    ) -> StoreResult<()> {
+        let revision =
+            i64::try_from(note.revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?;
+        let base_revision = i64::try_from(operation.base_revision.get())
+            .map_err(|_| StoreError::RevisionOutOfRange)?;
+        let transaction = self.connection.transaction()?;
+
+        transaction.execute(
+            "INSERT INTO notes (note_id, vault_path, content, content_hash, revision, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(vault_path) DO UPDATE SET
+                 note_id = excluded.note_id,
+                 content = excluded.content,
+                 content_hash = excluded.content_hash,
+                 revision = excluded.revision,
+                 updated_at = excluded.updated_at",
+            params![
+                note.note_id.to_string(),
+                note.path.as_str(),
+                note.content,
+                note.content_hash.to_string(),
+                revision,
+                note.updated_at,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO revisions (note_id, revision, content_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(note_id, revision) DO NOTHING",
+            params![
+                note.note_id.to_string(),
+                revision,
+                note.content_hash.to_string(),
+                note.updated_at,
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM links WHERE source_note_id = ?1",
+            [note.note_id.to_string()],
+        )?;
+        for target in links {
+            transaction.execute(
+                "INSERT INTO links (source_note_id, target) VALUES (?1, ?2)",
+                params![note.note_id.to_string(), target],
+            )?;
+        }
+        transaction.execute(
+            "INSERT INTO pending_operations (operation_id, note_id, base_revision, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(operation_id) DO NOTHING",
+            params![
+                operation.operation_id.to_string(),
+                operation.note_id.to_string(),
+                base_revision,
+                operation.payload,
+                operation.created_at,
+            ],
+        )?;
+        transaction.commit()?;
+
+        Ok(())
+    }
+
     pub fn note_content(&self, path: &VaultPath) -> StoreResult<Option<String>> {
         self.connection
             .query_row(
@@ -183,6 +253,20 @@ impl LocalStore {
             .query_row("SELECT COUNT(*) FROM pending_operations", [], |row| {
                 row.get(0)
             })
+            .map_err(Into::into)
+    }
+
+    pub fn pending_operation_payload(
+        &self,
+        operation_id: &OperationId,
+    ) -> StoreResult<Option<Vec<u8>>> {
+        self.connection
+            .query_row(
+                "SELECT payload FROM pending_operations WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
             .map_err(Into::into)
     }
 
