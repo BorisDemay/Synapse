@@ -70,6 +70,202 @@ async fn authenticated_owner_pulls_opaque_operations_in_strict_revision_order() 
 }
 
 #[tokio::test]
+async fn null_cursor_resnapshots_from_revision_zero_when_retention_starts_later() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    insert_operation(&pool, vault_id, 2, uuid_v7(2), vec![212; 16]).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+
+    let response = synapse_server::router(Some(pool))
+        .oneshot(pull_request(vault_id, &session.cookie_value(), None, 1))
+        .await
+        .expect("router responds");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response: serde_json::Value = serde_json::from_slice(
+        &response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body is readable")
+            .to_bytes(),
+    )
+    .expect("response is JSON");
+    assert_eq!(
+        response["operations"][0]["operation_id"],
+        uuid_v7(2).to_string()
+    );
+}
+
+#[tokio::test]
+async fn pull_limit_accepts_protocol_bounds_and_rejects_outside_them() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+    let app = synapse_server::router(Some(pool));
+
+    for (limit, expected_status) in [
+        (0, StatusCode::BAD_REQUEST),
+        (1, StatusCode::OK),
+        (100, StatusCode::OK),
+        (101, StatusCode::BAD_REQUEST),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(pull_request(vault_id, &session.cookie_value(), None, limit))
+            .await
+            .expect("router responds");
+        assert_eq!(response.status(), expected_status, "limit {limit}");
+    }
+}
+
+#[tokio::test]
+async fn cursor_cannot_resume_for_a_different_authorized_user_or_vault() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let other_user_id = create_user(&pool, "other@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    let other_vault_id = create_vault(&pool, owner_id).await;
+    add_member(&pool, vault_id, other_user_id).await;
+    insert_operation(&pool, vault_id, 1, uuid_v7(1), vec![91; 16]).await;
+    let owner_session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("owner session is created");
+    let other_session =
+        synapse_server::auth::session::create(&pool, other_user_id, SystemTime::now())
+            .await
+            .expect("other session is created");
+    let app = synapse_server::router(Some(pool));
+
+    let first: serde_json::Value = serde_json::from_slice(
+        &app.clone()
+            .oneshot(pull_request(
+                vault_id,
+                &owner_session.cookie_value(),
+                None,
+                1,
+            ))
+            .await
+            .expect("first page")
+            .into_body()
+            .collect()
+            .await
+            .expect("first body")
+            .to_bytes(),
+    )
+    .expect("first page is JSON");
+    let cursor = first["next_cursor"].as_str().expect("cursor is issued");
+
+    assert_resnapshot_required(
+        app.clone()
+            .oneshot(pull_request(
+                vault_id,
+                &other_session.cookie_value(),
+                Some(cursor),
+                1,
+            ))
+            .await
+            .expect("router responds"),
+    )
+    .await;
+    assert_resnapshot_required(
+        app.oneshot(pull_request(
+            other_vault_id,
+            &owner_session.cookie_value(),
+            Some(cursor),
+            1,
+        ))
+        .await
+        .expect("router responds"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn expired_cursor_returns_only_the_closed_resnapshot_body() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    let cursor = insert_cursor(&pool, vault_id, owner_id, 0, true).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+
+    assert_resnapshot_required(
+        synapse_server::router(Some(pool))
+            .oneshot(pull_request(
+                vault_id,
+                &session.cookie_value(),
+                Some(&cursor),
+                1,
+            ))
+            .await
+            .expect("router responds"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cursor_before_retention_floor_returns_only_the_closed_resnapshot_body() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    insert_operation(&pool, vault_id, 2, uuid_v7(2), vec![212; 16]).await;
+    let cursor = insert_cursor(&pool, vault_id, owner_id, 0, false).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+
+    assert_resnapshot_required(
+        synapse_server::router(Some(pool))
+            .oneshot(pull_request(
+                vault_id,
+                &session.cookie_value(),
+                Some(&cursor),
+                1,
+            ))
+            .await
+            .expect("router responds"),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn unknown_cursor_returns_only_the_closed_resnapshot_body() {
     let _guard = sync_test_lock().await;
     let pool = test_pool().await;
@@ -268,6 +464,45 @@ async fn reset_sync_tables(pool: &sqlx::PgPool) {
     .expect("sync tables reset");
 }
 
+async fn assert_resnapshot_required(response: axum::response::Response) {
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body is readable")
+            .to_bytes(),
+        r#"{"protocol_version":1,"code":"sync_cursor_resnapshot_required","resnapshot_cursor":null}"#
+    );
+}
+
+async fn insert_cursor(
+    pool: &sqlx::PgPool,
+    vault_id: Uuid,
+    user_id: Uuid,
+    revision: i64,
+    expired: bool,
+) -> String {
+    let cursor = Uuid::new_v4().to_string();
+    let query = if expired {
+        "INSERT INTO sync_cursors (id, vault_id, user_id, revision, expires_at) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, CURRENT_TIMESTAMP - INTERVAL '1 second')"
+    } else {
+        "INSERT INTO sync_cursors (id, vault_id, user_id, revision, expires_at) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, CURRENT_TIMESTAMP + INTERVAL '1 day')"
+    };
+    sqlx::query(query)
+        .bind(&cursor)
+        .bind(vault_id.to_string())
+        .bind(user_id.to_string())
+        .bind(revision)
+        .execute(pool)
+        .await
+        .expect("cursor is stored");
+    cursor
+}
+
 async fn create_user(pool: &sqlx::PgPool, email: &str) -> Uuid {
     let user_id = Uuid::new_v4();
     sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
@@ -299,4 +534,15 @@ async fn create_vault(pool: &sqlx::PgPool, owner_id: Uuid) -> Uuid {
     .expect("owner membership is stored");
     transaction.commit().await.expect("vault setup commits");
     vault_id
+}
+
+async fn add_member(pool: &sqlx::PgPool, vault_id: Uuid, user_id: Uuid) {
+    sqlx::query(
+        "INSERT INTO vault_members (vault_id, user_id, role) VALUES ($1::uuid, $2::uuid, 'reader')",
+    )
+    .bind(vault_id.to_string())
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await
+    .expect("member is stored");
 }

@@ -56,7 +56,7 @@ pub async fn pull(
     .fetch_one(pool)
     .await
     .map_err(|_| PullError::Database)?;
-    if retention_floor.is_some_and(|floor| start_revision < floor - 1) {
+    if cursor.is_some() && retention_floor.is_some_and(|floor| start_revision < floor - 1) {
         return Err(PullError::CursorResnapshotRequired);
     }
 
