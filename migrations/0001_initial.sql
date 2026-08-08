@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS operations (
     vault_id UUID NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
     base_revision BIGINT NOT NULL CHECK (base_revision >= 0),
     applied_revision BIGINT,
+    note_id UUID NOT NULL,
     ciphertext BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
     ciphertext_hash BYTEA NOT NULL,
@@ -70,11 +71,13 @@ CREATE TABLE IF NOT EXISTS operations (
 );
 
 CREATE TABLE IF NOT EXISTS sync_cursors (
+    id UUID PRIMARY KEY,
     vault_id UUID NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '30 days'),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (vault_id, user_id)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS blobs (

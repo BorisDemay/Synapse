@@ -85,7 +85,9 @@ fn router_with_clock_and_blob_store(
         .route("/vaults/{vault_id}", get(http::vaults::read))
         .route(
             "/v1/vaults/{vault_id}/operations",
-            post(http::sync::push).layer(DefaultBodyLimit::max(http::sync::MAX_REQUEST_BYTES)),
+            post(http::sync::push)
+                .get(http::sync::pull)
+                .layer(DefaultBodyLimit::max(http::sync::MAX_REQUEST_BYTES)),
         )
         .nest("/auth", auth_routes)
         .with_state(state)
@@ -111,6 +113,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .await?;
     sqlx::raw_sql(include_str!(
         "../../../migrations/0003_enforce_vault_owner_membership.sql"
+    ))
+    .execute(pool)
+    .await
+    .map(|_| ())?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0004_persist_opaque_sync_cursors.sql"
     ))
     .execute(pool)
     .await

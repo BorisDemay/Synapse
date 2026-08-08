@@ -162,13 +162,14 @@ pub async fn apply(
     .map_err(|_| ApplyError::Database)?;
     sqlx::query(
         "INSERT INTO operations \
-         (id, vault_id, base_revision, applied_revision, ciphertext, nonce, ciphertext_hash) \
-         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)",
+         (id, vault_id, base_revision, applied_revision, note_id, ciphertext, nonce, ciphertext_hash) \
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8)",
     )
     .bind(operation_id.to_string())
     .bind(vault_id.to_string())
     .bind(i64::try_from(operation.base_revision).map_err(|_| ApplyError::Invalid)?)
     .bind(next_revision)
+    .bind(operation.note_id)
     .bind(operation.ciphertext)
     .bind(operation.nonce)
     .bind(ciphertext_hash.as_bytes().as_slice())
