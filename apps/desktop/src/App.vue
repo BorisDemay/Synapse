@@ -46,15 +46,15 @@ async function createNote() {
 
     <form v-if="vaultName" @submit.prevent="createNote">
       <label for="note-path">Chemin du fichier</label>
-      <input
-        id="note-path"
-        v-model="notePath"
-        name="note-path"
-        required
-      />
+      <input id="note-path" v-model="notePath" name="note-path" required />
 
       <label for="note-content">Contenu Markdown</label>
-      <textarea id="note-content" v-model="noteContent" name="note-content" rows="8" />
+      <textarea
+        id="note-content"
+        v-model="noteContent"
+        name="note-content"
+        rows="8"
+      />
       <button type="submit" :disabled="isCreating">
         {{ isCreating ? "Création…" : "Créer la note" }}
       </button>
