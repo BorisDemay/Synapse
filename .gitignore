@@ -1,0 +1,23 @@
+# Rust
+/target/
+
+# Node.js
+/node_modules/
+.pnpm-store/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Test and build artifacts
+/coverage/
+/playwright-report/
+/test-results/
+/dist/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

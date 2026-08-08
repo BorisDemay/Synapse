@@ -1,0 +1,17 @@
+{
+  "name": "synapse",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22.17.0 <23",
+    "pnpm": ">=11.20.0 <12"
+  },
+  "scripts": {
+    "test": "pnpm --recursive --if-present test",
+    "lint": "pnpm --recursive --if-present lint",
+    "format": "pnpm --recursive --if-present format",
+    "typecheck": "pnpm --recursive --if-present typecheck"
+  }
+}
