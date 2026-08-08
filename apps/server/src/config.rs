@@ -5,6 +5,7 @@ use sqlx::postgres::PgConnectOptions;
 pub struct ServerConfig {
     bind_address: SocketAddr,
     database_url: String,
+    bootstrap_admin: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,10 +31,20 @@ impl std::error::Error for ConfigError {}
 
 impl ServerConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_values(
+        let mut config = Self::from_values(
             std::env::var("SYNAPSE_BIND_ADDR").ok().as_deref(),
             std::env::var("SYNAPSE_DATABASE_URL").ok().as_deref(),
-        )
+        )?;
+        config.bootstrap_admin = match (
+            std::env::var("SYNAPSE_BOOTSTRAP_ADMIN_EMAIL").ok(),
+            std::env::var("SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD").ok(),
+        ) {
+            (Some(email), Some(password)) if !email.is_empty() && !password.is_empty() => {
+                Some((email, password))
+            }
+            _ => None,
+        };
+        Ok(config)
     }
 
     pub fn from_values(
@@ -53,6 +64,7 @@ impl ServerConfig {
         Ok(Self {
             bind_address,
             database_url: database_url.to_owned(),
+            bootstrap_admin: None,
         })
     }
 
@@ -62,5 +74,9 @@ impl ServerConfig {
 
     pub fn database_url(&self) -> &str {
         &self.database_url
+    }
+
+    pub fn take_bootstrap_admin(&mut self) -> Option<(String, String)> {
+        self.bootstrap_admin.take()
     }
 }

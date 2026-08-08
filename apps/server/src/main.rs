@@ -30,7 +30,7 @@ impl std::error::Error for StartupError {}
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
-    let config = ServerConfig::from_env().map_err(|_| StartupError::Configuration)?;
+    let mut config = ServerConfig::from_env().map_err(|_| StartupError::Configuration)?;
     let pool = PgPoolOptions::new()
         .connect(config.database_url())
         .await
@@ -38,6 +38,11 @@ async fn main() -> Result<(), StartupError> {
     run_migrations(&pool)
         .await
         .map_err(|_| StartupError::Migration)?;
+    if let Some((email, password)) = config.take_bootstrap_admin() {
+        synapse_server::auth::bootstrap_initial_admin(&pool, &email, &password)
+            .await
+            .map_err(|_| StartupError::Configuration)?;
+    }
     let listener = tokio::net::TcpListener::bind(config.bind_address())
         .await
         .map_err(|_| StartupError::Bind)?;
