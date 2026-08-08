@@ -3,6 +3,35 @@
     "schemas": {
       "Conflict": {
         "additionalProperties": false,
+        "properties": {
+          "base_ciphertext_hash": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "base_revision": {
+            "minimum": 1
+          },
+          "local_ciphertext_hash": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "note_id": {
+            "format": "uuid"
+          },
+          "operation_id": {
+            "format": "uuid"
+          },
+          "protocol_version": {
+            "const": 1
+          },
+          "remote_ciphertext_hash": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "remote_revision": {
+            "minimum": 1
+          },
+          "vault_id": {
+            "format": "uuid"
+          }
+        },
         "required": [
           "protocol_version",
           "operation_id",
@@ -89,6 +118,21 @@
       },
       "PullRequest": {
         "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "format": "uuid"
+          },
+          "limit": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "protocol_version": {
+            "const": 1
+          },
+          "vault_id": {
+            "format": "uuid"
+          }
+        },
         "required": [
           "protocol_version",
           "vault_id",
@@ -99,6 +143,17 @@
       },
       "PullResponse": {
         "additionalProperties": false,
+        "properties": {
+          "next_cursor": {
+            "format": "uuid"
+          },
+          "operations": {
+            "type": "array"
+          },
+          "protocol_version": {
+            "const": 1
+          }
+        },
         "required": [
           "protocol_version",
           "operations",

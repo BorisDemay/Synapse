@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 pub const PROTOCOL_VERSION: u8 = 1;
 
@@ -12,7 +13,7 @@ pub struct SyncCursor(String);
 impl SyncCursor {
     pub fn new(value: impl Into<String>) -> Result<Self, CursorError> {
         let value = value.into();
-        if value.is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
+        if Uuid::parse_str(&value).is_err() {
             return Err(CursorError::Invalid);
         }
 
@@ -49,8 +50,7 @@ impl<'de> Deserialize<'de> for SyncCursor {
 
 /// An opaque, client-encrypted mutation. It deliberately has no plaintext title,
 /// path, tag, preview, or Markdown field.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EncryptedPushOperation {
     pub protocol_version: u8,
     pub operation_id: String,
@@ -63,6 +63,65 @@ pub struct EncryptedPushOperation {
     pub ciphertext_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encrypted_vault_key_envelope: Option<Vec<u8>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEncryptedPushOperation {
+    protocol_version: u8,
+    operation_id: String,
+    vault_id: String,
+    note_id: String,
+    base_revision: u64,
+    ciphertext: Vec<u8>,
+    nonce: Vec<u8>,
+    aad_version: u8,
+    ciphertext_hash: String,
+    encrypted_vault_key_envelope: Option<Vec<u8>>,
+}
+
+impl<'de> Deserialize<'de> for EncryptedPushOperation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawEncryptedPushOperation::deserialize(deserializer)?;
+        if raw.protocol_version != PROTOCOL_VERSION
+            || raw.aad_version != PROTOCOL_VERSION
+            || raw.base_revision == 0
+            || raw.nonce.len() != 24
+            || raw.ciphertext.len() < 16
+            || !is_uuid(&raw.operation_id)
+            || !is_uuid(&raw.vault_id)
+            || !is_uuid(&raw.note_id)
+            || !is_ciphertext_hash(&raw.ciphertext_hash)
+        {
+            return Err(serde::de::Error::custom("encrypted operation is invalid"));
+        }
+        Ok(Self {
+            protocol_version: raw.protocol_version,
+            operation_id: raw.operation_id,
+            vault_id: raw.vault_id,
+            note_id: raw.note_id,
+            base_revision: raw.base_revision,
+            ciphertext: raw.ciphertext,
+            nonce: raw.nonce,
+            aad_version: raw.aad_version,
+            ciphertext_hash: raw.ciphertext_hash,
+            encrypted_vault_key_envelope: raw.encrypted_vault_key_envelope,
+        })
+    }
+}
+
+fn is_uuid(value: &str) -> bool {
+    Uuid::parse_str(value).is_ok()
+}
+
+fn is_ciphertext_hash(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -136,17 +195,20 @@ pub fn openapi_document() -> Value {
                 "PullRequest": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["protocol_version", "vault_id", "cursor", "limit"]
+                    "required": ["protocol_version", "vault_id", "cursor", "limit"],
+                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "vault_id": { "format": "uuid" }, "cursor": { "format": "uuid" }, "limit": { "type": "integer", "minimum": 1 } }
                 },
                 "PullResponse": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["protocol_version", "operations", "next_cursor"]
+                    "required": ["protocol_version", "operations", "next_cursor"],
+                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "operations": { "type": "array" }, "next_cursor": { "format": "uuid" } }
                 },
                 "Conflict": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["protocol_version", "operation_id", "vault_id", "note_id", "base_revision", "remote_revision", "base_ciphertext_hash", "local_ciphertext_hash", "remote_ciphertext_hash"]
+                    "required": ["protocol_version", "operation_id", "vault_id", "note_id", "base_revision", "remote_revision", "base_ciphertext_hash", "local_ciphertext_hash", "remote_ciphertext_hash"],
+                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "operation_id": { "format": "uuid" }, "vault_id": { "format": "uuid" }, "note_id": { "format": "uuid" }, "base_revision": { "minimum": 1 }, "remote_revision": { "minimum": 1 }, "base_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" }, "local_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" }, "remote_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" } }
                 }
             }
         }
