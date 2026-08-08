@@ -72,39 +72,36 @@ fn password_hash_is_argon2id_salted_and_verifiable() {
 }
 
 #[tokio::test]
-async fn bootstrap_initial_admin_creates_one_verifiable_account_without_replacing_it() {
+async fn configured_bootstrap_creates_one_persistent_administrator_without_replacing_it() {
     let _guard = auth_test_lock().await;
     let pool = test_pool().await;
     reset_auth_tables(&pool).await;
 
-    synapse_server::auth::bootstrap_initial_admin(
-        &pool,
-        "initial-admin@example.test",
-        "initial bootstrap password",
-    )
-    .await
-    .expect("initial administrator is created");
-    let initial: (String, Vec<u8>) = sqlx::query_as("SELECT id::text, password_hash FROM users")
-        .fetch_one(&pool)
-        .await
-        .expect("initial administrator is stored");
+    let mut initial_server =
+        configured_server("initial-admin@example.test", "initial bootstrap password");
+    let initial = wait_for_user(&pool, "initial-admin@example.test").await;
+    initial_server.kill().expect("initial server stops");
+    initial_server.wait().expect("initial server exits");
     let initial_hash = String::from_utf8(initial.1.clone()).expect("password hash is text");
     assert!(initial_hash.starts_with("$argon2id$"));
     assert!(
         synapse_server::auth::password::verify("initial bootstrap password", &initial_hash).is_ok()
     );
 
-    synapse_server::auth::bootstrap_initial_admin(
-        &pool,
+    assert!(initial.2, "the bootstrap account is an administrator");
+
+    let mut replacement_server = configured_server(
         "replacement-admin@example.test",
         "replacement bootstrap password",
-    )
-    .await
-    .expect("repeated initialization is harmless");
-    let stored: (String, Vec<u8>) = sqlx::query_as("SELECT id::text, password_hash FROM users")
-        .fetch_one(&pool)
-        .await
-        .expect("administrator remains stored");
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    replacement_server.kill().expect("replacement server stops");
+    replacement_server.wait().expect("replacement server exits");
+    let stored: (String, Vec<u8>, bool) =
+        sqlx::query_as("SELECT id::text, password_hash, is_admin FROM users")
+            .fetch_one(&pool)
+            .await
+            .expect("administrator remains stored");
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
             .fetch_one(&pool)
@@ -171,6 +168,13 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
         .await
         .expect("user exists");
     assert_eq!(stored_email, "person@example.test");
+    assert!(
+        !sqlx::query_scalar::<_, bool>("SELECT is_admin FROM users WHERE email = $1")
+            .bind("person@example.test")
+            .fetch_one(&pool)
+            .await
+            .expect("ordinary signup has no global administrator privilege")
+    );
 
     let duplicate = request_json(
         "/auth/signup",
@@ -424,16 +428,18 @@ async fn auth_rate_limit_rejects_excess_without_affecting_health() {
             .expect("response");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
-    assert_eq!(
-        app.clone()
-            .oneshot(request_json(
-                "/auth/login",
-                r#"{"email":"a@example.test","password":"a secure password"}"#
-            ))
-            .await
-            .expect("response")
-            .status(),
-        StatusCode::TOO_MANY_REQUESTS
+    let limited = app
+        .clone()
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"a@example.test","password":"a secure password"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        limited.headers().contains_key("retry-after"),
+        "the Tower governor layer communicates when retry is allowed"
     );
     let health = app
         .oneshot(
@@ -462,6 +468,36 @@ async fn test_pool() -> sqlx::PgPool {
         .connect("postgres://postgres@127.0.0.1:55432/synapse_test")
         .await
         .expect("test postgres is available")
+}
+
+fn configured_server(email: &str, password: &str) -> std::process::Child {
+    std::process::Command::new(env!("CARGO_BIN_EXE_synapse-server"))
+        .env("SYNAPSE_BIND_ADDR", "127.0.0.1:31914")
+        .env(
+            "SYNAPSE_DATABASE_URL",
+            "postgres://postgres@127.0.0.1:55432/synapse_test",
+        )
+        .env("SYNAPSE_BOOTSTRAP_ADMIN_EMAIL", email)
+        .env("SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD", password)
+        .spawn()
+        .expect("configured server starts")
+}
+
+async fn wait_for_user(pool: &sqlx::PgPool, email: &str) -> (String, Vec<u8>, bool) {
+    for _ in 0..20 {
+        if let Ok(Some(user)) = sqlx::query_as::<_, (String, Vec<u8>, bool)>(
+            "SELECT id::text, password_hash, is_admin FROM users WHERE email = $1",
+        )
+        .bind(email)
+        .fetch_optional(pool)
+        .await
+        {
+            return user;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    panic!("configured bootstrap did not create its administrator");
 }
 
 async fn reset_auth_tables(pool: &sqlx::PgPool) {

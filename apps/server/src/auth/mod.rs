@@ -26,7 +26,7 @@ pub async fn bootstrap_initial_admin(
     let email =
         crate::http::auth::normalized_email(email).ok_or(BootstrapError::InvalidCredential)?;
     let password_hash = password::hash(password).map_err(|_| BootstrapError::InvalidCredential)?;
-    let created = sqlx::query("INSERT INTO users (id, email, password_hash) SELECT $1::uuid, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM users)")
+    let created = sqlx::query("INSERT INTO users (id, email, password_hash, is_admin) SELECT $1::uuid, $2, $3, TRUE WHERE NOT EXISTS (SELECT 1 FROM users)")
         .bind(Uuid::new_v4().to_string())
         .bind(email)
         .bind(password_hash.as_bytes())

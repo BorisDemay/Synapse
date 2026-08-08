@@ -1,8 +1,3 @@
-use std::{
-    sync::Mutex,
-    time::{Duration, Instant},
-};
-
 use axum::{
     Json,
     extract::State,
@@ -32,29 +27,6 @@ pub struct SignupRequest {
 pub struct LoginRequest {
     email: String,
     password: String,
-}
-
-pub(crate) struct AuthRateLimit {
-    window_started: Instant,
-    requests: u8,
-}
-
-impl AuthRateLimit {
-    pub(crate) fn new() -> Self {
-        Self {
-            window_started: Instant::now(),
-            requests: 0,
-        }
-    }
-
-    pub(crate) fn permit(&mut self) -> bool {
-        if self.window_started.elapsed() >= Duration::from_secs(1) {
-            self.window_started = Instant::now();
-            self.requests = 0;
-        }
-        self.requests = self.requests.saturating_add(1);
-        self.requests <= 5
-    }
 }
 
 pub(crate) fn normalized_email(email: &str) -> Option<String> {
@@ -196,25 +168,4 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Status
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
-}
-
-pub async fn rate_limit(
-    State(state): State<AppState>,
-    request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    let permitted = state
-        .rate_limit
-        .lock()
-        .map(|mut limit| limit.permit())
-        .unwrap_or(false);
-    if permitted {
-        next.run(request).await
-    } else {
-        StatusCode::TOO_MANY_REQUESTS.into_response()
-    }
-}
-
-pub(crate) fn new_rate_limit() -> Mutex<AuthRateLimit> {
-    Mutex::new(AuthRateLimit::new())
 }
