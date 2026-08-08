@@ -89,28 +89,30 @@ pub async fn signup(
         let Some(invitation_token) = request.invitation_token else {
             return signup_error();
         };
-        let invitation = sqlx::query("SELECT id::text AS id FROM invites WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP")
+        let mut transaction = match pool.begin().await {
+            Ok(transaction) => transaction,
+            Err(_) => return signup_error(),
+        };
+        let invitation = sqlx::query_scalar::<_, String>("UPDATE invites SET accepted_at = CURRENT_TIMESTAMP WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP RETURNING id::text")
             .bind(opaque_hash(&invitation_token))
-            .fetch_optional(&pool)
+            .fetch_optional(&mut *transaction)
             .await;
-        let Ok(Some(invitation)) = invitation else {
+        let Ok(Some(_)) = invitation else {
             return signup_error();
         };
-        let invitation_id: String = invitation.get("id");
         let created =
             sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
                 .bind(Uuid::new_v4().to_string())
                 .bind(&email)
                 .bind(password_hash.as_bytes())
-                .execute(&pool)
+                .execute(&mut *transaction)
                 .await;
         if created.is_err() {
             return signup_error();
         }
-        let _ = sqlx::query("UPDATE invites SET accepted_at = CURRENT_TIMESTAMP WHERE id = $1")
-            .bind(invitation_id)
-            .execute(&pool)
-            .await;
+        if transaction.commit().await.is_err() {
+            return signup_error();
+        }
     } else if sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
         .bind(Uuid::new_v4().to_string())
         .bind(&email)
@@ -151,7 +153,7 @@ pub async fn login(
     if password::verify(&request.password, &hash).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let Ok(token) = session::create(&pool, user_id, std::time::SystemTime::now()).await else {
+    let Ok(token) = session::create(&pool, user_id, state.clock.now()).await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let value = format!(
@@ -185,6 +187,11 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Status
     let (Some(pool), Some(token)) = (state.pool, token) else {
         return StatusCode::UNAUTHORIZED;
     };
+    match session::user_for(&pool, &token, state.clock.now()).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::UNAUTHORIZED,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+    }
     match session::revoke(&pool, &token).await {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,

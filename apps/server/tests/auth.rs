@@ -1,4 +1,7 @@
-use std::time::{Duration, UNIX_EPOCH};
+use std::{
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use axum::{
     body::Body,
@@ -7,8 +10,35 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
+use synapse_server::auth::session::Clock;
 use tower::ServiceExt;
 use uuid::Uuid;
+
+struct TestClock(Mutex<SystemTime>);
+
+impl TestClock {
+    fn new(now: SystemTime) -> Self {
+        Self(Mutex::new(now))
+    }
+
+    fn advance(&self, duration: Duration) {
+        let mut now = self.0.lock().expect("test clock is available");
+        *now += duration;
+    }
+}
+
+impl synapse_server::auth::session::Clock for TestClock {
+    fn now(&self) -> SystemTime {
+        *self.0.lock().expect("test clock is available")
+    }
+}
+
+async fn auth_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
+}
 
 #[tokio::test]
 async fn signup_rejects_malformed_json() {
@@ -43,6 +73,7 @@ fn password_hash_is_argon2id_salted_and_verifiable() {
 
 #[tokio::test]
 async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
+    let _guard = auth_test_lock().await;
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect("postgres://postgres@127.0.0.1:55432/synapse_test")
@@ -203,6 +234,139 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
 }
 
 #[tokio::test]
+async fn router_uses_injected_clock_for_session_creation_and_expiration() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
+        .bind(user_id.to_string())
+        .bind("clock@example.test")
+        .bind(
+            synapse_server::auth::password::hash("a secure password")
+                .expect("password hashes")
+                .into_bytes(),
+        )
+        .execute(&pool)
+        .await
+        .expect("user is stored");
+    let clock = Arc::new(TestClock::new(UNIX_EPOCH + Duration::from_secs(10)));
+    let app = synapse_server::router_with_clock(Some(pool.clone()), clock.clone());
+
+    let response = app
+        .clone()
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"clock@example.test","password":"a secure password"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let token = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|cookie| cookie.to_str().ok())
+        .and_then(|cookie| cookie.split(';').next())
+        .and_then(|pair| pair.strip_prefix("session="))
+        .and_then(synapse_server::auth::session::SessionToken::parse)
+        .expect("session cookie has an opaque token");
+
+    assert_eq!(
+        synapse_server::auth::session::user_for(&pool, &token, clock.now())
+            .await
+            .expect("session lookup succeeds"),
+        Some(user_id)
+    );
+    clock.advance(Duration::from_secs(8 * 60 * 60));
+    let logout = Request::builder()
+        .method("POST")
+        .uri("/auth/logout")
+        .header(header::COOKIE, format!("session={}", token.cookie_value()))
+        .header(header::ORIGIN, "https://synapse.local")
+        .body(Body::empty())
+        .expect("logout request");
+    assert_eq!(
+        app.oneshot(logout).await.expect("response").status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_signup_consumes_an_invitation_only_once() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let invite_token = "concurrently-consumed-invitation";
+    sqlx::query("INSERT INTO invites (id, email, token_hash, expires_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP + INTERVAL '1 hour')")
+        .bind(Uuid::new_v4().to_string())
+        .bind("invited@example.test")
+        .bind(Sha256::digest(invite_token.as_bytes()).to_vec())
+        .execute(&pool)
+        .await
+        .expect("invitation is stored");
+    let app = synapse_server::router(Some(pool.clone()));
+
+    let first = tokio::spawn({
+        let app = app.clone();
+        async move {
+            app.oneshot(request_json(
+                "/auth/signup",
+                r#"{"email":"first@example.test","password":"a secure password","invitation_token":"concurrently-consumed-invitation"}"#,
+            ))
+            .await
+        }
+    });
+    let second = tokio::spawn(async move {
+        app.oneshot(request_json(
+            "/auth/signup",
+            r#"{"email":"second@example.test","password":"a secure password","invitation_token":"concurrently-consumed-invitation"}"#,
+        ))
+        .await
+    });
+
+    let statuses = [
+        first
+            .await
+            .expect("first task completes")
+            .expect("first response")
+            .status(),
+        second
+            .await
+            .expect("second task completes")
+            .expect("second response")
+            .status(),
+    ];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|&&status| status == StatusCode::CREATED)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|&&status| status == StatusCode::BAD_REQUEST)
+            .count(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .expect("user count"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM invites WHERE accepted_at IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("accepted invitation count"),
+        1
+    );
+}
+
+#[tokio::test]
 async fn auth_rate_limit_rejects_excess_without_affecting_health() {
     let app = synapse_server::router(None);
     for _ in 0..5 {
@@ -246,4 +410,22 @@ fn request_json(uri: &str, body: &'static str) -> Request<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
         .expect("valid request")
+}
+
+async fn test_pool() -> sqlx::PgPool {
+    PgPoolOptions::new()
+        .max_connections(5)
+        .connect("postgres://postgres@127.0.0.1:55432/synapse_test")
+        .await
+        .expect("test postgres is available")
+}
+
+async fn reset_auth_tables(pool: &sqlx::PgPool) {
+    synapse_server::run_migrations(pool)
+        .await
+        .expect("migrations apply");
+    sqlx::query("TRUNCATE sessions, invites, users CASCADE")
+        .execute(pool)
+        .await
+        .expect("auth tables reset");
 }

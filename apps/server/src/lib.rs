@@ -16,9 +16,14 @@ pub struct AppState {
     pub(crate) allow_public_signup: bool,
     pub(crate) csrf_origin: String,
     pub(crate) rate_limit: Arc<Mutex<http::auth::AuthRateLimit>>,
+    pub(crate) clock: Arc<dyn auth::session::Clock>,
 }
 
 pub fn router(pool: Option<PgPool>) -> Router {
+    router_with_clock(pool, Arc::new(auth::session::SystemClock))
+}
+
+pub fn router_with_clock(pool: Option<PgPool>, clock: Arc<dyn auth::session::Clock>) -> Router {
     let state = AppState {
         pool,
         allow_public_signup: matches!(
@@ -28,6 +33,7 @@ pub fn router(pool: Option<PgPool>) -> Router {
         csrf_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
             .unwrap_or_else(|_| "https://synapse.local".to_owned()),
         rate_limit: Arc::new(http::auth::new_rate_limit()),
+        clock,
     };
 
     let auth_routes = Router::new()
