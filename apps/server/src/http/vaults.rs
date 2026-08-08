@@ -61,7 +61,7 @@ pub async fn read(
     }))
 }
 
-fn session_token(headers: &HeaderMap) -> Option<session::SessionToken> {
+pub(crate) fn session_token(headers: &HeaderMap) -> Option<session::SessionToken> {
     headers
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())

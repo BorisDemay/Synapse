@@ -3,11 +3,13 @@ pub mod blob;
 pub mod config;
 pub mod http;
 pub mod repository;
+pub mod sync;
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use sqlx::PgPool;
@@ -18,18 +20,43 @@ use tower_governor::{
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) pool: Option<PgPool>,
+    pub(crate) blob_store: Option<Arc<dyn blob::BlobStore>>,
     pub(crate) allow_public_signup: bool,
     pub(crate) csrf_origin: String,
     pub(crate) clock: Arc<dyn auth::session::Clock>,
 }
 
 pub fn router(pool: Option<PgPool>) -> Router {
-    router_with_clock(pool, Arc::new(auth::session::SystemClock))
+    router_with_clock_and_blob_store(
+        pool,
+        Arc::new(auth::session::SystemClock),
+        default_blob_store(),
+    )
 }
 
 pub fn router_with_clock(pool: Option<PgPool>, clock: Arc<dyn auth::session::Clock>) -> Router {
+    router_with_clock_and_blob_store(pool, clock, default_blob_store())
+}
+
+pub fn router_with_blob_store(
+    pool: Option<PgPool>,
+    blob_store: impl blob::BlobStore + 'static,
+) -> Router {
+    router_with_clock_and_blob_store(
+        pool,
+        Arc::new(auth::session::SystemClock),
+        Some(Arc::new(blob_store)),
+    )
+}
+
+fn router_with_clock_and_blob_store(
+    pool: Option<PgPool>,
+    clock: Arc<dyn auth::session::Clock>,
+    blob_store: Option<Arc<dyn blob::BlobStore>>,
+) -> Router {
     let state = AppState {
         pool,
+        blob_store,
         allow_public_signup: matches!(
             std::env::var("SYNAPSE_ALLOW_PUBLIC_SIGNUP").as_deref(),
             Ok("true")
@@ -56,8 +83,21 @@ pub fn router_with_clock(pool: Option<PgPool>, clock: Arc<dyn auth::session::Clo
         .route("/auth/logout", post(http::auth::logout))
         .route("/vaults", post(http::vaults::create))
         .route("/vaults/{vault_id}", get(http::vaults::read))
+        .route(
+            "/v1/vaults/{vault_id}/operations",
+            post(http::sync::push).layer(DefaultBodyLimit::max(http::sync::MAX_REQUEST_BYTES)),
+        )
         .nest("/auth", auth_routes)
         .with_state(state)
+}
+
+fn default_blob_store() -> Option<Arc<dyn blob::BlobStore>> {
+    let path = std::env::var_os("SYNAPSE_STORAGE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("synapse-blobs"));
+    blob::FilesystemBlobStore::open(path)
+        .ok()
+        .map(|store| Arc::new(store) as Arc<dyn blob::BlobStore>)
 }
 
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
