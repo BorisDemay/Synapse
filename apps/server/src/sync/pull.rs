@@ -140,7 +140,7 @@ async fn cursor_revision(
     .ok_or(PullError::CursorResnapshotRequired)
 }
 
-async fn issue_cursor(
+pub(crate) async fn issue_cursor(
     pool: &PgPool,
     vault_id: Uuid,
     user_id: Uuid,

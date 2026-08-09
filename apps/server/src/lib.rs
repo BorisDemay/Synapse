@@ -24,6 +24,7 @@ pub struct AppState {
     pub(crate) allow_public_signup: bool,
     pub(crate) csrf_origin: String,
     pub(crate) clock: Arc<dyn auth::session::Clock>,
+    pub(crate) notifications: http::ws::NotificationHub,
 }
 
 pub fn router(pool: Option<PgPool>) -> Router {
@@ -64,6 +65,7 @@ fn router_with_clock_and_blob_store(
         csrf_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
             .unwrap_or_else(|_| "https://synapse.local".to_owned()),
         clock,
+        notifications: http::ws::NotificationHub::new(),
     };
 
     let mut rate_limit_config = GovernorConfigBuilder::default().key_extractor(GlobalKeyExtractor);
@@ -83,6 +85,7 @@ fn router_with_clock_and_blob_store(
         .route("/auth/logout", post(http::auth::logout))
         .route("/vaults", post(http::vaults::create))
         .route("/vaults/{vault_id}", get(http::vaults::read))
+        .route("/v1/vaults/{vault_id}/ws", get(http::ws::connect))
         .route(
             "/v1/vaults/{vault_id}/operations",
             post(http::sync::push)

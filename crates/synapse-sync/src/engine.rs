@@ -5,7 +5,7 @@ use synapse_protocol::v1::{
     EncryptedPushOperation, MAX_PULL_LIMIT, PROTOCOL_VERSION, PullRequest, SyncCursor,
 };
 
-use crate::client::{PullOutcome, SyncTransport, TransportError};
+use crate::client::{PullOutcome, SyncTransport, TransportError, WakeSignal};
 
 pub trait Jitter {
     fn jitter_millis(&self, upper_bound_millis: u64) -> u64;
@@ -160,6 +160,15 @@ where
             }
         }
 
+        self.pull_until_current_cursor()
+    }
+
+    /// A WebSocket wake is not an acknowledgement and never mutates the outbox.
+    /// It only causes the regular pull to resume from the persisted cursor.
+    pub fn wake_from_signal(&self, signal: &WakeSignal) -> Result<SyncState, SyncError> {
+        if signal.vault_id != self.vault_id {
+            return Err(SyncError::Protocol);
+        }
         self.pull_until_current_cursor()
     }
 

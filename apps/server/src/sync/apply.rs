@@ -54,6 +54,7 @@ impl PushOperation {
 pub struct PushAck {
     pub operation_id: Uuid,
     pub revision: i64,
+    pub new_revision: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,6 +120,7 @@ pub async fn apply(
             return Ok(PushAck {
                 operation_id,
                 revision,
+                new_revision: false,
             });
         }
         return Err(ApplyError::NotFound);
@@ -213,6 +215,7 @@ pub async fn apply(
     Ok(PushAck {
         operation_id,
         revision: next_revision,
+        new_revision: true,
     })
 }
 

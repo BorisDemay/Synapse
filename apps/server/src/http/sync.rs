@@ -40,10 +40,10 @@ pub async fn push(
         Ok(vault_id) => vault_id,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
-    let Some(pool) = state.pool else {
+    let Some(pool) = state.pool.clone() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let Some(blob_store) = state.blob_store else {
+    let Some(blob_store) = state.blob_store.clone() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let Some(token) = vaults::session_token(&headers) else {
@@ -55,14 +55,19 @@ pub async fn push(
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     };
     match apply::apply(&pool, blob_store.as_ref(), user_id, vault_id, operation).await {
-        Ok(ack) => (
-            StatusCode::CREATED,
-            Json(PushAckResponse {
-                operation_id: ack.operation_id.to_string(),
-                revision: ack.revision,
-            }),
-        )
-            .into_response(),
+        Ok(ack) => {
+            if ack.new_revision {
+                state.notifications.publish(vault_id, ack.revision);
+            }
+            (
+                StatusCode::CREATED,
+                Json(PushAckResponse {
+                    operation_id: ack.operation_id.to_string(),
+                    revision: ack.revision,
+                }),
+            )
+                .into_response()
+        }
         Err(ApplyError::Conflict(conflict)) => {
             (StatusCode::CONFLICT, Json(*conflict)).into_response()
         }

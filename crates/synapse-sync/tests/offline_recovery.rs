@@ -6,7 +6,7 @@ use synapse_protocol::v1::{
     Conflict, EncryptedPushOperation, PROTOCOL_VERSION, PullRequest, PullResponse, SyncCursor,
 };
 use synapse_sync::{
-    client::{PullOutcome, PushAck, SyncTransport, TransportError},
+    client::{PullOutcome, PushAck, SyncTransport, TransportError, WakeSignal},
     engine::{RetryPolicy, SyncEngine, SyncError, SyncState},
 };
 
@@ -422,5 +422,93 @@ fn resnapshot_required_retries_pull_with_a_null_cursor_without_interpreting_it()
     assert_eq!(
         engine.store().sync_cursor(VAULT_ID).expect("cursor reads"),
         None
+    );
+}
+
+#[test]
+fn websocket_wake_signal_is_closed_and_requires_opaque_identifiers() {
+    let vault_id = VAULT_ID;
+    let cursor = "0198e5de-9999-7aaa-8bbb-ccccddddeeee";
+
+    assert_eq!(
+        WakeSignal::parse(&format!(
+            r#"{{"vault_id":"{vault_id}","cursor":"{cursor}"}}"#
+        )),
+        Ok(WakeSignal {
+            vault_id: vault_id.to_owned(),
+            cursor: cursor.to_owned(),
+        })
+    );
+    assert!(
+        WakeSignal::parse(&format!(
+            r#"{{"vault_id":"{vault_id}","cursor":"{cursor}","operation_id":"forbidden"}}"#
+        ))
+        .is_err()
+    );
+    assert!(WakeSignal::parse(r#"{"vault_id":"not-a-uuid","cursor":"not-a-uuid"}"#).is_err());
+}
+
+#[test]
+fn websocket_wake_pulls_from_persisted_cursor_without_acknowledging_outbox() {
+    struct WakeTransport<'a> {
+        requests: &'a RefCell<Vec<Option<String>>>,
+    }
+    impl SyncTransport for WakeTransport<'_> {
+        fn push(&self, _: EncryptedPushOperation) -> Result<PushAck, TransportError> {
+            panic!("wake must not push or acknowledge the outbox")
+        }
+
+        fn pull(&self, request: PullRequest) -> Result<PullOutcome, TransportError> {
+            self.requests
+                .borrow_mut()
+                .push(request.cursor.map(|cursor| cursor.as_str().to_owned()));
+            Ok(PullOutcome::Page(PullResponse {
+                protocol_version: PROTOCOL_VERSION,
+                operations: Vec::new(),
+                next_cursor: None,
+            }))
+        }
+    }
+
+    let store = LocalStore::open_in_memory().expect("store opens");
+    let operation = pending_operation();
+    store
+        .enqueue_operation(&operation)
+        .expect("operation persists");
+    let cursor = SyncCursor::new("0198e5de-9999-7aaa-8bbb-ccccddddeeee").expect("cursor is valid");
+    store
+        .set_sync_cursor(VAULT_ID, cursor.as_str())
+        .expect("cursor persists");
+    let requests = RefCell::new(Vec::new());
+    let engine = SyncEngine::new(
+        store,
+        WakeTransport {
+            requests: &requests,
+        },
+        VAULT_ID,
+        RetryPolicy::without_delay(1),
+    );
+    let signal = WakeSignal::parse(&format!(
+        r#"{{"vault_id":"{VAULT_ID}","cursor":"{}"}}"#,
+        cursor.as_str()
+    ))
+    .expect("signal parses");
+
+    assert_eq!(
+        engine
+            .wake_from_signal(&signal)
+            .expect("wake pull succeeds"),
+        SyncState::Synced
+    );
+    assert_eq!(
+        requests.borrow().as_slice(),
+        &[Some(cursor.as_str().to_owned())]
+    );
+    assert_eq!(
+        engine
+            .store()
+            .pending_operation_count()
+            .expect("outbox reads"),
+        1
     );
 }
