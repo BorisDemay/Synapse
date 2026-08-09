@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde_json = "1.0"
+synapse-core = { path = "../synapse-core" }
+synapse-local-store = { path = "../synapse-local-store" }
+synapse-protocol = { path = "../synapse-protocol" }
 
 [lints]
 workspace = true

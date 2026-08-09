@@ -270,10 +270,28 @@ impl LocalStore {
             .map_err(Into::into)
     }
 
+    /// Returns queued opaque payloads in stable creation order. Payloads stay
+    /// unparsed at the local storage boundary.
+    pub fn pending_operation_payloads(&self) -> StoreResult<Vec<Vec<u8>>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM pending_operations ORDER BY created_at, operation_id")?;
+        statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     pub fn acknowledge_operation(&self, operation_id: &OperationId) -> StoreResult<()> {
+        self.acknowledge_operation_id(&operation_id.to_string())
+    }
+
+    /// Deletes only the exact operation identifier explicitly acknowledged by
+    /// the server. The payload remains opaque to this storage boundary.
+    pub fn acknowledge_operation_id(&self, operation_id: &str) -> StoreResult<()> {
         self.connection.execute(
             "DELETE FROM pending_operations WHERE operation_id = ?1",
-            [operation_id.to_string()],
+            [operation_id],
         )?;
 
         Ok(())
@@ -298,6 +316,13 @@ impl LocalStore {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn clear_sync_cursor(&self, vault_id: &str) -> StoreResult<()> {
+        self.connection
+            .execute("DELETE FROM sync_cursors WHERE vault_id = ?1", [vault_id])?;
+
+        Ok(())
     }
 
     pub fn record_revision(&self, note: &IndexedNote) -> StoreResult<()> {
