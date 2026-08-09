@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::Deserialize;
 use sqlx::PgPool;
+use synapse_protocol::v1::Conflict;
 use uuid::Uuid;
 
 use crate::blob::{BlobStore, CiphertextHash};
@@ -55,9 +56,10 @@ pub struct PushAck {
     pub revision: i64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplyError {
-    Conflict,
+    Conflict(Box<Conflict>),
+    RevisionMismatch,
     Database,
     Invalid,
     NotFound,
@@ -67,7 +69,8 @@ pub enum ApplyError {
 impl fmt::Display for ApplyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::Conflict => "operation conflicts with the current revision",
+            Self::Conflict(_) => "operation conflicts with the current revision",
+            Self::RevisionMismatch => "operation conflicts with the current revision",
             Self::Database => "sync database operation failed",
             Self::Invalid => "encrypted push operation is invalid",
             Self::NotFound => "vault is not available",
@@ -127,7 +130,27 @@ pub async fn apply(
     if operation.base_revision
         != u64::try_from(current_revision).map_err(|_| ApplyError::Database)?
     {
-        return Err(ApplyError::Conflict);
+        if operation.base_revision
+            > u64::try_from(current_revision).map_err(|_| ApplyError::Database)?
+        {
+            return Err(ApplyError::RevisionMismatch);
+        }
+        let base_hash =
+            revision_ciphertext_hash(&mut transaction, vault_id, operation.base_revision).await?;
+        let remote_revision = u64::try_from(current_revision).map_err(|_| ApplyError::Database)?;
+        let remote_hash =
+            revision_ciphertext_hash(&mut transaction, vault_id, remote_revision).await?;
+        return Err(ApplyError::Conflict(Box::new(Conflict {
+            protocol_version: PROTOCOL_VERSION,
+            operation_id: operation.operation_id,
+            vault_id: operation.vault_id,
+            note_id: operation.note_id,
+            base_revision: operation.base_revision,
+            remote_revision,
+            base_ciphertext_hash: hex_hash(&base_hash),
+            local_ciphertext_hash: operation.ciphertext_hash,
+            remote_ciphertext_hash: hex_hash(&remote_hash),
+        })));
     }
     let next_revision = current_revision
         .checked_add(1)
@@ -201,4 +224,24 @@ fn canonical_uuid(value: &str) -> Option<Uuid> {
 fn canonical_uuid_v7(value: &str) -> Option<Uuid> {
     let id = canonical_uuid(value)?;
     (id.get_version() == Some(uuid::Version::SortRand)).then_some(id)
+}
+
+async fn revision_ciphertext_hash(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    vault_id: Uuid,
+    revision: u64,
+) -> Result<Vec<u8>, ApplyError> {
+    sqlx::query_scalar(
+        "SELECT ciphertext_hash FROM revisions WHERE vault_id = $1::uuid AND revision = $2",
+    )
+    .bind(vault_id.to_string())
+    .bind(i64::try_from(revision).map_err(|_| ApplyError::Database)?)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|_| ApplyError::Database)?
+    .ok_or(ApplyError::Database)
+}
+
+fn hex_hash(hash: &[u8]) -> String {
+    hash.iter().map(|byte| format!("{byte:02x}")).collect()
 }
