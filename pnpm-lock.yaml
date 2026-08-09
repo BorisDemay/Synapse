@@ -91,6 +91,21 @@ importers:
         specifier: 2.2.0
         version: 2.2.0(typescript@5.7.3)
 
+  packages/api-client:
+    devDependencies:
+      jsdom:
+        specifier: 25.0.1
+        version: 25.0.1
+      prettier:
+        specifier: 3.5.3
+        version: 3.5.3
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
+      vitest:
+        specifier: 3.0.5
+        version: 3.0.5(jsdom@25.0.1)
+
 packages:
 
   '@asamuzakjp/css-color@3.2.0':
