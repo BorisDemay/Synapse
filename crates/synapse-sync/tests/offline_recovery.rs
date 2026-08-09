@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::BTreeMap, fs};
 
 use synapse_core::{ContentHash, NoteId, OperationId, Revision, VaultPath};
 use synapse_local_store::{IndexedNote, LocalStore, PendingOperation};
@@ -7,7 +7,7 @@ use synapse_protocol::v1::{
 };
 use synapse_sync::{
     client::{PullOutcome, PushAck, SyncTransport, TransportError},
-    engine::{RetryPolicy, SyncEngine, SyncState},
+    engine::{RetryPolicy, SyncEngine, SyncError, SyncState},
 };
 
 const VAULT_ID: &str = "0198e5de-1111-7222-8333-444455556666";
@@ -56,19 +56,20 @@ fn network_failure_keeps_the_opaque_pending_operation_in_the_outbox() {
 }
 
 #[test]
-fn reconnect_retries_with_injected_backoff_and_acks_only_after_matching_server_ack() {
+fn reconnect_consumes_bounded_exponential_jitter_before_acknowledging_the_outbox() {
     let store = LocalStore::open_in_memory().expect("store opens");
     let operation = pending_operation();
     store
         .enqueue_operation(&operation)
         .expect("operation persists");
     let attempts = RefCell::new(0);
-    let delays = RefCell::new(Vec::new());
+    let jitter_bounds = RefCell::new(Vec::new());
+    let scheduled_delays = RefCell::new(Vec::new());
     let operation_id = operation.operation_id.to_string();
     let transport = move |_: EncryptedPushOperation| {
         let mut attempts = attempts.borrow_mut();
         *attempts += 1;
-        if *attempts == 1 {
+        if *attempts < 3 {
             return Err(TransportError::Network);
         }
         Ok(PushAck {
@@ -79,15 +80,24 @@ fn reconnect_retries_with_injected_backoff_and_acks_only_after_matching_server_a
         store,
         transport,
         VAULT_ID,
-        RetryPolicy::new(2, |attempt| {
-            delays.borrow_mut().push(attempt);
-            17
-        }),
+        RetryPolicy::exponential(
+            3,
+            100,
+            250,
+            20,
+            |bound| {
+                jitter_bounds.borrow_mut().push(bound);
+                999
+            },
+            |delay| scheduled_delays.borrow_mut().push(delay),
+        ),
     );
 
     let state = engine.synchronize().expect("reconnect succeeds");
 
     assert_eq!(state, SyncState::Synced);
+    assert_eq!(jitter_bounds.borrow().as_slice(), &[20, 20]);
+    assert_eq!(scheduled_delays.borrow().as_slice(), &[120, 220]);
     assert_eq!(
         engine
             .store()
@@ -98,34 +108,155 @@ fn reconnect_retries_with_injected_backoff_and_acks_only_after_matching_server_a
 }
 
 #[test]
-fn replay_after_crash_before_ack_is_idempotent_and_removes_the_operation_once_acknowledged() {
+fn a_mismatched_ack_keeps_the_operation_in_the_outbox() {
+    struct MismatchedAckTransport;
+
+    impl SyncTransport for MismatchedAckTransport {
+        fn push(&self, _: EncryptedPushOperation) -> Result<PushAck, TransportError> {
+            Ok(PushAck {
+                operation_id: OperationId::new().to_string(),
+            })
+        }
+    }
+
     let store = LocalStore::open_in_memory().expect("store opens");
     let operation = pending_operation();
     store
         .enqueue_operation(&operation)
         .expect("operation persists");
-    let received_operation_ids = RefCell::new(Vec::new());
-    let transport = |operation: EncryptedPushOperation| {
-        received_operation_ids
-            .borrow_mut()
-            .push(operation.operation_id.clone());
-        Ok(PushAck {
-            operation_id: operation.operation_id,
-        })
-    };
-    let mut engine = SyncEngine::new(store, transport, VAULT_ID, RetryPolicy::without_delay(1));
+    let mut engine = SyncEngine::new(
+        store,
+        MismatchedAckTransport,
+        VAULT_ID,
+        RetryPolicy::without_delay(1),
+    );
 
-    let state = engine.synchronize().expect("idempotent replay succeeds");
-
-    assert_eq!(state, SyncState::Synced);
+    assert!(matches!(engine.synchronize(), Err(SyncError::Protocol)));
     assert_eq!(
         engine
             .store()
             .pending_operation_count()
             .expect("outbox reads"),
+        1
+    );
+}
+
+#[test]
+fn replay_after_lost_ack_reuses_the_durable_operation_id_and_removes_the_outbox_once() {
+    let database_path = std::env::temp_dir().join(format!(
+        "synapse-sync-replay-{}.sqlite3",
+        OperationId::new()
+    ));
+    let store = LocalStore::open(&database_path).expect("store opens");
+    let operation = pending_operation();
+    store
+        .enqueue_operation(&operation)
+        .expect("operation persists");
+    let server = DurableFakeServer::default();
+    let first_transport = LostAckTransport {
+        server: &server,
+        lose_ack: true,
+    };
+    let mut first_engine = SyncEngine::new(
+        store,
+        first_transport,
+        VAULT_ID,
+        RetryPolicy::without_delay(1),
+    );
+
+    assert_eq!(
+        first_engine
+            .synchronize()
+            .expect("lost acknowledgement is recoverable"),
+        SyncState::Pending
+    );
+    assert_eq!(
+        first_engine
+            .store()
+            .pending_operation_count()
+            .expect("outbox reads"),
+        1
+    );
+    drop(first_engine);
+
+    let second_transport = LostAckTransport {
+        server: &server,
+        lose_ack: false,
+    };
+    let mut second_engine = SyncEngine::new(
+        LocalStore::open(&database_path).expect("persistent outbox reopens"),
+        second_transport,
+        VAULT_ID,
+        RetryPolicy::without_delay(1),
+    );
+
+    assert_eq!(
+        second_engine
+            .synchronize()
+            .expect("durable replay succeeds"),
+        SyncState::Synced
+    );
+    assert_eq!(
+        second_engine
+            .store()
+            .pending_operation_count()
+            .expect("outbox reads"),
         0
     );
-    assert_eq!(received_operation_ids.borrow().len(), 1);
+    assert_eq!(server.durable_application_count(), 1);
+    assert_eq!(
+        server.received_operation_ids().as_slice(),
+        &[
+            operation.operation_id.to_string(),
+            operation.operation_id.to_string()
+        ]
+    );
+    fs::remove_file(database_path).expect("temporary database removes");
+}
+
+#[derive(Default)]
+struct DurableFakeServer {
+    acknowledgements: RefCell<BTreeMap<String, PushAck>>,
+    received_operation_ids: RefCell<Vec<String>>,
+}
+
+impl DurableFakeServer {
+    fn receive(&self, operation: EncryptedPushOperation) -> PushAck {
+        self.received_operation_ids
+            .borrow_mut()
+            .push(operation.operation_id.clone());
+        self.acknowledgements
+            .borrow_mut()
+            .entry(operation.operation_id.clone())
+            .or_insert_with(|| PushAck {
+                operation_id: operation.operation_id,
+            })
+            .clone()
+    }
+
+    fn durable_application_count(&self) -> usize {
+        self.acknowledgements.borrow().len()
+    }
+
+    fn received_operation_ids(&self) -> Vec<String> {
+        self.received_operation_ids.borrow().clone()
+    }
+}
+
+struct LostAckTransport<'a> {
+    server: &'a DurableFakeServer,
+    lose_ack: bool,
+}
+
+impl SyncTransport for LostAckTransport<'_> {
+    fn push(&self, operation: EncryptedPushOperation) -> Result<PushAck, TransportError> {
+        let acknowledgement = self.server.receive(operation);
+        if self.lose_ack {
+            Err(TransportError::Network)
+        } else {
+            Ok(acknowledgement)
+        }
+    }
 }
 
 fn pending_operation() -> PendingOperation {

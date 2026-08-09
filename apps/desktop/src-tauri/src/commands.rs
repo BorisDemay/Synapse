@@ -6,10 +6,6 @@ use std::{
 
 use serde::Serialize;
 use synapse_core::{VaultPath, VaultService};
-use synapse_sync::{
-    client::SyncTransport,
-    engine::{Backoff, SyncEngine, SyncState},
-};
 use tauri::State;
 use tokio::sync::Mutex;
 
@@ -30,47 +26,6 @@ pub struct OpenedVault {
 pub struct NoteSummary {
     pub path: String,
     pub label: String,
-}
-
-/// Content-free state returned by an explicitly injected sync adapter.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncStatus {
-    pub state: &'static str,
-}
-
-/// Desktop adapter for a configured engine. No transport/client is created
-/// globally, so network credentials and endpoints remain explicit.
-pub struct SyncCommands<T, B> {
-    engine: Mutex<SyncEngine<T, B>>,
-}
-
-impl<T, B> SyncCommands<T, B>
-where
-    T: SyncTransport + Send,
-    B: Backoff + Send,
-{
-    pub fn new(engine: SyncEngine<T, B>) -> Self {
-        Self {
-            engine: Mutex::new(engine),
-        }
-    }
-
-    pub async fn synchronize_queued_operations(&self) -> Result<SyncStatus, String> {
-        let state = self
-            .engine
-            .lock()
-            .await
-            .synchronize()
-            .map_err(|_| "unable to synchronize queued operations".to_owned())?;
-        Ok(SyncStatus {
-            state: match state {
-                SyncState::Synced => "synced",
-                SyncState::Pending => "pending",
-                SyncState::Conflict => "conflict",
-            },
-        })
-    }
 }
 
 struct ActiveVault {

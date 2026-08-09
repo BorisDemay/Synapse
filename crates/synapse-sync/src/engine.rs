@@ -7,36 +7,78 @@ use synapse_protocol::v1::{
 
 use crate::client::{PullOutcome, SyncTransport, TransportError};
 
-pub trait Backoff {
-    fn delay_millis(&self, retry: u8) -> u64;
+pub trait Jitter {
+    fn jitter_millis(&self, upper_bound_millis: u64) -> u64;
 }
 
-impl<F> Backoff for F
+impl<F> Jitter for F
 where
-    F: Fn(u8) -> u64,
+    F: Fn(u64) -> u64,
 {
-    fn delay_millis(&self, retry: u8) -> u64 {
-        self(retry)
+    fn jitter_millis(&self, upper_bound_millis: u64) -> u64 {
+        self(upper_bound_millis)
     }
 }
 
-pub struct RetryPolicy<B> {
-    max_attempts: u8,
-    backoff: B,
+pub trait RetryScheduler {
+    fn schedule(&self, delay_millis: u64);
 }
 
-impl<B: Backoff> RetryPolicy<B> {
-    pub fn new(max_attempts: u8, backoff: B) -> Self {
+impl<F> RetryScheduler for F
+where
+    F: Fn(u64),
+{
+    fn schedule(&self, delay_millis: u64) {
+        self(delay_millis);
+    }
+}
+
+pub struct RetryPolicy<J, S> {
+    max_attempts: u8,
+    initial_backoff_millis: u64,
+    max_backoff_millis: u64,
+    jitter_bound_millis: u64,
+    jitter: J,
+    scheduler: S,
+}
+
+impl<J: Jitter, S: RetryScheduler> RetryPolicy<J, S> {
+    pub fn exponential(
+        max_attempts: u8,
+        initial_backoff_millis: u64,
+        max_backoff_millis: u64,
+        jitter_bound_millis: u64,
+        jitter: J,
+        scheduler: S,
+    ) -> Self {
         Self {
             max_attempts: max_attempts.max(1),
-            backoff,
+            initial_backoff_millis,
+            max_backoff_millis: max_backoff_millis.max(initial_backoff_millis),
+            jitter_bound_millis,
+            jitter,
+            scheduler,
         }
+    }
+
+    fn delay_millis(&self, retry: u8) -> u64 {
+        let exponent = u32::from(retry.saturating_sub(1));
+        let exponential_backoff = self
+            .initial_backoff_millis
+            .checked_shl(exponent)
+            .unwrap_or(u64::MAX);
+        let bounded_backoff = exponential_backoff.min(self.max_backoff_millis);
+        let bounded_jitter = self
+            .jitter
+            .jitter_millis(self.jitter_bound_millis)
+            .min(self.jitter_bound_millis);
+        bounded_backoff.saturating_add(bounded_jitter)
     }
 }
 
-impl RetryPolicy<fn(u8) -> u64> {
+impl RetryPolicy<fn(u64) -> u64, fn(u64)> {
     pub fn without_delay(max_attempts: u8) -> Self {
-        Self::new(max_attempts, |_| 0)
+        Self::exponential(max_attempts, 0, 0, 0, |_| 0, |_| {})
     }
 }
 
@@ -72,23 +114,24 @@ impl From<StoreError> for SyncError {
 
 /// Coordinates the durable opaque outbox. It deliberately does not decrypt,
 /// merge, or write filesystem content while synchronizing.
-pub struct SyncEngine<T, B> {
+pub struct SyncEngine<T, J, S> {
     store: LocalStore,
     transport: T,
     vault_id: String,
-    retry_policy: RetryPolicy<B>,
+    retry_policy: RetryPolicy<J, S>,
 }
 
-impl<T, B> SyncEngine<T, B>
+impl<T, J, S> SyncEngine<T, J, S>
 where
     T: SyncTransport,
-    B: Backoff,
+    J: Jitter,
+    S: RetryScheduler,
 {
     pub fn new(
         store: LocalStore,
         transport: T,
         vault_id: impl Into<String>,
-        retry_policy: RetryPolicy<B>,
+        retry_policy: RetryPolicy<J, S>,
     ) -> Self {
         Self {
             store,
@@ -131,7 +174,9 @@ where
                     return Ok(SyncState::Pending);
                 }
                 Err(TransportError::Network) => {
-                    let _ = self.retry_policy.backoff.delay_millis(attempt);
+                    self.retry_policy
+                        .scheduler
+                        .schedule(self.retry_policy.delay_millis(attempt));
                 }
                 Err(TransportError::Protocol) => return Err(SyncError::Protocol),
             }
