@@ -8,6 +8,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use http_body_util::BodyExt;
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use synapse_server::auth::session::Clock;
@@ -278,6 +279,62 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
         .await
         .expect("lookup")
         .is_none()
+    );
+}
+
+#[tokio::test]
+async fn authenticated_session_introspection_returns_only_its_opaque_user_id() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
+        .bind(user_id.to_string())
+        .bind("session@example.test")
+        .bind(b"not-used-by-this-test".as_slice())
+        .execute(&pool)
+        .await
+        .expect("user is stored");
+    let session = synapse_server::auth::session::create(&pool, user_id, SystemTime::now())
+        .await
+        .expect("session is created");
+    let app = synapse_server::router(Some(pool));
+
+    let authenticated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/session")
+                .header(
+                    header::COOKIE,
+                    format!("session={}", session.cookie_value()),
+                )
+                .body(Body::empty())
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(authenticated.status(), StatusCode::OK);
+    assert_eq!(
+        authenticated
+            .into_body()
+            .collect()
+            .await
+            .expect("body is readable")
+            .to_bytes(),
+        format!(r#"{{"user_id":"{user_id}"}}"#)
+    );
+    assert_eq!(
+        app.oneshot(
+            Request::builder()
+                .uri("/v1/session")
+                .body(Body::empty())
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response")
+        .status(),
+        StatusCode::UNAUTHORIZED
     );
 }
 

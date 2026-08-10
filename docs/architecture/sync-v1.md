@@ -38,12 +38,18 @@ révision, ni utilisateur, ni métadonnée en clair. Le client le conserve et le
 renvoie sans l'interpréter. Un curseur reste consommable après une coupure ou
 une reprise tant que sa révision est conservée par le serveur.
 
-Un `PullRequest` contient `protocol_version: 1`, le coffre, un curseur nullable
-et une limite entière de 1 à 100 inclus. `cursor: null` demande un snapshot
-depuis la révision 0. Une réponse `PullResponse` contient seulement des
-opérations chiffrées, dans l'ordre strict des révisions serveur croissantes, et
-un `next_cursor` opaque nullable. Le serveur ne retourne jamais plus de 100
-opérations et n'émet `next_cursor` que lorsqu'une page suivante existe.
+Le pull HTTP v1 est un `GET` navigateur-compatible sans corps :
+
+`GET /v1/vaults/{vault_id}/operations?limit=<1..100>&cursor=<uuid>`
+
+Le paramètre `limit` est obligatoire (1 à 100 inclus). Le paramètre `cursor` est
+optionnel : son absence demande un snapshot depuis la révision 0. Une réponse
+`PullResponse` contient seulement des opérations chiffrées, dans l'ordre strict
+des révisions serveur croissantes, et un `next_cursor` opaque nullable. Le
+serveur ne retourne jamais plus de 100 opérations et n'émet `next_cursor` que
+lorsqu'une page suivante existe. Le schéma `PullRequest` reste la forme
+canonique du contrat logique (version, coffre, curseur, limite) ; sur le fil
+HTTP, le coffre vient du chemin et le curseur/limite des query params.
 
 Après une coupure, un redémarrage ou la perte d'un signal WebSocket, le client
 reprend un pull depuis son dernier curseur durable.
@@ -61,9 +67,9 @@ JSON fermé et versionné suivant :
 ```
 
 Ce code stable n'expose aucune cause, révision ou métadonnée supplémentaire. Le
-client doit abandonner le curseur concerné et réessayer le même pull avec
-`cursor: null`; il ne doit pas déduire de l'erreur l'existence ou l'état d'un
-autre coffre.
+client doit abandonner le curseur concerné et réessayer le même pull sans
+`cursor`; il ne doit pas déduire de l'erreur l'existence ou l'état d'un autre
+coffre.
 
 WebSocket est uniquement un signal de réveil : il ne constitue ni un accusé de
 réception ni une source de vérité. Toute reprise passe par le pull paginé.

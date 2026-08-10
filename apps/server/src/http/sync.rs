@@ -1,11 +1,14 @@
 use axum::{
     Json,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{
+        Path, Query, State,
+        rejection::{JsonRejection, QueryRejection},
+    },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
-use synapse_protocol::v1::{PullRequest, ResnapshotRequired};
+use serde::{Deserialize, Serialize};
+use synapse_protocol::v1::{MAX_PULL_LIMIT, ResnapshotRequired, SyncCursor};
 use uuid::Uuid;
 
 use crate::{
@@ -24,6 +27,13 @@ pub const MAX_REQUEST_BYTES: usize = apply::MAX_CIPHERTEXT_BYTES + 16_384;
 pub struct PushAckResponse {
     operation_id: String,
     revision: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PullQuery {
+    cursor: Option<SyncCursor>,
+    limit: u32,
 }
 
 pub async fn push(
@@ -79,9 +89,9 @@ pub async fn pull(
     State(state): State<AppState>,
     Path(vault_id): Path<String>,
     headers: HeaderMap,
-    request: Result<Json<PullRequest>, JsonRejection>,
+    request: Result<Query<PullQuery>, QueryRejection>,
 ) -> Response {
-    let Json(request) = match request {
+    let Query(request) = match request {
         Ok(request) => request,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
@@ -89,7 +99,7 @@ pub async fn pull(
         Ok(vault_id) => vault_id,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
-    if request.vault_id != route_vault_id.to_string() {
+    if request.limit == 0 || request.limit > MAX_PULL_LIMIT {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let Some(pool) = state.pool else {

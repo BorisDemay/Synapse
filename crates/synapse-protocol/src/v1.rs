@@ -252,17 +252,79 @@ pub fn openapi_document() -> Value {
             "license": { "name": "AGPL-3.0-or-later" }
         },
         "paths": {
+            "/v1/session": {
+                "get": {
+                    "summary": "Return the opaque authenticated user id for the current session cookie",
+                    "responses": {
+                        "200": {
+                            "description": "Authenticated session",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionResponse" } } }
+                        },
+                        "401": { "description": "Missing or invalid session" }
+                    }
+                }
+            },
+            "/v1/vaults": {
+                "get": {
+                    "summary": "List opaque vault ids the authenticated user may access",
+                    "responses": {
+                        "200": {
+                            "description": "Owned or membership vault ids only",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultListResponse" } } }
+                        },
+                        "401": { "description": "Missing or invalid session" }
+                    }
+                }
+            },
+            "/v1/vaults/{vault_id}/envelope": {
+                "get": {
+                    "summary": "Read the opaque encrypted vault-key envelope for the authenticated user",
+                    "responses": {
+                        "200": {
+                            "description": "Opaque envelope bytes",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultKeyEnvelope" } } }
+                        },
+                        "401": { "description": "Missing or invalid session" },
+                        "404": { "description": "Envelope missing or vault not authorized" }
+                    }
+                },
+                "put": {
+                    "summary": "Upsert the opaque encrypted vault-key envelope for the authenticated user",
+                    "responses": {
+                        "204": { "description": "Envelope stored" },
+                        "400": { "description": "Invalid envelope payload" },
+                        "401": { "description": "Missing or invalid session" },
+                        "403": { "description": "CSRF origin rejected" },
+                        "404": { "description": "Vault not authorized" }
+                    }
+                }
+            },
             "/v1/vaults/{vault_id}/operations": {
                 "post": { "summary": "Push an encrypted operation" },
                 "get": {
                     "summary": "Pull encrypted operations in strictly increasing server revision order",
+                    "parameters": [
+                        {
+                            "name": "cursor",
+                            "in": "query",
+                            "required": false,
+                            "schema": { "type": "string", "format": "uuid" },
+                            "description": "Opaque sync cursor; omit to resnapshot from revision 0"
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "integer", "minimum": 1, "maximum": MAX_PULL_LIMIT }
+                        }
+                    ],
                     "responses": {
                         "200": {
                             "description": "A stable page of encrypted operations",
                             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PullResponse" } } }
                         },
                         "409": {
-                            "description": "The opaque cursor is unknown, belongs to another vault or user, or predates retention; retry with cursor null",
+                            "description": "The opaque cursor is unknown, belongs to another vault or user, or predates retention; retry with cursor omitted",
                             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResnapshotRequired" } } }
                         }
                     }
@@ -271,6 +333,41 @@ pub fn openapi_document() -> Value {
         },
         "components": {
             "schemas": {
+                "SessionResponse": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["user_id"],
+                    "properties": { "user_id": { "type": "string", "format": "uuid" } }
+                },
+                "VaultListResponse": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["vaults"],
+                    "properties": {
+                        "vaults": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["id"],
+                                "properties": { "id": { "type": "string", "format": "uuid" } }
+                            }
+                        }
+                    }
+                },
+                "VaultKeyEnvelope": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["bytes"],
+                    "properties": {
+                        "bytes": {
+                            "type": "array",
+                            "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                            "minItems": 1,
+                            "maxItems": 65536
+                        }
+                    }
+                },
                 "EncryptedPushOperation": {
                     "type": "object",
                     "additionalProperties": false,

@@ -4,7 +4,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::IntoResponse,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
@@ -27,6 +27,11 @@ pub struct SignupRequest {
 pub struct LoginRequest {
     email: String,
     password: String,
+}
+
+#[derive(Serialize)]
+pub struct SessionResponse {
+    user_id: String,
 }
 
 pub(crate) fn normalized_email(email: &str) -> Option<String> {
@@ -128,8 +133,9 @@ pub async fn login(
     let Ok(token) = session::create(&pool, user_id, state.clock.now()).await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let secure = if state.cookie_secure { "; Secure" } else { "" };
     let value = format!(
-        "session={}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800",
+        "session={}; Path=/; HttpOnly{secure}; SameSite=Strict; Max-Age=28800",
         token.cookie_value()
     );
     let mut response = StatusCode::NO_CONTENT.into_response();
@@ -168,4 +174,19 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Status
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
+}
+
+pub async fn session_info(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<SessionResponse>, StatusCode> {
+    let pool = state.pool.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let token = crate::http::vaults::session_token(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let user_id = session::user_for(&pool, &token, state.clock.now())
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(Json(SessionResponse {
+        user_id: user_id.to_string(),
+    }))
 }

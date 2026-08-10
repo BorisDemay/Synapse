@@ -158,6 +158,111 @@ async fn vault_reads_require_a_session_and_hide_non_owned_or_unknown_vaults() {
 }
 
 #[tokio::test]
+async fn v1_vault_list_and_opaque_envelope_are_authorized_and_csrf_protected() {
+    let _guard = vault_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_vault_tables(&pool).await;
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let stranger_id = create_user(&pool, "stranger@example.test").await;
+    let vault_id = create_complete_vault(&pool, owner_id).await;
+    let owner_session = create_session(&pool, owner_id).await;
+    let stranger_session = create_session(&pool, stranger_id).await;
+    let app = synapse_server::router(Some(pool));
+
+    let listed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/vaults")
+                .header(header::COOKIE, format!("session={owner_session}"))
+                .body(Body::empty())
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(
+        listed.into_body().collect().await.expect("body").to_bytes(),
+        format!(r#"{{"vaults":[{{"id":"{vault_id}"}}]}}"#)
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/vaults")
+                    .header(header::COOKIE, format!("session={stranger_session}"))
+                    .body(Body::empty())
+                    .expect("request is valid"),
+            )
+            .await
+            .expect("response")
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
+        &br#"{"vaults":[]}"#[..]
+    );
+    let write = Request::builder()
+        .method("PUT")
+        .uri(format!("/v1/vaults/{vault_id}/envelope"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ORIGIN, "https://synapse.local")
+        .header(header::COOKIE, format!("session={owner_session}"))
+        .body(Body::from(r#"{"bytes":[1,2,3,4]}"#))
+        .expect("request is valid");
+    assert_eq!(
+        app.clone().oneshot(write).await.expect("response").status(),
+        StatusCode::NO_CONTENT
+    );
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/vaults/{vault_id}/envelope"))
+                .header(header::COOKIE, format!("session={owner_session}"))
+                .body(Body::empty())
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(read.status(), StatusCode::OK);
+    assert_eq!(
+        read.into_body().collect().await.expect("body").to_bytes(),
+        &br#"{"bytes":[1,2,3,4]}"#[..]
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/vaults/{vault_id}/envelope"))
+                    .header(header::COOKIE, format!("session={stranger_session}"))
+                    .body(Body::empty())
+                    .expect("request is valid"),
+            )
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let cross_origin = Request::builder()
+        .method("PUT")
+        .uri(format!("/v1/vaults/{vault_id}/envelope"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ORIGIN, "https://evil.example")
+        .header(header::COOKIE, format!("session={owner_session}"))
+        .body(Body::from(r#"{"bytes":[1]}"#))
+        .expect("request is valid");
+    assert_eq!(
+        app.oneshot(cross_origin).await.expect("response").status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
 async fn vault_inputs_are_validated_and_database_rejects_orphaned_or_multiple_owner_state() {
     let _guard = vault_test_lock().await;
     let pool = test_pool().await;
@@ -282,6 +387,27 @@ async fn create_session(pool: &sqlx::PgPool, user_id: Uuid) -> String {
         .await
         .expect("session is created")
         .cookie_value()
+}
+
+async fn create_complete_vault(pool: &sqlx::PgPool, owner_id: Uuid) -> Uuid {
+    let vault_id = Uuid::new_v4();
+    let mut transaction = pool.begin().await.expect("transaction starts");
+    sqlx::query("INSERT INTO vaults (id, owner_user_id) VALUES ($1::uuid, $2::uuid)")
+        .bind(vault_id.to_string())
+        .bind(owner_id.to_string())
+        .execute(&mut *transaction)
+        .await
+        .expect("vault is stored");
+    sqlx::query(
+        "INSERT INTO vault_members (vault_id, user_id, role) VALUES ($1::uuid, $2::uuid, 'owner')",
+    )
+    .bind(vault_id.to_string())
+    .bind(owner_id.to_string())
+    .execute(&mut *transaction)
+    .await
+    .expect("owner membership is stored");
+    transaction.commit().await.expect("vault setup commits");
+    vault_id
 }
 
 fn read_vault(vault_id: Uuid, session: Option<&str>) -> Request<Body> {

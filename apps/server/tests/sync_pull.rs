@@ -374,15 +374,14 @@ async fn pagination_resumes_from_the_persisted_opaque_cursor_without_a_duplicate
 }
 
 fn pull_request(vault_id: Uuid, session: &str, cursor: Option<&str>, limit: u32) -> Request<Body> {
-    let cursor = cursor.map_or_else(|| "null".to_owned(), |cursor| format!("\"{cursor}\""));
+    let cursor = cursor.map_or_else(String::new, |cursor| format!("cursor={cursor}&"));
     Request::builder()
         .method("GET")
-        .uri(format!("/v1/vaults/{vault_id}/operations"))
-        .header(header::CONTENT_TYPE, "application/json")
+        .uri(format!(
+            "/v1/vaults/{vault_id}/operations?{cursor}limit={limit}"
+        ))
         .header(header::COOKIE, format!("session={session}"))
-        .body(Body::from(format!(
-            r#"{{"protocol_version":1,"vault_id":"{vault_id}","cursor":{cursor},"limit":{limit}}}"#
-        )))
+        .body(Body::empty())
         .expect("request is valid")
 }
 

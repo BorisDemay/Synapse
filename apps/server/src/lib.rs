@@ -22,7 +22,9 @@ pub struct AppState {
     pub(crate) pool: Option<PgPool>,
     pub(crate) blob_store: Option<Arc<dyn blob::BlobStore>>,
     pub(crate) allow_public_signup: bool,
+    pub(crate) cookie_secure: bool,
     pub(crate) csrf_origin: String,
+    pub(crate) enable_hsts: bool,
     pub(crate) clock: Arc<dyn auth::session::Clock>,
     pub(crate) notifications: http::ws::NotificationHub,
 }
@@ -55,16 +57,43 @@ fn router_with_clock_and_blob_store(
     clock: Arc<dyn auth::session::Clock>,
     blob_store: Option<Arc<dyn blob::BlobStore>>,
 ) -> Router {
-    let state = AppState {
-        pool,
-        blob_store,
+    router_with_settings(RouterSettings {
         allow_public_signup: matches!(
             std::env::var("SYNAPSE_ALLOW_PUBLIC_SIGNUP").as_deref(),
             Ok("true")
         ),
+        blob_store,
+        clock,
+        cookie_secure: !matches!(
+            std::env::var("SYNAPSE_COOKIE_SECURE").as_deref(),
+            Ok("false")
+        ),
         csrf_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
             .unwrap_or_else(|_| "https://synapse.local".to_owned()),
-        clock,
+        enable_hsts: http::security::is_production(),
+        pool,
+    })
+}
+
+pub struct RouterSettings {
+    pub allow_public_signup: bool,
+    pub blob_store: Option<Arc<dyn blob::BlobStore>>,
+    pub clock: Arc<dyn auth::session::Clock>,
+    pub cookie_secure: bool,
+    pub csrf_origin: String,
+    pub enable_hsts: bool,
+    pub pool: Option<PgPool>,
+}
+
+pub fn router_with_settings(settings: RouterSettings) -> Router {
+    let state = AppState {
+        pool: settings.pool,
+        blob_store: settings.blob_store,
+        allow_public_signup: settings.allow_public_signup,
+        cookie_secure: settings.cookie_secure,
+        csrf_origin: settings.csrf_origin,
+        enable_hsts: settings.enable_hsts,
+        clock: settings.clock,
         notifications: http::ws::NotificationHub::new(),
     };
 
@@ -83,8 +112,14 @@ fn router_with_clock_and_blob_store(
         .route("/health/live", get(http::health::live))
         .route("/health/ready", get(http::health::ready))
         .route("/auth/logout", post(http::auth::logout))
+        .route("/v1/session", get(http::auth::session_info))
         .route("/vaults", post(http::vaults::create))
         .route("/vaults/{vault_id}", get(http::vaults::read))
+        .route("/v1/vaults", get(http::vaults::list))
+        .route(
+            "/v1/vaults/{vault_id}/envelope",
+            get(http::vaults::read_envelope).put(http::vaults::write_envelope),
+        )
         .route("/v1/vaults/{vault_id}/ws", get(http::ws::connect))
         .route(
             "/v1/vaults/{vault_id}/operations",
@@ -93,6 +128,10 @@ fn router_with_clock_and_blob_store(
                 .layer(DefaultBodyLimit::max(http::sync::MAX_REQUEST_BYTES)),
         )
         .nest("/auth", auth_routes)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            http::security::layer,
+        ))
         .with_state(state)
 }
 
@@ -122,6 +161,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .map(|_| ())?;
     sqlx::raw_sql(include_str!(
         "../../../migrations/0004_persist_opaque_sync_cursors.sql"
+    ))
+    .execute(pool)
+    .await
+    .map(|_| ())?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0005_vault_user_envelopes.sql"
     ))
     .execute(pool)
     .await

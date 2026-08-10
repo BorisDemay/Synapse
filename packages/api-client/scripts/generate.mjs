@@ -37,6 +37,14 @@ function typeFor(schema) {
   if (schema.type === "string" || schema.format || schema.pattern) {
     return "string";
   }
+  if (schema.type === "object" && schema.properties) {
+    const required = new Set(schema.required ?? []);
+    const fields = Object.entries(schema.properties).map(
+      ([property, propertySchema]) =>
+        `${property}${required.has(property) ? "" : "?"}: ${typeFor(propertySchema)}`,
+    );
+    return `{ ${fields.join("; ")} }`;
+  }
   return "unknown";
 }
 
@@ -68,6 +76,18 @@ function renderClient() {
     "  operation: EncryptedPushOperation,",
     "): string {",
     "  return JSON.stringify(operation);",
+    "}",
+    "",
+    "export function buildPullOperationsPath(",
+    "  vaultId: string,",
+    "  options: { cursor?: string | null; limit: number },",
+    "): string {",
+    "  const params = new URLSearchParams();",
+    "  if (options.cursor) {",
+    '    params.set("cursor", options.cursor);',
+    "  }",
+    '  params.set("limit", String(options.limit));',
+    "  return `/v1/vaults/${vaultId}/operations?${params.toString()}`;",
     "}",
     "",
   ].join("\n");

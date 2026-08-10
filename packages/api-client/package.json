@@ -4,6 +4,11 @@
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "generate": "node scripts/generate.mjs",
     "check:generated": "pnpm generate && git -C ../.. diff --exit-code -- packages/api-client/src/generated",

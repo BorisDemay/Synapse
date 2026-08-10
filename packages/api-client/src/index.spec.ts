@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPullOperationsPath,
   serializeEncryptedPushOperation,
   type EncryptedPushOperation,
 } from "./index";
@@ -22,6 +23,26 @@ describe("EncryptedPushOperation", () => {
 
     expect(serializeEncryptedPushOperation(operation)).toBe(
       '{"protocol_version":1,"operation_id":"0198e5de-aaaa-7bbb-8ccc-ddddeeeeffff","vault_id":"0198e5de-1111-7222-8333-444455556666","note_id":"0198e5de-7777-7888-8999-aaaabbbbcccc","base_revision":4,"ciphertext":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"nonce":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"aad_version":1,"ciphertext_hash":"f6d6f3ae0fc5e8a4feab46c293fe3d15eb34d8f5ca2dd01fc2cad6df1ddf6fb2"}',
+    );
+  });
+});
+
+describe("buildPullOperationsPath", () => {
+  it("builds a browser-safe query-string pull path", () => {
+    expect(
+      buildPullOperationsPath("0198e5de-1111-7222-8333-444455556666", {
+        limit: 50,
+      }),
+    ).toBe(
+      "/v1/vaults/0198e5de-1111-7222-8333-444455556666/operations?limit=50",
+    );
+    expect(
+      buildPullOperationsPath("0198e5de-1111-7222-8333-444455556666", {
+        cursor: "0198e5de-aaaa-7bbb-8ccc-ddddeeeeffff",
+        limit: 10,
+      }),
+    ).toBe(
+      "/v1/vaults/0198e5de-1111-7222-8333-444455556666/operations?cursor=0198e5de-aaaa-7bbb-8ccc-ddddeeeeffff&limit=10",
     );
   });
 });

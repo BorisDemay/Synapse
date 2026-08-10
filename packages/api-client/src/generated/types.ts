@@ -39,3 +39,12 @@ export interface ResnapshotRequired {
   protocol_version: 1;
   resnapshot_cursor: null;
 }
+export interface SessionResponse {
+  user_id: string;
+}
+export interface VaultKeyEnvelope {
+  bytes: number[];
+}
+export interface VaultListResponse {
+  vaults: { id: string }[];
+}

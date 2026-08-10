@@ -6,3 +6,15 @@ export function serializeEncryptedPushOperation(
 ): string {
   return JSON.stringify(operation);
 }
+
+export function buildPullOperationsPath(
+  vaultId: string,
+  options: { cursor?: string | null; limit: number },
+): string {
+  const params = new URLSearchParams();
+  if (options.cursor) {
+    params.set("cursor", options.cursor);
+  }
+  params.set("limit", String(options.limit));
+  return `/v1/vaults/${vaultId}/operations?${params.toString()}`;
+}

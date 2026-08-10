@@ -197,6 +197,63 @@
           "resnapshot_cursor"
         ],
         "type": "object"
+      },
+      "SessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "VaultKeyEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "items": {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 65536,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "VaultListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "vaults": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "vaults"
+        ],
+        "type": "object"
       }
     }
   },
@@ -209,8 +266,113 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/session": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Authenticated session"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        },
+        "summary": "Return the opaque authenticated user id for the current session cookie"
+      }
+    },
+    "/v1/vaults": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultListResponse"
+                }
+              }
+            },
+            "description": "Owned or membership vault ids only"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        },
+        "summary": "List opaque vault ids the authenticated user may access"
+      }
+    },
+    "/v1/vaults/{vault_id}/envelope": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultKeyEnvelope"
+                }
+              }
+            },
+            "description": "Opaque envelope bytes"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "404": {
+            "description": "Envelope missing or vault not authorized"
+          }
+        },
+        "summary": "Read the opaque encrypted vault-key envelope for the authenticated user"
+      },
+      "put": {
+        "responses": {
+          "204": {
+            "description": "Envelope stored"
+          },
+          "400": {
+            "description": "Invalid envelope payload"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "CSRF origin rejected"
+          },
+          "404": {
+            "description": "Vault not authorized"
+          }
+        },
+        "summary": "Upsert the opaque encrypted vault-key envelope for the authenticated user"
+      }
+    },
     "/v1/vaults/{vault_id}/operations": {
       "get": {
+        "parameters": [
+          {
+            "description": "Opaque sync cursor; omit to resnapshot from revision 0",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": true,
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -230,7 +392,7 @@
                 }
               }
             },
-            "description": "The opaque cursor is unknown, belongs to another vault or user, or predates retention; retry with cursor null"
+            "description": "The opaque cursor is unknown, belongs to another vault or user, or predates retention; retry with cursor omitted"
           }
         },
         "summary": "Pull encrypted operations in strictly increasing server revision order"

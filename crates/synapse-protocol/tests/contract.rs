@@ -166,6 +166,9 @@ fn generated_openapi_document_is_stable_and_exposes_only_opaque_payloads() {
         "#/components/schemas/ResnapshotRequired"
     );
     for schema in [
+        "SessionResponse",
+        "VaultListResponse",
+        "VaultKeyEnvelope",
         "PullRequest",
         "PullResponse",
         "ResnapshotRequired",
@@ -177,4 +180,23 @@ fn generated_openapi_document_is_stable_and_exposes_only_opaque_payloads() {
                 .is_some_and(|properties| !properties.is_empty())
         );
     }
+    assert_eq!(
+        openapi_document()["paths"]["/v1/session"]["get"]["responses"]["200"]["content"]["application/json"]
+            ["schema"]["$ref"],
+        "#/components/schemas/SessionResponse"
+    );
+    assert_eq!(
+        openapi_document()["paths"]["/v1/vaults"]["get"]["responses"]["200"]["content"]["application/json"]
+            ["schema"]["$ref"],
+        "#/components/schemas/VaultListResponse"
+    );
+    assert_eq!(
+        openapi_document()["paths"]["/v1/vaults/{vault_id}/envelope"]["get"]["responses"]["200"]["content"]
+            ["application/json"]["schema"]["$ref"],
+        "#/components/schemas/VaultKeyEnvelope"
+    );
+    assert_eq!(
+        openapi_document()["paths"]["/v1/vaults/{vault_id}/operations"]["get"]["parameters"][1]["name"],
+        "limit"
+    );
 }

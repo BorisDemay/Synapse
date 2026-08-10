@@ -1750,6 +1750,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "synapse-core",
  "synapse-protocol",
  "tokio",
  "tower",
