@@ -30,6 +30,7 @@ impl std::error::Error for StartupError {}
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
+    synapse_server::telemetry::init();
     let mut config = ServerConfig::from_env().map_err(|_| StartupError::Configuration)?;
     let pool = PgPoolOptions::new()
         .connect(config.database_url())

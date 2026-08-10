@@ -69,6 +69,7 @@ pub async fn push(
             if ack.new_revision {
                 state.notifications.publish(vault_id, ack.revision);
             }
+            crate::metrics::observe_push_accepted();
             (
                 StatusCode::CREATED,
                 Json(PushAckResponse {
@@ -79,9 +80,13 @@ pub async fn push(
                 .into_response()
         }
         Err(ApplyError::Conflict(conflict)) => {
+            crate::metrics::observe_push_conflict();
             (StatusCode::CONFLICT, Json(*conflict)).into_response()
         }
-        Err(error) => status_for(error).into_response(),
+        Err(error) => {
+            crate::metrics::observe_push_error();
+            status_for(error).into_response()
+        }
     }
 }
 
@@ -123,7 +128,10 @@ pub async fn pull(
     )
     .await
     {
-        Ok(response) => Json(response).into_response(),
+        Ok(response) => {
+            crate::metrics::observe_pull();
+            Json(response).into_response()
+        }
         Err(PullError::CursorResnapshotRequired) => {
             (StatusCode::CONFLICT, Json(ResnapshotRequired::new())).into_response()
         }

@@ -53,6 +53,7 @@ impl NotificationHub {
             self.connections.fetch_sub(1, Ordering::AcqRel);
             return None;
         }
+        crate::metrics::ws_connected();
         Some((
             self.sender.subscribe(),
             ConnectionGuard(self.connections.clone()),
@@ -69,6 +70,7 @@ pub(crate) struct ConnectionGuard(Arc<AtomicUsize>);
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
+        crate::metrics::ws_disconnected();
     }
 }
 

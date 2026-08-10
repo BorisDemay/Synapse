@@ -2,8 +2,10 @@ pub mod auth;
 pub mod blob;
 pub mod config;
 pub mod http;
+pub mod metrics;
 pub mod repository;
 pub mod sync;
+pub mod telemetry;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -111,6 +113,7 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
     Router::new()
         .route("/health/live", get(http::health::live))
         .route("/health/ready", get(http::health::ready))
+        .route("/metrics", get(metrics::render))
         .route("/auth/logout", post(http::auth::logout))
         .route("/v1/session", get(http::auth::session_info))
         .route("/vaults", post(http::vaults::create))
@@ -128,6 +131,7 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
                 .layer(DefaultBodyLimit::max(http::sync::MAX_REQUEST_BYTES)),
         )
         .nest("/auth", auth_routes)
+        .layer(axum::middleware::from_fn(telemetry::request_id_middleware))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             http::security::layer,
