@@ -24,3 +24,6 @@ node_modules/
 Thumbs.db
 .idea/
 .vscode/
+
+# Web build output
+/apps/web/dist/
