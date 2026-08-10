@@ -1,0 +1,19 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Source Serif 4", "Libre Baskerville", "Iowan Old Style", Georgia,
+    serif;
+  color: #1a2330;
+  background: #e8edf2;
+}

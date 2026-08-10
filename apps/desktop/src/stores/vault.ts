@@ -15,8 +15,16 @@ interface NoteSummary {
   label: string;
 }
 
+export interface DesktopConflict {
+  base: string;
+  local: string;
+  noteId: string;
+  remote: string;
+}
+
 export const useVaultStore = defineStore("vault", {
   state: () => ({
+    activeConflict: null as DesktopConflict | null,
     nodes: [] as VaultNode[],
     searchResults: [] as VaultNode[],
     vaultName: "",
@@ -49,6 +57,19 @@ export const useVaultStore = defineStore("vault", {
         id: note.path,
         label: note.label,
       }));
+    },
+    setActiveConflict(conflict: DesktopConflict | null) {
+      this.activeConflict = conflict;
+    },
+    async resolveConflict(content: string) {
+      if (!this.activeConflict) {
+        throw new Error("No active conflict");
+      }
+      await invoke("write_note", {
+        content,
+        path: this.activeConflict.noteId,
+      });
+      this.activeConflict = null;
     },
   },
 });

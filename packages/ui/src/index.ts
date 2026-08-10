@@ -1,5 +1,6 @@
 export { default as AppShell } from "./components/AppShell.vue";
 export { default as BacklinksPanel } from "./components/BacklinksPanel.vue";
+export { default as ConflictResolver } from "./components/ConflictResolver.vue";
 export { default as HistoryPanel } from "./components/HistoryPanel.vue";
 export { default as MarkdownEditor } from "./components/MarkdownEditor.vue";
 export { default as MarkdownPreview } from "./components/MarkdownPreview.vue";

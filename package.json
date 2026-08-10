@@ -10,8 +10,12 @@
   },
   "scripts": {
     "test": "pnpm --recursive --if-present test",
+    "test:e2e": "playwright test",
     "lint": "pnpm --recursive --if-present lint",
     "format": "pnpm --recursive --if-present format",
     "typecheck": "pnpm --recursive --if-present typecheck"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.50.1"
   }
 }

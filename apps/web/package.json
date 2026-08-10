@@ -1,36 +1,31 @@
 {
-  "name": "@synapse/ui",
+  "name": "@synapse/web",
   "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit",
     "lint": "prettier --check .",
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@codemirror/autocomplete": "6.18.6",
-    "@codemirror/commands": "6.8.1",
-    "@codemirror/lang-markdown": "6.3.4",
-    "@codemirror/language": "6.11.1",
-    "@codemirror/state": "6.7.1",
-    "@codemirror/view": "6.43.8",
-    "@lezer/markdown": "1.4.3",
-    "dompurify": "3.4.13",
-    "markdown-it": "15.0.0",
-    "vue": "3.5.13"
+    "@noble/ciphers": "2.3.0",
+    "@noble/hashes": "2.3.0",
+    "@synapse/api-client": "workspace:*",
+    "@synapse/ui": "workspace:*",
+    "idb": "8.0.3",
+    "pinia": "4.0.2",
+    "vue": "3.5.13",
+    "vue-router": "4.5.0"
   },
   "devDependencies": {
-    "@types/markdown-it": "14.1.2",
     "@vitejs/plugin-vue": "5.2.1",
     "@vue/test-utils": "2.4.6",
+    "fake-indexeddb": "6.0.0",
     "jsdom": "25.0.1",
     "prettier": "3.5.3",
     "typescript": "5.7.3",
