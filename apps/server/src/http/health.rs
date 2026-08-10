@@ -12,9 +12,9 @@ pub async fn live() -> Json<HealthStatus> {
     Json(HealthStatus { status: "ok" })
 }
 
-pub async fn ready(State(state): State<AppState>) -> StatusCode {
+pub async fn ready(State(state): State<AppState>) -> Result<Json<HealthStatus>, StatusCode> {
     let Some(pool) = state.pool else {
-        return StatusCode::SERVICE_UNAVAILABLE;
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     };
 
     let migration_present = sqlx::query_scalar::<_, bool>(
@@ -34,7 +34,7 @@ pub async fn ready(State(state): State<AppState>) -> StatusCode {
     .await;
 
     match migration_present {
-        Ok(true) => StatusCode::OK,
-        Ok(false) | Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+        Ok(true) => Ok(Json(HealthStatus { status: "ok" })),
+        Ok(false) | Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
     }
 }

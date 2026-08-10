@@ -1,0 +1,96 @@
+name: synapse
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      POSTGRES_USER: ${POSTGRES_USER:-synapse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SYNAPSE_BIND_ADDR: 0.0.0.0:3000
+      SYNAPSE_DATABASE_URL: postgres://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@postgres:5432/${POSTGRES_DB:-synapse}
+      SYNAPSE_STORAGE_PATH: /var/lib/synapse/blobs
+      SYNAPSE_ALLOWED_ORIGIN: ${SYNAPSE_ALLOWED_ORIGIN:-http://127.0.0.1:8080}
+      SYNAPSE_ALLOW_PUBLIC_SIGNUP: ${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}
+      SYNAPSE_COOKIE_SECURE: ${SYNAPSE_COOKIE_SECURE:-false}
+      SYNAPSE_ENV: ${SYNAPSE_ENV:-development}
+      SYNAPSE_BOOTSTRAP_ADMIN_EMAIL: ${SYNAPSE_BOOTSTRAP_ADMIN_EMAIL:-}
+      SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD: ${SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - blob_data:/var/lib/synapse/blobs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      server:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.9-alpine
+    depends_on:
+      - web
+      - server
+    ports:
+      - "${SYNAPSE_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Optional observability profile keeps the minimal path free of paid services.
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./infra/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  blob_data:
+  caddy_data:
+  caddy_config:

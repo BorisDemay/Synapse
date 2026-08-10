@@ -1,0 +1,32 @@
+{
+  auto_https off
+  admin off
+}
+
+:80 {
+  encode gzip
+
+  handle /auth/* {
+    reverse_proxy server:3000
+  }
+
+  handle /v1/* {
+    reverse_proxy server:3000
+  }
+
+  handle /vaults* {
+    reverse_proxy server:3000
+  }
+
+  handle /health/* {
+    reverse_proxy server:3000
+  }
+
+  handle /metrics {
+    reverse_proxy server:3000
+  }
+
+  handle {
+    reverse_proxy web:8080
+  }
+}
