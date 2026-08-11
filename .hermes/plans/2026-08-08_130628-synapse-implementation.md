@@ -1416,16 +1416,16 @@ Les décisions licence AGPLv3, comptes multi-utilisateur avec invitations par d�
 
 ## 9. Vérification finale avant préversion
 
-- [ ] Tous les tests ont été observés en RED avant leur implémentation.
-- [ ] Aucun code produit sans test correspondant, hors fichiers générés et configuration validée par intégration.
-- [ ] Le desktop fonctionne sans serveur et ne bloque jamais l’édition sur le réseau.
-- [ ] Le rejeu d’une opération ne crée aucune révision dupliquée.
-- [ ] Les conflits préservent toutes les variantes.
-- [ ] Le serveur, ses logs, PostgreSQL et le stockage de blobs ne contiennent aucun contenu de coffre en clair.
-- [ ] Les clés de coffre ne persistent jamais dans le navigateur ou les logs en clair et sont purgées au verrouillage/logout.
-- [ ] Aucun accès filesystem Tauri généraliste ou shell n’est autorisé.
-- [ ] Aucun SaaS, compte externe ou option payante n’est requis.
-- [ ] Les licences et vulnérabilités sont vérifiées automatiquement.
-- [ ] L’installation Compose, le redémarrage et la restauration sont testés.
-- [ ] Les budgets de performance proviennent de mesures reproductibles.
-- [ ] Le README ne promet que des fonctionnalités et commandes réellement disponibles.
+- [x] Tous les tests ont été observés en RED avant leur implémentation.
+- [x] Aucun code produit sans test correspondant, hors fichiers générés et configuration validée par intégration.
+- [x] Le desktop fonctionne sans serveur et ne bloque jamais l’édition sur le réseau.
+- [x] Le rejeu d’une opération ne crée aucune révision dupliquée.
+- [x] Les conflits préservent toutes les variantes.
+- [x] Le serveur, ses logs, PostgreSQL et le stockage de blobs ne contiennent aucun contenu de coffre en clair.
+- [x] Les clés de coffre ne persistent jamais dans le navigateur ou les logs en clair et sont purgées au verrouillage/logout.
+- [x] Aucun accès filesystem Tauri généraliste ou shell n’est autorisé.
+- [x] Aucun SaaS, compte externe ou option payante n’est requis.
+- [x] Les licences et vulnérabilités sont vérifiées automatiquement.
+- [x] L’installation Compose, le redémarrage et la restauration sont testés.
+- [x] Les budgets de performance proviennent de mesures reproductibles.
+- [x] Le README ne promet que des fonctionnalités et commandes réellement disponibles.
