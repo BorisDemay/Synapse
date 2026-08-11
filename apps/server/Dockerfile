@@ -6,6 +6,7 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY apps/server ./apps/server
 COPY crates ./crates
 COPY migrations ./migrations
+COPY tests/fixtures/generator ./tests/fixtures/generator
 RUN cargo build --release -p synapse-server \
   && strip target/release/synapse-server
 

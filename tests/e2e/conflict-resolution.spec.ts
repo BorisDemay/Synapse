@@ -1,54 +1,22 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-async function registerAndUnlock(
-  page: Page,
-  email: string,
-  password: string,
-  passphrase: string,
-  mode: "create" | "unlock",
-) {
-  if (mode === "create") {
-    await page.goto("/register");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Mot de passe").fill(password);
-    await page.getByRole("button", { name: "S’inscrire" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Créer un coffre" }),
-    ).toBeVisible({ timeout: 30_000 });
-  } else {
-    await page.goto("/login");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Mot de passe").fill(password);
-    await page.getByRole("button", { name: "Se connecter" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Déverrouiller le coffre" }),
-    ).toBeVisible({ timeout: 30_000 });
-  }
-  await page.getByLabel("Phrase de déchiffrement").fill(passphrase);
-  await page
-    .getByRole("button", {
-      name: mode === "create" ? "Créer et déverrouiller" : "Déverrouiller",
-    })
-    .click();
-  await expect(page.getByRole("heading", { name: "Coffre" })).toBeVisible({
-    timeout: 30_000,
-  });
-}
-
-async function writeAndSave(page: Page, text: string) {
-  const editor = page.getByLabel("Éditeur Markdown");
-  await editor.click();
-  await page.keyboard.press("Control+A");
-  await page.keyboard.type(text);
-  await page.getByRole("button", { name: "Enregistrer" }).click();
-}
+import {
+  DEFAULT_PASSPHRASE,
+  DEFAULT_PASSWORD,
+  expectOffline,
+  expectSynced,
+  goOnline,
+  registerAndUnlock,
+  uniqueEmail,
+  writeAndSave,
+} from "./fixtures";
 
 test("two offline contexts resolve a concurrent note conflict", async ({
   browser,
 }) => {
-  const email = `conflict-${Date.now()}@example.test`;
-  const password = "a secure password";
-  const passphrase = "local unlock passphrase";
+  const email = uniqueEmail("conflict");
+  const password = DEFAULT_PASSWORD;
+  const passphrase = DEFAULT_PASSPHRASE;
 
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
@@ -57,9 +25,7 @@ test("two offline contexts resolve a concurrent note conflict", async ({
 
   await registerAndUnlock(pageA, email, password, passphrase, "create");
   await writeAndSave(pageA, "# shared seed\n\ncommon");
-  await expect(pageA.getByRole("status")).toHaveText("synced", {
-    timeout: 30_000,
-  });
+  await expectSynced(pageA);
 
   await registerAndUnlock(pageB, email, password, passphrase, "unlock");
   await expect(pageB.getByRole("treeitem", { name: "shared seed" })).toBeVisible(
@@ -69,17 +35,12 @@ test("two offline contexts resolve a concurrent note conflict", async ({
 
   await contextA.setOffline(true);
   await writeAndSave(pageA, "# local branch\n\nfrom A");
-  await expect(pageA.getByRole("status")).toHaveText("offline", {
-    timeout: 30_000,
-  });
+  await expectOffline(pageA);
 
   await writeAndSave(pageB, "# remote branch\n\nfrom B");
-  await expect(pageB.getByRole("status")).toHaveText("synced", {
-    timeout: 30_000,
-  });
+  await expectSynced(pageB);
 
-  await contextA.setOffline(false);
-  await pageA.evaluate(() => window.dispatchEvent(new Event("online")));
+  await goOnline(pageA);
   await expect(
     pageA.getByRole("region", { name: "Résolution de conflit" }),
   ).toBeVisible({ timeout: 30_000 });
@@ -92,9 +53,7 @@ test("two offline contexts resolve a concurrent note conflict", async ({
 
   pageA.once("dialog", (dialog) => dialog.accept());
   await pageA.getByRole("button", { name: "Garder la version locale" }).click();
-  await expect(pageA.getByRole("status")).toHaveText("synced", {
-    timeout: 30_000,
-  });
+  await expectSynced(pageA);
   await expect(pageA.getByLabel("Aperçu Markdown")).toContainText("local branch");
 
   await contextA.close();

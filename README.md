@@ -159,56 +159,67 @@ opaque : il n'accède jamais au contenu des coffres en clair.
 └── tests/                # Tests d’intégration, charge et end-to-end
 ```
 
-## Installation auto-hébergée — cible
+## État MVP vérifié
 
-Le déploiement de référence doit tenir dans un fichier Compose et des variables d’environnement documentées.
+Les commandes ci-dessous ont été exécutées avec succès sur le dépôt actuel.
+Ne documenter ici que ce qui a réellement passé.
 
-Pré-requis : Docker Engine avec le plugin Compose, un nom de domaine et un reverse proxy TLS en production.
+### Qualité
 
 ```bash
-git clone https://example.invalid/synapse.git
-cd synapse
-cp .env.example .env
-# Renseigner notamment SYNAPSE_BASE_URL, les secrets et le stockage.
-docker compose up -d
+just verify
 ```
 
-La version finale devra fournir :
+Enchaîne format Rust, clippy (`-D warnings`), `cargo nextest`, Vitest,
+typecheck, Prettier, `cargo deny check`, `pnpm audit --prod` et le smoke
+Playwright `tests/e2e/web-register-save.spec.ts`. Détails : `docs/operations/ci.md`.
 
-- une image de serveur versionnée et multi-architecture ;
-- un fichier `docker-compose.yml` prêt à l’emploi ;
-- une configuration de proxy inverse Caddy et/ou Nginx ;
-- une commande de migration et une vérification de santé ;
-- des scripts de sauvegarde/restauration testés ;
-- une documentation de mise à jour sans interruption inutile.
+### Self-hosting Docker Compose
 
-> Les commandes ci-dessus décrivent l’objectif de distribution. Elles ne sont pas encore opérationnelles tant que le serveur et l’infrastructure n’ont pas été implémentés.
+```bash
+cp .env.example .env
+# Ajuster SYNAPSE_ALLOWED_ORIGIN et les secrets PostgreSQL
+bash tests/integration/self_hosted.sh
+bash tests/integration/backup_restore.sh
+```
 
-## Configuration de production à documenter
+Stack minimale : PostgreSQL + API Rust + UI web + Caddy + volume de blobs.
+Guide opérateur : `docs/operations/install.md`, sauvegarde :
+`docs/operations/backup-restore.md`.
 
-| Variable | Rôle |
-|---|---|
-| `SYNAPSE_BASE_URL` | URL publique canonique du service |
-| `SYNAPSE_DATABASE_URL` | Connexion à la base de métadonnées |
-| `SYNAPSE_STORAGE_PATH` | Répertoire persistant des pièces jointes/blobs |
-| `SYNAPSE_SESSION_SECRET` | Secret de signature des sessions, long et aléatoire |
-| `SYNAPSE_ALLOWED_ORIGINS` | Origines web explicitement autorisées |
-| `SYNAPSE_LOG_LEVEL` | Niveau de journalisation, sans données de contenu |
+### Parcours chiffré web / sync
 
-Les secrets ne doivent jamais être committés. Les répertoires de données et de sauvegarde doivent être placés sur des volumes persistants.
+Prérequis : PostgreSQL de test (`infra/docker/compose.test.yml`) et API locale
+sur `127.0.0.1:3000` avec `SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` et
+`SYNAPSE_COOKIE_SECURE=false`.
 
-## Qualité et validation
+```bash
+pnpm playwright test tests/e2e/full-sync.spec.ts
+pnpm playwright test tests/e2e/desktop.spec.ts
+```
 
-Chaque évolution doit inclure, selon son périmètre :
+Checklist de préversion : `docs/testing/release-checklist.md`.
 
-- tests unitaires du modèle Markdown, des permissions et de la résolution de conflits ;
-- tests d’intégration API et base de données ;
-- tests end-to-end client lourd et web ;
-- tests de reprise de synchronisation après coupure réseau ;
-- tests de charge et budget de performance ;
-- analyse statique, formatage, audit des dépendances et revue de sécurité.
+### Performance
 
-Les migrations de stockage, les mécanismes de sauvegarde et les scénarios de restauration doivent être testés automatiquement avant publication.
+```bash
+cargo run -p synapse-fixture-generator --release -- target/perf-vault 10000
+cargo bench -p synapse-core --bench markdown -- --quick
+cargo bench -p synapse-local-store --bench search -- --quick
+SYNAPSE_BASE_URL=http://127.0.0.1:3000 k6 run tests/load/sync.js
+```
+
+Budgets mesurés : `docs/architecture/performance-budgets.md`.
+
+### Limites connues du MVP
+
+- Le client Tauri ouvre un coffre local ; le parcours sync desktop ↔ web complet
+  via WebDriver Tauri n’est pas encore automatisé. Le scénario vertical utilise
+  deux contextes navigateur (stand-in desktop + web).
+- Aucun contenu de coffre en clair n’atteint le serveur ; la phrase de
+  déchiffrement reste locale.
+- Pas de SaaS obligatoire, pas de télémétrie distante.
+- SBOM CycloneDX : `just sbom` écrit sous `target/sbom/` (non versionné).
 
 ## Feuille de route
 
