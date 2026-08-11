@@ -11,7 +11,10 @@ const SEED: u64 = 42;
 
 fn main() -> io::Result<()> {
     let mut args = env::args().skip(1);
-    let output = PathBuf::from(args.next().unwrap_or_else(|| "target/perf-vault".to_owned()));
+    let output = PathBuf::from(
+        args.next()
+            .unwrap_or_else(|| "target/perf-vault".to_owned()),
+    );
     let count = args
         .next()
         .and_then(|value| value.parse().ok())
@@ -38,18 +41,12 @@ fn generate_vault(root: &Path, count: usize) -> io::Result<()> {
         let absolute = root.join(&path);
         fs::write(&absolute, &content)?;
         let digest = hex(Sha256::digest(content.as_bytes()));
-        writeln!(
-            &mut manifest,
-            "{digest}  {path}  bytes={}",
-            content.len()
-        )?;
+        writeln!(&mut manifest, "{digest}  {path}  bytes={}", content.len())?;
     }
     fs::write(root.join("MANIFEST.sha256"), manifest)?;
     fs::write(
         root.join("README.md"),
-        format!(
-            "# Performance fixture vault\n\nDeterministic {count} notes, seed={SEED}.\n"
-        ),
+        format!("# Performance fixture vault\n\nDeterministic {count} notes, seed={SEED}.\n"),
     )?;
     Ok(())
 }
@@ -57,11 +54,14 @@ fn generate_vault(root: &Path, count: usize) -> io::Result<()> {
 fn note_content(index: usize, count: usize) -> String {
     let next = (index + 1) % count;
     let hop = (index.wrapping_mul(7) + SEED as usize) % count;
-    let tag = if index % 5 == 0 { "project" } else { "inbox" };
+    let tag = if index.is_multiple_of(5) {
+        "project"
+    } else {
+        "inbox"
+    };
     let body_repeat = 1 + (index % 9);
-    let paragraph = format!(
-        "Body for note {index} with keyword token{index} and shared term synapse.\n"
-    );
+    let paragraph =
+        format!("Body for note {index} with keyword token{index} and shared term synapse.\n");
     format!(
         "---\ntags: [{tag}, bench]\n---\n\n# Note {index}\n\nSee [[note-{next:05}]] and [[note-{hop:05}|hop]].\n\n{}",
         paragraph.repeat(body_repeat)

@@ -46,7 +46,11 @@ const DB_VERSION = 1;
 
 let dbPromise: Promise<IDBPDatabase<SynapseOfflineSchema>> | undefined;
 
-export function noteKey(userId: string, vaultId: string, noteId: string): string {
+export function noteKey(
+  userId: string,
+  vaultId: string,
+  noteId: string,
+): string {
   return `${userId}:${vaultId}:${noteId}`;
 }
 
@@ -65,9 +69,7 @@ export function metaKey(
   return `${userId}:${vaultId}:${name}`;
 }
 
-export function openOfflineDb(): Promise<
-  IDBPDatabase<SynapseOfflineSchema>
-> {
+export function openOfflineDb(): Promise<IDBPDatabase<SynapseOfflineSchema>> {
   if (!dbPromise) {
     dbPromise = openDB<SynapseOfflineSchema>(DB_NAME, DB_VERSION, {
       upgrade(db) {

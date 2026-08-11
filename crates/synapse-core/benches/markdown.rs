@@ -14,9 +14,13 @@ fn parse_incremental(criterion: &mut Criterion) {
     for kib in [1usize, 8, 64] {
         let source = sample_note(42, kib);
         group.throughput(Throughput::Bytes(source.len() as u64));
-        group.bench_with_input(BenchmarkId::new("bytes_kib", kib), &source, |bencher, source| {
-            bencher.iter(|| parse_note(source).expect("parse"));
-        });
+        group.bench_with_input(
+            BenchmarkId::new("bytes_kib", kib),
+            &source,
+            |bencher, source| {
+                bencher.iter(|| parse_note(source).expect("parse"));
+            },
+        );
     }
     group.finish();
 }

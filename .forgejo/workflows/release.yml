@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbom-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        run: cargo install just --locked
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.17.1"
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server release binary
+        run: cargo build -p synapse-server --release
+
+      - name: Build web UI
+        run: pnpm --filter @synapse/web build
+
+      - name: Generate CycloneDX SBOMs
+        run: just sbom
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: synapse-release-${{ github.ref_name }}
+          path: |
+            target/release/synapse-server
+            apps/web/dist/
+            target/sbom/
+          if-no-files-found: error

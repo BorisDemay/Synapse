@@ -1,9 +1,7 @@
 use std::sync::OnceLock;
 
 use axum::response::IntoResponse;
-use prometheus::{
-    Encoder, IntCounter, IntCounterVec, IntGauge, Opts, Registry, TextEncoder, opts,
-};
+use prometheus::{Encoder, IntCounter, IntCounterVec, IntGauge, Opts, Registry, TextEncoder, opts};
 
 struct Metrics {
     conflicts: IntCounter,
@@ -17,8 +15,8 @@ struct Metrics {
 fn metrics() -> &'static Metrics {
     static METRICS: OnceLock<Metrics> = OnceLock::new();
     METRICS.get_or_init(|| {
-        let registry = Registry::new_custom(Some("synapse".to_owned()), None)
-            .expect("prometheus registry");
+        let registry =
+            Registry::new_custom(Some("synapse".to_owned()), None).expect("prometheus registry");
         let http_requests = IntCounterVec::new(
             Opts::new(
                 "http_requests_total",
@@ -32,11 +30,8 @@ fn metrics() -> &'static Metrics {
             &["result"],
         )
         .expect("push counter");
-        let pull = IntCounter::with_opts(Opts::new(
-            "sync_pull_total",
-            "Encrypted pull responses",
-        ))
-        .expect("pull counter");
+        let pull = IntCounter::with_opts(Opts::new("sync_pull_total", "Encrypted pull responses"))
+            .expect("pull counter");
         let conflicts = IntCounter::with_opts(Opts::new(
             "sync_conflicts_total",
             "Stale-base conflict responses",
@@ -103,10 +98,7 @@ pub fn observe_http(status: u16) {
         400..=499 => "4xx",
         _ => "5xx",
     };
-    metrics()
-        .http_requests
-        .with_label_values(&[class])
-        .inc();
+    metrics().http_requests.with_label_values(&[class]).inc();
 }
 
 pub fn observe_push_accepted() {

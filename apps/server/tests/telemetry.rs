@@ -7,10 +7,8 @@ use tower::ServiceExt;
 #[test]
 fn redacts_passwords_cookies_tokens_and_markdown_from_log_fields() {
     let password = synapse_server::telemetry::redact_field("password", "correct horse battery");
-    let cookie = synapse_server::telemetry::redact_field(
-        "cookie",
-        "session=opaque-token-value; Path=/",
-    );
+    let cookie =
+        synapse_server::telemetry::redact_field("cookie", "session=opaque-token-value; Path=/");
     let token = synapse_server::telemetry::redact_field("invitation_token", "invite-secret");
     let authorization =
         synapse_server::telemetry::redact_field("authorization", "Bearer top-secret");

@@ -1,0 +1,11 @@
+[profile.default]
+# Server integration tests share one PostgreSQL database and use process-local
+# mutexes; serialize them across nextest binaries.
+default-filter = "all()"
+
+[test-groups]
+server-db = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(synapse-server)'
+test-group = 'server-db'

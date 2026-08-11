@@ -62,7 +62,9 @@ export async function listCachedVaultIds(userId: string): Promise<string[]> {
   const envelopes = await db.getAll("envelopes");
   return [
     ...new Set(
-      envelopes.filter((row) => row.userId === userId).map((row) => row.vaultId),
+      envelopes
+        .filter((row) => row.userId === userId)
+        .map((row) => row.vaultId),
     ),
   ];
 }

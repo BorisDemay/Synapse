@@ -31,11 +31,15 @@ function confirmAction(
 </script>
 
 <template>
-  <section class="conflict-resolver" aria-label="Résolution de conflit" role="region">
+  <section
+    class="conflict-resolver"
+    aria-label="Résolution de conflit"
+    role="region"
+  >
     <h2>Conflit de synchronisation</h2>
     <p>
-      Trois versions chiffrées ont divergé. Choisissez explicitement une résolution ;
-      l’historique n’est pas écrasé.
+      Trois versions chiffrées ont divergé. Choisissez explicitement une
+      résolution ; l’historique n’est pas écrasé.
     </p>
 
     <div class="conflict-panes">

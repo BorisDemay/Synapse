@@ -38,7 +38,9 @@ describe("ConflictResolver", () => {
       },
     });
 
-    await wrapper.get('[aria-label="Garder la version locale"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Garder la version locale"]')
+      .trigger("click");
     await wrapper
       .get('[aria-label="Garder la version distante"]')
       .trigger("click");
@@ -62,7 +64,9 @@ describe("ConflictResolver", () => {
       },
     });
 
-    await wrapper.get('[aria-label="Garder la version locale"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Garder la version locale"]')
+      .trigger("click");
     expect(wrapper.emitted("keep-local")).toBeUndefined();
     vi.unstubAllGlobals();
   });

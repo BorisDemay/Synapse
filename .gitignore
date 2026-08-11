@@ -31,3 +31,7 @@ Thumbs.db
 # Performance fixtures and Criterion reports
 /target/perf-vault/
 /target/criterion/
+
+# Accidental local CycloneDX outputs next to crates
+**/rust.json
+**/synapse-rust.json

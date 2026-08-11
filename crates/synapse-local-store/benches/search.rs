@@ -26,9 +26,7 @@ fn index_and_search(criterion: &mut Criterion) {
 
     criterion.bench_function("search_paths_token_mid", |bencher| {
         bencher.iter(|| {
-            let hits = store
-                .search_paths_limited("token5000", 20)
-                .expect("search");
+            let hits = store.search_paths_limited("token5000", 20).expect("search");
             assert!(!hits.is_empty());
         });
     });

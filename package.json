@@ -13,7 +13,9 @@
     "test:e2e": "playwright test",
     "lint": "pnpm --recursive --if-present lint",
     "format": "pnpm --recursive --if-present format",
-    "typecheck": "pnpm --recursive --if-present typecheck"
+    "typecheck": "pnpm --recursive --if-present typecheck",
+    "audit": "pnpm audit --prod",
+    "verify": "just verify"
   },
   "devDependencies": {
     "@playwright/test": "1.50.1"
