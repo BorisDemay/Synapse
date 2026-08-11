@@ -27,3 +27,7 @@ Thumbs.db
 
 # Web build output
 /apps/web/dist/
+
+# Performance fixtures and Criterion reports
+/target/perf-vault/
+/target/criterion/
