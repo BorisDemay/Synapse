@@ -6,7 +6,13 @@
 
 **Architecture:** Un monorepo combine un workspace Cargo pour le domaine, la cryptographie, le stockage, le protocole et le serveur, et un workspace pnpm pour Vue 3, les composants partagés et les clients générés. Le client lourd conserve les fichiers Markdown, un index local et une file d’opérations dans SQLite ; le web conserve un cache complet mais chiffré dans IndexedDB. Les clients chiffrent les contenus avant synchronisation ; Axum ne persiste que des blobs chiffrés, des enveloppes de clés et des métadonnées minimales nécessaires à l’autorisation et aux curseurs. La synchronisation est versionnée, incrémentale, idempotente et signale les conflits au lieu d’écraser silencieusement les données.
 
-**Tech Stack:** Rust stable, Cargo, Axum, Tokio, Tower, SQLx, PostgreSQL, SQLite/FTS5, XChaCha20-Poly1305, Argon2id, Tauri 2, Vue 3, TypeScript, Vite, Pinia, Vue Router, CodeMirror 6, markdown-it, pnpm, Vitest, Playwright, cargo-nextest, Docker Compose, Caddy, OpenTelemetry et Prometheus.
+**Tech Stack:** Rust stable, Cargo, Axum, Tokio, Tower, SQLx, PostgreSQL, SQLite/FTS5, XChaCha20-Poly1305, Argon2id, Tauri 2, Vue 3, TypeScript, Vite, Pinia, Vue Router, Vditor 3, markdown-it, pnpm, Vitest, Playwright, cargo-nextest, Docker Compose, Caddy, OpenTelemetry et Prometheus.
+
+> Amendement du 2026-08-20 — ADR 0011 remplace le coffre dossier canonique
+> desktop par le même client Vue/IndexedDB chiffré que le web. Tauri conserve
+> seulement un pont HTTP Synapse fermé et une session en mémoire ; les anciens
+> dossiers ne sont jamais supprimés implicitement et relèvent d'une migration
+> explicite.
 
 ---
 
@@ -16,7 +22,7 @@
 
 - Ouvrir un dossier local comme coffre depuis le client Tauri.
 - Lister, créer, lire, modifier, renommer et supprimer des notes Markdown.
-- Éditer une note avec CodeMirror et afficher son rendu Markdown assaini.
+- Éditer une note avec Vditor en rendu instantané et afficher son rendu Markdown assaini.
 - Extraire le front matter, les tags, les wikilinks et les backlinks.
 - Indexer et rechercher localement avec SQLite FTS5.
 - Continuer à travailler hors ligne et conserver une file persistante d’opérations.
@@ -35,7 +41,13 @@
 - CRDT et édition simultanée caractère par caractère.
 - Partage de coffres chiffrés entre utilisateurs : cela exige une distribution, rotation et révocation de clés de groupe auditable.
 - Récupération d’un coffre chiffré sans phrase secrète ou dispositif déjà déverrouillé ; le produit doit rendre ce risque explicite.
-- Graphe visuel, marketplace de plugins, mobile et intelligence artificielle.
+- Graphe visuel, marketplace de plugins et mobile.
+- Intelligence artificielle **intégrée ou obligatoire**. Un assistant Codex
+  optionnel, côté client, avec clé fournie par l’utilisateur, est documenté
+  par l’ADR 0008 ; il choisit une action locale structurée (création,
+  remplacement ou ajout sur une note explicitement liée) et n’emprunte jamais
+  le serveur de synchronisation. Ses fils de conversation sont chiffrés et
+  persistés localement par coffre, sans synchronisation serveur.
 - MinIO, Grafana/Loki et déploiement multi-nœuds ; les interfaces doivent seulement permettre leur ajout ultérieur.
 
 ### Décisions validées
@@ -464,7 +476,7 @@ git commit -m "feat(ui): add accessible vault application shell"
 
 ### Task 9: Créer l’éditeur et la prévisualisation Markdown
 
-**Objective:** Fournir édition CodeMirror, autosauvegarde différée et rendu Markdown assaini.
+**Objective:** Fournir édition Vditor en rendu instantané, autosauvegarde différée et rendu Markdown assaini.
 
 **Files:**
 - Create: `packages/ui/src/components/MarkdownEditor.vue`
@@ -485,7 +497,7 @@ it('supprime les scripts du rendu', () => {
 
 **Step 3: Écrire le test d’autosauvegarde** avec faux timers ; attendre un unique événement après une rafale.
 
-**Step 4: Implémenter l’éditeur minimal**, sans accès direct au système de fichiers depuis Vue.
+**Step 4: Implémenter l’éditeur Vditor en mode IR**, sans accès direct au système de fichiers depuis Vue, sans cache de contenu dans `localStorage` et avec les ressources d’exécution servies depuis la même origine.
 
 **Step 5: Vérifier**
 
@@ -517,7 +529,14 @@ git commit -m "feat(ui): add secure markdown editor and preview"
 
 **Step 1: Tester la commande `open_vault`** avec un adaptateur de dialogue injecté, sans ouvrir de vraie fenêtre.
 
-**Step 2: Vérifier RED**, puis exposer uniquement `open_vault`, `list_notes`, `read_note`, `write_note`, `rename_note`, `trash_note` et `search_notes`.
+**Step 2: Vérifier RED**, puis exposer uniquement `open_vault`, `list_notes`, `read_note`, `write_note`, `save_note`, `rename_note`, `trash_note` et `search_notes`.
+
+La parité UX avec le web (AppShell, Vditor, auth optionnelle, sync E2EE) est
+décrite dans `docs/adr/0009-desktop-web-ux-parity.md` : un dossier local est
+canonique et distinct d’un coffre distant éphémère, HTTP Synapse uniquement en
+Rust, pas d’appareil de confiance IndexedDB sur le desktop. Le coffre distant
+ne crée ni fichiers Markdown ni SQLite ; il ne conserve notes, clé et file
+qu’en mémoire.
 
 **Step 3: Définir les capabilities Tauri minimales** ; ne pas accorder un accès global au shell ni au système de fichiers.
 
@@ -918,7 +937,7 @@ git commit -m "feat(sync): preserve encrypted concurrent edits"
 
 ### Task 20: Connecter la file locale au serveur
 
-**Objective:** Envoyer les opérations en attente, tirer les nouveautés et reprendre après coupure.
+**Objective:** Envoyer les opérations en attente, tirer les nouveautés et reprendre après coupure. Le transport desktop est un client HTTP Rust allowlisté (ADR 0009), pas un plugin HTTP Vue.
 
 **Files:**
 - Create: `crates/synapse-sync/src/client.rs`
@@ -1096,7 +1115,7 @@ git commit -m "feat(web): cache complete encrypted vault offline"
 
 **Step 2: TDD actions** garder local, garder distant et édition manuelle ; chacune demande confirmation.
 
-**Step 3: TDD requête de résolution** portant l’identifiant du conflit et les hashes attendus.
+**Step 3: TDD requête de résolution** portant l’identifiant du conflit et les hashes attendus. Le desktop (ADR 0009) monte le même `ConflictResolver` après un push HTTP Rust ; les variantes base/local/remote sont déchiffrées localement, le fichier Markdown n’est pas écrasé tant que l’utilisateur n’a pas choisi.
 
 **Step 4: E2E avec deux contextes** modifiant la même note hors ligne puis se reconnectant.
 

@@ -4,6 +4,8 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::IntoResponse,
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -11,7 +13,10 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    auth::{password, session},
+    auth::{
+        mail::{MailError, MailMessage, Mailer},
+        password, session,
+    },
 };
 
 #[derive(Deserialize)]
@@ -24,8 +29,27 @@ pub struct SignupRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ActivateRequest {
+    token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoginRequest {
     email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteAccountRequest {
     password: String,
 }
 
@@ -34,25 +58,81 @@ pub struct SessionResponse {
     user_id: String,
 }
 
+#[derive(Serialize)]
+pub struct SessionListItem {
+    created_at: String,
+    current: bool,
+    id: String,
+}
+
+#[derive(Serialize)]
+pub struct SessionListResponse {
+    email: String,
+    sessions: Vec<SessionListItem>,
+}
+
+#[derive(Serialize)]
+pub struct SignupStatusResponse {
+    public_signup: bool,
+}
+
 pub(crate) fn normalized_email(email: &str) -> Option<String> {
     let email = email.trim().to_lowercase();
     (email.len() <= 320 && email.contains('@') && !email.starts_with('@') && !email.ends_with('@'))
         .then_some(email)
 }
 
+fn normalized_login(identifier: &str) -> Option<String> {
+    let identifier = identifier.trim().to_lowercase();
+    if identifier.contains('@') {
+        return normalized_email(&identifier);
+    }
+    let valid_local = (1..=64).contains(&identifier.len())
+        && identifier.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+        && identifier
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphanumeric());
+    valid_local.then_some(identifier)
+}
+
 fn opaque_hash(value: &str) -> Vec<u8> {
     Sha256::digest(value.as_bytes()).to_vec()
+}
+
+fn csrf_origin_allowed(headers: &HeaderMap, csrf_origin: &str) -> bool {
+    headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        == Some(csrf_origin)
+}
+
+fn authenticated_user<'a>(
+    headers: &'a HeaderMap,
+    state: &'a AppState,
+) -> Result<(&'a sqlx::PgPool, session::SessionToken), StatusCode> {
+    let pool = state.pool.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let token = crate::http::vaults::session_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok((pool, token))
 }
 
 fn signup_error() -> StatusCode {
     StatusCode::BAD_REQUEST
 }
 
+pub async fn signup_status(State(state): State<AppState>) -> Json<SignupStatusResponse> {
+    Json(SignupStatusResponse {
+        public_signup: state.allow_public_signup,
+    })
+}
+
 pub async fn signup(
     State(state): State<AppState>,
     Json(request): Json<SignupRequest>,
 ) -> StatusCode {
-    let Some(pool) = state.pool else {
+    let Some(pool) = state.pool.clone() else {
         return StatusCode::SERVICE_UNAVAILABLE;
     };
     let Some(email) = normalized_email(&request.email) else {
@@ -62,46 +142,100 @@ pub async fn signup(
         return signup_error();
     };
 
+    let mut transaction = match pool.begin().await {
+        Ok(transaction) => transaction,
+        Err(_) => return signup_error(),
+    };
     if !state.allow_public_signup {
         let Some(invitation_token) = request.invitation_token else {
             return signup_error();
         };
-        let mut transaction = match pool.begin().await {
-            Ok(transaction) => transaction,
-            Err(_) => return signup_error(),
-        };
-        let invitation = sqlx::query_scalar::<_, String>("UPDATE invites SET accepted_at = CURRENT_TIMESTAMP WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP RETURNING id::text")
+        let invitation = sqlx::query_scalar::<_, String>("UPDATE invites SET accepted_at = CURRENT_TIMESTAMP WHERE token_hash = $1 AND lower(email) = $2 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP RETURNING id::text")
             .bind(opaque_hash(&invitation_token))
+            .bind(&email)
             .fetch_optional(&mut *transaction)
             .await;
         let Ok(Some(_)) = invitation else {
             return signup_error();
         };
-        let created =
-            sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
-                .bind(Uuid::new_v4().to_string())
-                .bind(&email)
-                .bind(password_hash.as_bytes())
-                .execute(&mut *transaction)
-                .await;
-        if created.is_err() {
-            return signup_error();
-        }
-        if transaction.commit().await.is_err() {
-            return signup_error();
-        }
-    } else if sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
+    }
+    let user_id = Uuid::new_v4();
+    let created = sqlx::query(
+        "INSERT INTO users (id, email, password_hash, activated_at) VALUES ($1::uuid, $2, $3, NULL)",
+    )
+    .bind(user_id.to_string())
+    .bind(&email)
+    .bind(password_hash.as_bytes())
+    .execute(&mut *transaction)
+    .await;
+    if created.is_err() {
+        return signup_error();
+    }
+    let activation_token = random_token();
+    let stored = sqlx::query("INSERT INTO account_activations (id, user_id, token_hash, expires_at) VALUES ($1::uuid, $2::uuid, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours')")
         .bind(Uuid::new_v4().to_string())
-        .bind(&email)
-        .bind(password_hash.as_bytes())
-        .execute(&pool)
-        .await
-        .is_err()
+        .bind(user_id.to_string())
+        .bind(opaque_hash(&activation_token))
+        .execute(&mut *transaction)
+        .await;
+    if stored.is_err() {
+        return signup_error();
+    }
+    if send_activation_mail(
+        state.mailer.as_ref(),
+        &state.public_origin,
+        &email,
+        &activation_token,
+    )
+    .await
+    .is_err()
     {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+    if transaction.commit().await.is_err() {
         return signup_error();
     }
 
     StatusCode::CREATED
+}
+
+pub async fn activate(
+    State(state): State<AppState>,
+    Json(request): Json<ActivateRequest>,
+) -> StatusCode {
+    let Some(pool) = state.pool else {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    };
+    if request.token.is_empty() {
+        return StatusCode::BAD_REQUEST;
+    }
+    let mut transaction = match pool.begin().await {
+        Ok(transaction) => transaction,
+        Err(_) => return StatusCode::BAD_REQUEST,
+    };
+    let user_id = sqlx::query_scalar::<_, String>(
+        "UPDATE account_activations SET consumed_at = CURRENT_TIMESTAMP WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP RETURNING user_id::text",
+    )
+    .bind(opaque_hash(&request.token))
+    .fetch_optional(&mut *transaction)
+    .await;
+    let Ok(Some(user_id)) = user_id else {
+        return StatusCode::BAD_REQUEST;
+    };
+    if sqlx::query(
+        "UPDATE users SET activated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid AND activated_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut *transaction)
+    .await
+    .is_err()
+    {
+        return StatusCode::BAD_REQUEST;
+    }
+    if transaction.commit().await.is_err() {
+        return StatusCode::BAD_REQUEST;
+    }
+    StatusCode::NO_CONTENT
 }
 
 pub async fn login(
@@ -111,10 +245,12 @@ pub async fn login(
     let Some(pool) = state.pool else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let Some(email) = normalized_email(&request.email) else {
+    let Some(email) = normalized_login(&request.email) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let user = sqlx::query("SELECT id::text AS id, password_hash FROM users WHERE email = $1")
+    let user = sqlx::query(
+        "SELECT id::text AS id, password_hash, (activated_at IS NOT NULL) AS activated FROM users WHERE email = $1",
+    )
         .bind(email)
         .fetch_optional(&pool)
         .await;
@@ -129,6 +265,9 @@ pub async fn login(
     };
     if password::verify(&request.password, &hash).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if !user.get::<bool, _>("activated") {
+        return StatusCode::FORBIDDEN.into_response();
     }
     let Ok(token) = session::create(&pool, user_id, state.clock.now()).await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -146,31 +285,19 @@ pub async fn login(
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> StatusCode {
-    let origin = headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok());
-    if origin != Some(state.csrf_origin.as_str()) {
+    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
         return StatusCode::FORBIDDEN;
     }
-    let token = headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies
-                .split(';')
-                .map(str::trim)
-                .find_map(|part| part.strip_prefix("session="))
-        })
-        .and_then(session::SessionToken::parse);
-    let (Some(pool), Some(token)) = (state.pool, token) else {
-        return StatusCode::UNAUTHORIZED;
+    let (pool, token) = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(status) => return status,
     };
-    match session::user_for(&pool, &token, state.clock.now()).await {
+    match session::user_for(pool, &token, state.clock.now()).await {
         Ok(Some(_)) => {}
         Ok(None) => return StatusCode::UNAUTHORIZED,
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
     }
-    match session::revoke(&pool, &token).await {
+    match session::revoke(pool, &token).await {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
@@ -189,4 +316,197 @@ pub async fn session_info(
     Ok(Json(SessionResponse {
         user_id: user_id.to_string(),
     }))
+}
+
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<SessionListResponse>, StatusCode> {
+    let (pool, token) = authenticated_user(&headers, &state)?;
+    let user_id = session::user_for(pool, &token, state.clock.now())
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let email = sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id = $1::uuid")
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let sessions = session::list_for_user(pool, user_id, &token, state.clock.now())
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    Ok(Json(SessionListResponse {
+        email,
+        sessions: sessions
+            .into_iter()
+            .map(|item| SessionListItem {
+                created_at: item.created_at,
+                current: item.current,
+                id: item.id,
+            })
+            .collect(),
+    }))
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ChangePasswordRequest>,
+) -> StatusCode {
+    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+        return StatusCode::FORBIDDEN;
+    }
+    let (pool, token) = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    let user_id = match session::user_for(pool, &token, state.clock.now()).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return StatusCode::UNAUTHORIZED,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+    };
+    if request.current_password == request.new_password {
+        return StatusCode::BAD_REQUEST;
+    }
+    let Ok(new_hash) = password::hash(&request.new_password) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let stored =
+        sqlx::query_scalar::<_, Vec<u8>>("SELECT password_hash FROM users WHERE id = $1::uuid")
+            .bind(user_id.to_string())
+            .fetch_optional(pool)
+            .await;
+    let Ok(Some(stored)) = stored else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    let Ok(hash) = String::from_utf8(stored) else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    if password::verify(&request.current_password, &hash).is_err() {
+        return StatusCode::UNAUTHORIZED;
+    }
+    if sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2::uuid")
+        .bind(new_hash.as_bytes())
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+    match session::revoke_others(pool, user_id, &token).await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+pub async fn revoke_other_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> StatusCode {
+    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+        return StatusCode::FORBIDDEN;
+    }
+    let (pool, token) = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    let user_id = match session::user_for(pool, &token, state.clock.now()).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return StatusCode::UNAUTHORIZED,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+    };
+    match session::revoke_others(pool, user_id, &token).await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+pub async fn revoke_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> StatusCode {
+    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+        return StatusCode::FORBIDDEN;
+    }
+    let Ok(session_id) = Uuid::parse_str(&session_id) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let (pool, token) = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    let user_id = match session::user_for(pool, &token, state.clock.now()).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return StatusCode::UNAUTHORIZED,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+    };
+    match session::revoke_id(pool, user_id, session_id).await {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+pub async fn delete_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<DeleteAccountRequest>,
+) -> StatusCode {
+    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+        return StatusCode::FORBIDDEN;
+    }
+    let (pool, token) = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    let user_id = match session::user_for(pool, &token, state.clock.now()).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return StatusCode::UNAUTHORIZED,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+    };
+    let stored =
+        sqlx::query_scalar::<_, Vec<u8>>("SELECT password_hash FROM users WHERE id = $1::uuid")
+            .bind(user_id.to_string())
+            .fetch_optional(pool)
+            .await;
+    let Ok(Some(stored)) = stored else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    let Ok(hash) = String::from_utf8(stored) else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    if password::verify(&request.password, &hash).is_err() {
+        return StatusCode::UNAUTHORIZED;
+    }
+    match session::delete_account(pool, user_id).await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+fn random_token() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+async fn send_activation_mail(
+    mailer: &dyn Mailer,
+    public_origin: &str,
+    email: &str,
+    token: &str,
+) -> Result<(), MailError> {
+    let origin = public_origin.trim_end_matches('/');
+    mailer
+        .send(MailMessage {
+            to: email.to_owned(),
+            subject: "Activate your Synapse account".to_owned(),
+            body: format!(
+                "Open this link to activate your account:\n{origin}/activate?token={token}\n"
+            ),
+        })
+        .await
 }

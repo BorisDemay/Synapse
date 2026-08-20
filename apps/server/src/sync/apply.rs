@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::blob::{BlobStore, CiphertextHash};
 
-pub const MAX_CIPHERTEXT_BYTES: usize = 1_048_576;
+pub const MAX_CIPHERTEXT_BYTES: usize = 10 * 1024 * 1024 + 256;
 const NONCE_BYTES: usize = 24;
 const MIN_CIPHERTEXT_BYTES: usize = 16;
 const PROTOCOL_VERSION: u8 = 1;
@@ -137,8 +137,13 @@ pub async fn apply(
         {
             return Err(ApplyError::RevisionMismatch);
         }
-        let base_hash =
-            revision_ciphertext_hash(&mut transaction, vault_id, operation.base_revision).await?;
+        // A zero base revision means "vault genesis": there is no previous
+        // revision row to reference, so the conflict reports a null hash.
+        let base_hash = if operation.base_revision == 0 {
+            Vec::new()
+        } else {
+            revision_ciphertext_hash(&mut transaction, vault_id, operation.base_revision).await?
+        };
         let remote_revision = u64::try_from(current_revision).map_err(|_| ApplyError::Database)?;
         let remote_hash =
             revision_ciphertext_hash(&mut transaction, vault_id, remote_revision).await?;
@@ -246,5 +251,8 @@ async fn revision_ciphertext_hash(
 }
 
 fn hex_hash(hash: &[u8]) -> String {
+    if hash.is_empty() {
+        return "00".repeat(32);
+    }
     hash.iter().map(|byte| format!("{byte:02x}")).collect()
 }

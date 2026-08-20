@@ -74,6 +74,7 @@ fn reconnect_consumes_bounded_exponential_jitter_before_acknowledging_the_outbox
         }
         Ok(PushAck {
             operation_id: operation_id.clone(),
+            revision: 1,
         })
     };
     let mut engine = SyncEngine::new(
@@ -115,6 +116,7 @@ fn a_mismatched_ack_keeps_the_operation_in_the_outbox() {
         fn push(&self, _: EncryptedPushOperation) -> Result<PushAck, TransportError> {
             Ok(PushAck {
                 operation_id: OperationId::new().to_string(),
+                revision: 1,
             })
         }
     }
@@ -230,6 +232,7 @@ impl DurableFakeServer {
             .entry(operation.operation_id.clone())
             .or_insert_with(|| PushAck {
                 operation_id: operation.operation_id,
+                revision: 1,
             })
             .clone()
     }
@@ -292,6 +295,7 @@ fn pull_network_failure_is_recoverable_and_exposes_pending_state() {
         fn push(&self, operation: EncryptedPushOperation) -> Result<PushAck, TransportError> {
             Ok(PushAck {
                 operation_id: operation.operation_id,
+                revision: 1,
             })
         }
 
@@ -332,6 +336,7 @@ fn concurrent_pull_conflict_preserves_the_local_file_and_exposes_conflict() {
         fn push(&self, operation: EncryptedPushOperation) -> Result<PushAck, TransportError> {
             Ok(PushAck {
                 operation_id: operation.operation_id,
+                revision: 1,
             })
         }
 
@@ -384,6 +389,7 @@ fn resnapshot_required_retries_pull_with_a_null_cursor_without_interpreting_it()
         fn push(&self, operation: EncryptedPushOperation) -> Result<PushAck, TransportError> {
             Ok(PushAck {
                 operation_id: operation.operation_id,
+                revision: 1,
             })
         }
 

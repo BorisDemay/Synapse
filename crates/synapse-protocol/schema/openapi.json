@@ -5,10 +5,12 @@
         "additionalProperties": false,
         "properties": {
           "base_ciphertext_hash": {
+            "description": "64 zeros when base_revision is 0 (no base ciphertext exists at genesis)",
             "pattern": "^[a-f0-9]{64}$"
           },
           "base_revision": {
-            "minimum": 1
+            "description": "0 means vault genesis: the conflicting operation was built offline before any pull, so no base revision exists",
+            "minimum": 0
           },
           "local_ciphertext_hash": {
             "pattern": "^[a-f0-9]{64}$"
@@ -53,7 +55,7 @@
             "type": "integer"
           },
           "base_revision": {
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "ciphertext": {

@@ -2,9 +2,21 @@ import { fileURLToPath, URL } from "node:url";
 
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: "../../packages/ui/node_modules/vditor/dist/**/*",
+          dest: "vendor/vditor",
+          rename: { stripBase: 4 },
+        },
+      ],
+    }),
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -23,7 +35,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: "127.0.0.1",
+    host: "localhost",
     port: 5173,
     proxy: {
       "/auth": "http://127.0.0.1:3000",

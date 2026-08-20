@@ -314,6 +314,71 @@ async fn owner_push_rejects_invalid_opaque_payloads_without_persisting_state() {
     }
 }
 
+#[tokio::test]
+async fn genesis_base_push_on_a_non_empty_vault_conflicts_with_a_null_base_hash() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+    let storage = TestStorage::new();
+    let app = synapse_server::router_with_blob_store(
+        Some(pool.clone()),
+        FilesystemBlobStore::open(&storage.path).expect("blob storage opens"),
+    );
+
+    let first_ciphertext = vec![77_u8; 16];
+    let first_hash = hex(Sha256::digest(&first_ciphertext));
+    let first = app
+        .clone()
+        .oneshot(push_request(
+            vault_id,
+            &session.cookie_value(),
+            uuid_v7(6),
+            Uuid::new_v4(),
+            &first_ciphertext,
+            &first_hash,
+        ))
+        .await
+        .expect("first response");
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let offline_ciphertext = vec![41_u8; 16];
+    let offline_hash = hex(Sha256::digest(&offline_ciphertext));
+    let conflict = app
+        .oneshot(push_request(
+            vault_id,
+            &session.cookie_value(),
+            uuid_v7(7),
+            Uuid::new_v4(),
+            &offline_ciphertext,
+            &offline_hash,
+        ))
+        .await
+        .expect("conflict response");
+
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    let body = conflict
+        .into_body()
+        .collect()
+        .await
+        .expect("conflict body is readable")
+        .to_bytes();
+    let body: serde_json::Value =
+        serde_json::from_slice(&body).expect("conflict body is valid json");
+    assert_eq!(body["base_revision"], 0);
+    assert_eq!(body["remote_revision"], 1);
+    assert_eq!(body["base_ciphertext_hash"], "00".repeat(32));
+    assert_eq!(body["local_ciphertext_hash"], offline_hash);
+    assert_eq!(body["remote_ciphertext_hash"], first_hash);
+}
+
 struct FailingBlobStore;
 
 impl synapse_server::blob::BlobStore for FailingBlobStore {

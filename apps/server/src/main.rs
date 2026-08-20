@@ -44,9 +44,17 @@ async fn main() -> Result<(), StartupError> {
             .await
             .map_err(|_| StartupError::Configuration)?;
     }
-    let listener = tokio::net::TcpListener::bind(config.bind_address())
+    synapse_server::auth::seed_dev_fixture_user(
+        &pool,
+        !synapse_server::http::security::is_production(),
+    )
+    .await
+    .map_err(|_| StartupError::Configuration)?;
+    let bind = config.bind_address();
+    let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|_| StartupError::Bind)?;
+    tracing::info!(%bind, "API listening");
 
     axum::serve(listener, router(Some(pool)))
         .await

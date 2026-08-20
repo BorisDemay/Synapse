@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host localhost",
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit",
@@ -15,10 +15,12 @@
   "dependencies": {
     "@noble/ciphers": "2.3.0",
     "@noble/hashes": "2.3.0",
+    "@primeuix/styles": "2.0.3",
     "@synapse/api-client": "workspace:*",
     "@synapse/ui": "workspace:*",
     "idb": "8.0.3",
     "pinia": "4.0.2",
+    "primevue": "^4.5.4",
     "vue": "3.5.13",
     "vue-router": "4.5.0"
   },

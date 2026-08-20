@@ -40,7 +40,9 @@ export async function registerAndUnlock(
       name: mode === "create" ? "Créer et déverrouiller" : "Déverrouiller",
     })
     .click();
-  await expect(page.getByRole("heading", { name: "Coffre" })).toBeVisible({
+  await expect(
+    page.getByRole("heading", { name: "Coffre", exact: true }),
+  ).toBeVisible({
     timeout: 30_000,
   });
 }

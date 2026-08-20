@@ -1,6 +1,6 @@
 # ADR 0003 — Les fichiers locaux sont canoniques
 
-- Statut : accepté
+- Statut : remplacé par ADR 0011
 - Date : 2026-08-08
 
 ## Contexte

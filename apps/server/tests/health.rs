@@ -53,6 +53,7 @@ async fn ready_health_returns_ok_after_migrations() {
         .connect("postgres://postgres@127.0.0.1:55432/synapse_test")
         .await
         .unwrap();
+    // Wipes synapse_test only. Interactive local accounts must use synapse_dev.
     sqlx::query("DROP SCHEMA public CASCADE")
         .execute(&pool)
         .await

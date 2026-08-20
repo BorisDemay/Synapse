@@ -6,6 +6,7 @@ import {
   parseWrappedVaultKey,
   unlockVaultKey,
   uuidV7,
+  wrapVaultKey,
 } from "./vault-key";
 
 const envelope = {
@@ -48,6 +49,21 @@ describe("vault key unlocking", () => {
       await createWrappedVaultKey("fresh passphrase");
     const unlocked = await unlockVaultKey(created, "fresh passphrase");
     expect(unlocked).toEqual(vaultKey);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("re-wraps an existing vault key under a new passphrase", async () => {
+    const { envelope, vaultKey } =
+      await createWrappedVaultKey("old passphrase");
+    const original = await unlockVaultKey(envelope, "old passphrase");
+    const rewrapped = await wrapVaultKey(original, "new passphrase");
+    const unlocked = await unlockVaultKey(rewrapped, "new passphrase");
+
+    expect(unlocked).toEqual(vaultKey);
+    await expect(unlockVaultKey(rewrapped, "old passphrase")).rejects.toThrow(
+      "Unable to unlock vault",
+    );
+    expect(JSON.stringify(rewrapped)).not.toContain("new passphrase");
     expect(localStorage.length).toBe(0);
   });
 

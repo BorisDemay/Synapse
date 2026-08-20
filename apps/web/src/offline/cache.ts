@@ -1,13 +1,27 @@
 import {
+  assistantConversationsKey,
+  assistantCredentialKey,
   envelopeKey,
   metaKey,
   noteKey,
   openOfflineDb,
   resetOfflineDbHandle,
+  revisionKey,
+  type CachedAssistantCredentialRecord,
+  type CachedAssistantConversationsRecord,
   type CachedNoteRecord,
+  type CachedRevisionRecord,
+  trustedDeviceKey,
+  type TrustedDeviceRecord,
 } from "./db";
 
-export type { CachedNoteRecord };
+export type {
+  CachedAssistantCredentialRecord,
+  CachedAssistantConversationsRecord,
+  CachedNoteRecord,
+  CachedRevisionRecord,
+  TrustedDeviceRecord,
+};
 
 export { openOfflineDb, resetOfflineDbHandle };
 
@@ -55,6 +69,94 @@ export async function getCachedEnvelope(
   const db = await openOfflineDb();
   const row = await db.get("envelopes", envelopeKey(userId, vaultId));
   return row?.bytes ?? null;
+}
+
+export async function putTrustedDevice(
+  record: TrustedDeviceRecord,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.put(
+    "trusted_devices",
+    record,
+    trustedDeviceKey(record.userId, record.vaultId),
+  );
+}
+
+export async function getTrustedDevice(
+  userId: string,
+  vaultId: string,
+): Promise<TrustedDeviceRecord | null> {
+  const db = await openOfflineDb();
+  const records = await db.getAll("trusted_devices");
+  return (
+    records.find(
+      (record) => record.userId === userId && record.vaultId === vaultId,
+    ) ?? null
+  );
+}
+
+export async function deleteTrustedDevice(
+  record: TrustedDeviceRecord,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.delete(
+    "trusted_devices",
+    trustedDeviceKey(record.userId, record.vaultId),
+  );
+}
+
+export async function putAssistantCredential(
+  record: CachedAssistantCredentialRecord,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.put(
+    "ai_credentials",
+    record,
+    assistantCredentialKey(record.userId, record.vaultId),
+  );
+}
+
+export async function getAssistantCredential(
+  userId: string,
+  vaultId: string,
+): Promise<CachedAssistantCredentialRecord | null> {
+  const db = await openOfflineDb();
+  return (
+    (await db.get("ai_credentials", assistantCredentialKey(userId, vaultId))) ??
+    null
+  );
+}
+
+export async function deleteAssistantCredential(
+  userId: string,
+  vaultId: string,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.delete("ai_credentials", assistantCredentialKey(userId, vaultId));
+}
+
+export async function putAssistantConversations(
+  record: CachedAssistantConversationsRecord,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.put(
+    "ai_conversations",
+    record,
+    assistantConversationsKey(record.userId, record.vaultId),
+  );
+}
+
+export async function getAssistantConversations(
+  userId: string,
+  vaultId: string,
+): Promise<CachedAssistantConversationsRecord | null> {
+  const db = await openOfflineDb();
+  return (
+    (await db.get(
+      "ai_conversations",
+      assistantConversationsKey(userId, vaultId),
+    )) ?? null
+  );
 }
 
 export async function listCachedVaultIds(userId: string): Promise<string[]> {
@@ -135,11 +237,66 @@ export async function clearRememberedSession(): Promise<void> {
   );
 }
 
+export async function putNoteRevision(
+  record: CachedRevisionRecord,
+): Promise<void> {
+  const db = await openOfflineDb();
+  const key = revisionKey(
+    record.userId,
+    record.vaultId,
+    record.noteId,
+    record.revision,
+  );
+  await db.put("note_revisions", record, key);
+  const all = (await db.getAll("note_revisions"))
+    .filter(
+      (row) =>
+        row.userId === record.userId &&
+        row.vaultId === record.vaultId &&
+        row.noteId === record.noteId,
+    )
+    .sort((left, right) => right.revision - left.revision);
+  await Promise.all(
+    all
+      .slice(50)
+      .map((row) =>
+        db.delete(
+          "note_revisions",
+          revisionKey(row.userId, row.vaultId, row.noteId, row.revision),
+        ),
+      ),
+  );
+}
+
+export async function listNoteRevisions(
+  userId: string,
+  vaultId: string,
+  noteId: string,
+): Promise<CachedRevisionRecord[]> {
+  const db = await openOfflineDb();
+  const all = await db.getAll("note_revisions");
+  return all
+    .filter(
+      (row) =>
+        row.userId === userId &&
+        row.vaultId === vaultId &&
+        row.noteId === noteId,
+    )
+    .sort((left, right) => right.revision - left.revision);
+}
+
 export async function clearUserOfflineData(userId: string): Promise<void> {
   const db = await openOfflineDb();
   const prefix = `${userId}:`;
 
-  for (const store of ["notes", "envelopes"] as const) {
+  for (const store of [
+    "notes",
+    "envelopes",
+    "trusted_devices",
+    "ai_credentials",
+    "ai_conversations",
+    "note_revisions",
+  ] as const) {
     const keys = await db.getAllKeys(store);
     await Promise.all(
       keys

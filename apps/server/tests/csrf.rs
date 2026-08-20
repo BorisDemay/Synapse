@@ -5,7 +5,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use sqlx::postgres::PgPoolOptions;
-use synapse_server::{RouterSettings, auth::session::SystemClock};
+use synapse_server::{RouterSettings, auth::mail::RecordingMailer, auth::session::SystemClock};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -20,6 +20,7 @@ async fn cookie_authenticated_mutations_require_the_allowlisted_origin() {
     synapse_server::run_migrations(&pool).await.unwrap();
 
     let email = format!("csrf-{}@example.test", Uuid::new_v4());
+    let mailer = Arc::new(RecordingMailer::default());
     let app = synapse_server::router_with_settings(RouterSettings {
         allow_public_signup: true,
         blob_store: None,
@@ -27,7 +28,9 @@ async fn cookie_authenticated_mutations_require_the_allowlisted_origin() {
         cookie_secure: false,
         csrf_origin: "https://synapse.local".to_owned(),
         enable_hsts: false,
+        mailer: mailer.clone(),
         pool: Some(pool),
+        public_origin: "https://synapse.local".to_owned(),
     });
     let signup = app
         .clone()
@@ -48,6 +51,20 @@ async fn cookie_authenticated_mutations_require_the_allowlisted_origin() {
         "signup status {}",
         signup.status()
     );
+    let token = mailer.activation_token().expect("activation mail");
+    let activated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/activate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(r#"{{"token":"{token}"}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(activated.status(), StatusCode::NO_CONTENT);
 
     let login = app
         .clone()
@@ -107,6 +124,7 @@ async fn cookie_authenticated_mutations_require_the_allowlisted_origin() {
 }
 
 async fn reset_schema(pool: &sqlx::PgPool) {
+    // Wipes synapse_test only. Interactive local accounts must use synapse_dev.
     sqlx::query("DROP SCHEMA public CASCADE")
         .execute(pool)
         .await

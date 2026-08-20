@@ -3,15 +3,23 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   clearUserOfflineData,
+  deleteAssistantCredential,
+  getAssistantCredential,
+  getAssistantConversations,
   getCachedEnvelope,
   getCachedHeadRevision,
+  getTrustedDevice,
   listCachedNotes,
   openOfflineDb,
+  putAssistantCredential,
+  putAssistantConversations,
   putCachedEnvelope,
   putCachedNote,
+  putTrustedDevice,
   resetOfflineDbHandle,
   setCachedHeadRevision,
   setCachedPullCursor,
+  deleteTrustedDevice,
 } from "./cache";
 
 const userId = "0198e5de-user-7000-8000-000000000001";
@@ -48,6 +56,7 @@ describe("offline cache", () => {
 
     const db = await openOfflineDb();
     const dumped = JSON.stringify({
+      ai_credentials: await db.getAll("ai_credentials"),
       envelopes: await db.getAll("envelopes"),
       meta: await db.getAll("meta"),
       notes: await db.getAll("notes"),
@@ -69,5 +78,77 @@ describe("offline cache", () => {
     });
     await clearUserOfflineData("0198e5de-other-7000-8000-000000000099");
     expect(await listCachedNotes(userId, vaultId)).toHaveLength(1);
+  });
+
+  it("stores and removes trusted device envelopes without plaintext keys", async () => {
+    const wrappingKey = await crypto.subtle.generateKey(
+      { length: 256, name: "AES-GCM" },
+      false,
+      ["encrypt", "decrypt"],
+    );
+    const record = {
+      ciphertext: [9, 8, 7],
+      iv: Array.from({ length: 12 }, () => 1),
+      userId,
+      vaultId,
+      wrappingKey,
+    };
+
+    await putTrustedDevice(record);
+    const stored = await getTrustedDevice(userId, vaultId);
+    expect(stored?.ciphertext).toEqual(record.ciphertext);
+    expect(stored?.iv).toEqual(record.iv);
+    expect(stored?.wrappingKey.extractable).toBe(false);
+
+    const db = await openOfflineDb();
+    expect(JSON.stringify(await db.getAll("trusted_devices"))).not.toContain(
+      "Secret offline",
+    );
+
+    await deleteTrustedDevice(record);
+    expect(await getTrustedDevice(userId, vaultId)).toBeNull();
+  });
+
+  it("stores assistant credentials as ciphertext only", async () => {
+    const token = "sk-live-super-secret";
+    await putAssistantCredential({
+      ciphertext: [3, 1, 4],
+      nonce: Array.from({ length: 24 }, (_, index) => index),
+      provider: "codex",
+      userId,
+      vaultId,
+    });
+
+    const stored = await getAssistantCredential(userId, vaultId);
+    expect(stored?.ciphertext).toEqual([3, 1, 4]);
+    expect(stored?.provider).toBe("codex");
+
+    const db = await openOfflineDb();
+    const dumped = JSON.stringify(await db.getAll("ai_credentials"));
+    expect(dumped).not.toContain(token);
+    expect(dumped).not.toContain("Secret offline");
+
+    await deleteAssistantCredential(userId, vaultId);
+    expect(await getAssistantCredential(userId, vaultId)).toBeNull();
+  });
+
+  it("stores assistant conversations as ciphertext only and clears them by user", async () => {
+    await putAssistantConversations({
+      ciphertext: [7, 2, 9],
+      nonce: Array.from({ length: 24 }, (_, index) => index),
+      userId,
+      vaultId,
+    });
+
+    expect(
+      (await getAssistantConversations(userId, vaultId))?.ciphertext,
+    ).toEqual([7, 2, 9]);
+    const db = await openOfflineDb();
+    expect(JSON.stringify(await db.getAll("ai_conversations"))).not.toContain(
+      "Secret offline",
+    );
+
+    await clearUserOfflineData(userId);
+    expect(await getAssistantConversations(userId, vaultId)).toBeNull();
   });
 });

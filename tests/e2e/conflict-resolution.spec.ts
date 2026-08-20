@@ -54,7 +54,7 @@ test("two offline contexts resolve a concurrent note conflict", async ({
   pageA.once("dialog", (dialog) => dialog.accept());
   await pageA.getByRole("button", { name: "Garder la version locale" }).click();
   await expectSynced(pageA);
-  await expect(pageA.getByLabel("Aperçu Markdown")).toContainText("local branch");
+  await expect(pageA.getByLabel("Éditeur Markdown")).toContainText("local branch");
 
   await contextA.close();
   await contextB.close();

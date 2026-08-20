@@ -13,7 +13,14 @@ fn migration_creates_operation_queue() {
 fn migration_creates_local_index_tables() {
     let store = LocalStore::open_in_memory().unwrap();
 
-    for table in ["notes", "links", "revisions", "sync_cursors", "notes_fts"] {
+    for table in [
+        "notes",
+        "links",
+        "revisions",
+        "sync_cursors",
+        "notes_fts",
+        "kv",
+    ] {
         assert!(store.has_table(table).unwrap(), "missing table {table}");
     }
 }
@@ -89,6 +96,112 @@ fn enqueue_operation_persists_it_until_acknowledged() {
     store.enqueue_operation(&operation).unwrap();
 
     assert_eq!(store.pending_operation_count().unwrap(), 1);
+}
+
+#[test]
+fn saving_a_note_replaces_its_superseded_outbox_operation() {
+    let mut store = LocalStore::open_in_memory().unwrap();
+    let note_id = NoteId::new();
+    let path = VaultPath::parse("notes/draft.md").unwrap();
+    let first = PendingOperation {
+        operation_id: OperationId::new(),
+        note_id: note_id.clone(),
+        base_revision: Revision::new(1).unwrap(),
+        payload: b"first-ciphertext".to_vec(),
+        created_at: 1,
+    };
+    let second = PendingOperation {
+        operation_id: OperationId::new(),
+        note_id: note_id.clone(),
+        base_revision: Revision::new(1).unwrap(),
+        payload: b"latest-ciphertext".to_vec(),
+        created_at: 2,
+    };
+
+    for (content, operation, updated_at) in [("# First", &first, 1), ("# Latest", &second, 2)] {
+        store
+            .persist_note_and_operation(
+                &IndexedNote {
+                    note_id: note_id.clone(),
+                    path: path.clone(),
+                    content: content.to_owned(),
+                    content_hash: ContentHash::from_bytes(content.as_bytes()),
+                    revision: Revision::new(1).unwrap(),
+                    updated_at,
+                },
+                &[],
+                &[],
+                operation,
+            )
+            .unwrap();
+    }
+
+    assert_eq!(store.pending_operation_count().unwrap(), 1);
+    assert_eq!(
+        store.pending_operation_payloads().unwrap(),
+        [b"latest-ciphertext".to_vec()]
+    );
+}
+
+#[test]
+fn compaction_keeps_only_the_latest_legacy_outbox_entry_per_note() {
+    let store = LocalStore::open_in_memory().unwrap();
+    let note_id = NoteId::new();
+    let older = PendingOperation {
+        operation_id: OperationId::new(),
+        note_id: note_id.clone(),
+        base_revision: Revision::new(1).unwrap(),
+        payload: b"older-ciphertext".to_vec(),
+        created_at: 1,
+    };
+    let newer = PendingOperation {
+        operation_id: OperationId::new(),
+        note_id,
+        base_revision: Revision::new(1).unwrap(),
+        payload: b"newer-ciphertext".to_vec(),
+        created_at: 2,
+    };
+
+    store.enqueue_operation(&older).unwrap();
+    store.enqueue_operation(&newer).unwrap();
+    store.retain_latest_pending_operation_per_note().unwrap();
+
+    assert_eq!(store.pending_operation_count().unwrap(), 1);
+    assert_eq!(
+        store.pending_operation_payloads().unwrap(),
+        [b"newer-ciphertext".to_vec()]
+    );
+}
+
+#[test]
+fn replacing_a_rejected_operation_keeps_the_rebased_entry_pending() {
+    let mut store = LocalStore::open_in_memory().unwrap();
+    let note_id = NoteId::new();
+    let rejected = PendingOperation {
+        operation_id: OperationId::new(),
+        note_id: note_id.clone(),
+        base_revision: Revision::new(1).unwrap(),
+        payload: b"rejected-ciphertext".to_vec(),
+        created_at: 1,
+    };
+    let rebased = PendingOperation {
+        operation_id: OperationId::new(),
+        note_id,
+        base_revision: Revision::new(2).unwrap(),
+        payload: b"rebased-ciphertext".to_vec(),
+        created_at: 2,
+    };
+
+    store.enqueue_operation(&rejected).unwrap();
+    store
+        .replace_pending_operation(&rejected.operation_id.to_string(), &rebased)
+        .unwrap();
+
+    assert_eq!(store.pending_operation_count().unwrap(), 1);
+    assert_eq!(
+        store.pending_operation_payloads().unwrap(),
+        [b"rebased-ciphertext".to_vec()]
+    );
 }
 
 #[test]

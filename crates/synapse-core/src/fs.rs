@@ -23,7 +23,7 @@ pub(super) async fn write_atomically(
         Err(error) => return Err(VaultError::Io(error)),
     }
 
-    let temporary = write_temporary(&destination, content).await?;
+    let temporary = write_temporary(&destination, content.as_bytes()).await?;
     match tokio::fs::hard_link(&temporary, &destination).await {
         Ok(()) => tokio::fs::remove_file(temporary)
             .await
@@ -53,10 +53,66 @@ pub(super) async fn replace_if_unchanged(
         return Err(VaultError::ContentChanged);
     }
 
+    let temporary = write_temporary(&destination, content.as_bytes()).await?;
+    tokio::fs::rename(temporary, destination)
+        .await
+        .map_err(VaultError::Io)
+}
+
+pub(super) async fn write_bytes_atomically(
+    root: &Path,
+    relative_path: &str,
+    content: &[u8],
+) -> VaultResult<()> {
+    let destination = prepare_destination(root, relative_path).await?;
+    match tokio::fs::symlink_metadata(&destination).await {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(VaultError::PathEscapesVault);
+        }
+        Ok(_) => return Err(VaultError::AlreadyExists),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(VaultError::Io(error)),
+    }
+
+    let temporary = write_temporary(&destination, content).await?;
+    match tokio::fs::hard_link(&temporary, &destination).await {
+        Ok(()) => tokio::fs::remove_file(temporary)
+            .await
+            .map_err(VaultError::Io),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = tokio::fs::remove_file(temporary).await;
+            Err(VaultError::AlreadyExists)
+        }
+        Err(error) => {
+            let _ = tokio::fs::remove_file(temporary).await;
+            Err(VaultError::Io(error))
+        }
+    }
+}
+
+pub(super) async fn replace_bytes_if_unchanged(
+    root: &Path,
+    relative_path: &str,
+    expected_hash: &ContentHash,
+    content: &[u8],
+) -> VaultResult<()> {
+    let destination = resolve_existing_file(root, relative_path).await?;
+    let existing = tokio::fs::read(&destination)
+        .await
+        .map_err(VaultError::Io)?;
+    if ContentHash::from_bytes(&existing) != *expected_hash {
+        return Err(VaultError::ContentChanged);
+    }
+
     let temporary = write_temporary(&destination, content).await?;
     tokio::fs::rename(temporary, destination)
         .await
         .map_err(VaultError::Io)
+}
+
+pub(super) async fn read_bytes(root: &Path, relative_path: &str) -> VaultResult<Vec<u8>> {
+    let path = resolve_existing_file(root, relative_path).await?;
+    tokio::fs::read(path).await.map_err(VaultError::Io)
 }
 
 pub(super) async fn read_note(root: &Path, relative_path: &str) -> VaultResult<String> {
@@ -154,7 +210,7 @@ fn temporary_path(destination: &Path) -> PathBuf {
     destination.with_file_name(format!(".{file_name}.{}.synapse-tmp", Uuid::now_v7()))
 }
 
-async fn write_temporary(destination: &Path, content: &str) -> VaultResult<PathBuf> {
+async fn write_temporary(destination: &Path, content: &[u8]) -> VaultResult<PathBuf> {
     let temporary = temporary_path(destination);
     let mut file = tokio::fs::OpenOptions::new()
         .create_new(true)
@@ -162,9 +218,7 @@ async fn write_temporary(destination: &Path, content: &str) -> VaultResult<PathB
         .open(&temporary)
         .await
         .map_err(VaultError::Io)?;
-    file.write_all(content.as_bytes())
-        .await
-        .map_err(VaultError::Io)?;
+    file.write_all(content).await.map_err(VaultError::Io)?;
     file.sync_all().await.map_err(VaultError::Io)?;
     Ok(temporary)
 }

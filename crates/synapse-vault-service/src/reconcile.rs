@@ -7,6 +7,6 @@ impl VaultOrchestrator {
         &mut self,
         mutation: &VaultMutation,
     ) -> VaultOrchestratorResult<()> {
-        self.persist_existing_file(mutation).await
+        self.index_encrypted_mutation(mutation)
     }
 }

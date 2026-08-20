@@ -35,7 +35,7 @@ fn persist_note_and_operation_commits_index_revision_links_and_opaque_outbox_tog
     let operation = pending_operation(note_id.clone(), 1);
 
     store
-        .persist_note_and_operation(&note, &["Roadmap".to_owned()], &operation)
+        .persist_note_and_operation(&note, &["Roadmap".to_owned()], &[], &operation)
         .expect("single SQLite transaction commits");
 
     assert_eq!(
@@ -57,7 +57,12 @@ fn persist_note_and_operation_rolls_back_every_table_when_link_insert_fails() {
     let original = indexed_note(note_id.clone(), "notes/rollback.md", "# Original", 1);
     let original_operation = pending_operation(note_id.clone(), 1);
     store
-        .persist_note_and_operation(&original, &["Original".to_owned()], &original_operation)
+        .persist_note_and_operation(
+            &original,
+            &["Original".to_owned()],
+            &[],
+            &original_operation,
+        )
         .expect("original state persists");
 
     let replacement = indexed_note(note_id.clone(), "notes/rollback.md", "# Replacement", 2);
@@ -68,6 +73,7 @@ fn persist_note_and_operation_rolls_back_every_table_when_link_insert_fails() {
             .persist_note_and_operation(
                 &replacement,
                 &["Duplicate".to_owned(), "Duplicate".to_owned()],
+                &[],
                 &replacement_operation,
             )
             .is_err()

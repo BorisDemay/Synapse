@@ -15,7 +15,9 @@ fn test_router(csrf_origin: &str, enable_hsts: bool) -> axum::Router {
         cookie_secure: true,
         csrf_origin: csrf_origin.to_owned(),
         enable_hsts,
+        mailer: Arc::new(synapse_server::auth::mail::RecordingMailer::default()),
         pool: None,
+        public_origin: csrf_origin.to_owned(),
     })
 }
 

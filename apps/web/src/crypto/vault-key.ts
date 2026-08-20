@@ -44,14 +44,15 @@ export function encodeWrappedVaultKey(envelope: WrappedVaultKey): number[] {
   );
 }
 
-export async function createWrappedVaultKey(passphrase: string): Promise<{
-  envelope: WrappedVaultKey;
-  vaultKey: Uint8Array;
-}> {
-  const vaultKey = new Uint8Array(32);
+export async function wrapVaultKey(
+  vaultKey: Uint8Array,
+  passphrase: string,
+): Promise<WrappedVaultKey> {
+  if (vaultKey.length !== 32) {
+    throw new Error("Invalid vault key");
+  }
   const salt = new Uint8Array(16);
   const nonce = new Uint8Array(24);
-  crypto.getRandomValues(vaultKey);
   crypto.getRandomValues(salt);
   crypto.getRandomValues(nonce);
 
@@ -67,16 +68,23 @@ export async function createWrappedVaultKey(passphrase: string): Promise<{
       ENVELOPE_AAD,
     ).encrypt(vaultKey);
     return {
-      envelope: {
-        ciphertext: Array.from(ciphertext),
-        nonce: Array.from(nonce),
-        salt: Array.from(salt),
-      },
-      vaultKey,
+      ciphertext: Array.from(ciphertext),
+      nonce: Array.from(nonce),
+      salt: Array.from(salt),
     };
   } finally {
     wrappingKey.fill(0);
   }
+}
+
+export async function createWrappedVaultKey(passphrase: string): Promise<{
+  envelope: WrappedVaultKey;
+  vaultKey: Uint8Array;
+}> {
+  const vaultKey = new Uint8Array(32);
+  crypto.getRandomValues(vaultKey);
+  const envelope = await wrapVaultKey(vaultKey, passphrase);
+  return { envelope, vaultKey };
 }
 
 export async function unlockVaultKey(

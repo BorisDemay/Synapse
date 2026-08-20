@@ -7,7 +7,11 @@ pub mod repository;
 pub mod sync;
 pub mod telemetry;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use axum::{
     Router,
@@ -15,9 +19,35 @@ use axum::{
     routing::{get, post},
 };
 use sqlx::PgPool;
-use tower_governor::{
-    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor,
-};
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::KeyExtractor};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ClientKeyExtractor;
+
+impl KeyExtractor for ClientKeyExtractor {
+    type Key = String;
+
+    fn extract<T>(
+        &self,
+        request: &axum::http::Request<T>,
+    ) -> Result<Self::Key, tower_governor::GovernorError> {
+        Ok(request
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .and_then(|value| value.parse::<IpAddr>().ok())
+            .map(|value| value.to_string())
+            .or_else(|| {
+                request
+                    .extensions()
+                    .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                    .map(|info| info.0.ip().to_string())
+            })
+            .unwrap_or_else(|| "unknown-client".to_owned()))
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,6 +58,8 @@ pub struct AppState {
     pub(crate) csrf_origin: String,
     pub(crate) enable_hsts: bool,
     pub(crate) clock: Arc<dyn auth::session::Clock>,
+    pub(crate) mailer: Arc<dyn auth::mail::Mailer>,
+    pub(crate) public_origin: String,
     pub(crate) notifications: http::ws::NotificationHub,
 }
 
@@ -73,7 +105,10 @@ fn router_with_clock_and_blob_store(
         csrf_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
             .unwrap_or_else(|_| "https://synapse.local".to_owned()),
         enable_hsts: http::security::is_production(),
+        mailer: auth::mail::mailer_from_env(),
         pool,
+        public_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
+            .unwrap_or_else(|_| "https://synapse.local".to_owned()),
     })
 }
 
@@ -84,7 +119,9 @@ pub struct RouterSettings {
     pub cookie_secure: bool,
     pub csrf_origin: String,
     pub enable_hsts: bool,
+    pub mailer: Arc<dyn auth::mail::Mailer>,
     pub pool: Option<PgPool>,
+    pub public_origin: String,
 }
 
 pub fn router_with_settings(settings: RouterSettings) -> Router {
@@ -96,25 +133,43 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
         csrf_origin: settings.csrf_origin,
         enable_hsts: settings.enable_hsts,
         clock: settings.clock,
+        mailer: settings.mailer,
+        public_origin: settings.public_origin,
         notifications: http::ws::NotificationHub::new(),
     };
 
-    let mut rate_limit_config = GovernorConfigBuilder::default().key_extractor(GlobalKeyExtractor);
+    let mut rate_limit_config = GovernorConfigBuilder::default().key_extractor(ClientKeyExtractor);
     rate_limit_config.per_second(1).burst_size(5);
     let rate_limit_config = rate_limit_config
         .finish()
         .expect("a non-zero auth rate limit configuration is valid");
 
     let auth_routes = Router::new()
-        .route("/signup", post(http::auth::signup))
-        .route("/login", post(http::auth::login))
-        .layer(GovernorLayer::new(rate_limit_config));
+        .route("/signup", get(http::auth::signup_status))
+        .merge(
+            Router::new()
+                .route("/signup", post(http::auth::signup))
+                .route("/login", post(http::auth::login))
+                .route("/activate", post(http::auth::activate))
+                .route("/password", post(http::auth::change_password))
+                .route("/account/delete", post(http::auth::delete_account))
+                .layer(GovernorLayer::new(rate_limit_config)),
+        );
 
     Router::new()
         .route("/health/live", get(http::health::live))
         .route("/health/ready", get(http::health::ready))
         .route("/metrics", get(metrics::render))
         .route("/auth/logout", post(http::auth::logout))
+        .route("/auth/sessions", get(http::auth::list_sessions))
+        .route(
+            "/auth/sessions/revoke-others",
+            post(http::auth::revoke_other_sessions),
+        )
+        .route(
+            "/auth/sessions/{session_id}/revoke",
+            post(http::auth::revoke_session),
+        )
         .route("/v1/session", get(http::auth::session_info))
         .route("/vaults", post(http::vaults::create))
         .route("/vaults/{vault_id}", get(http::vaults::read))
@@ -171,6 +226,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .map(|_| ())?;
     sqlx::raw_sql(include_str!(
         "../../../migrations/0005_vault_user_envelopes.sql"
+    ))
+    .execute(pool)
+    .await
+    .map(|_| ())?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0006_account_activation.sql"
     ))
     .execute(pool)
     .await

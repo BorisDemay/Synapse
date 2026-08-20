@@ -21,7 +21,7 @@ use crate::{
     },
 };
 
-pub const MAX_REQUEST_BYTES: usize = apply::MAX_CIPHERTEXT_BYTES + 16_384;
+pub const MAX_REQUEST_BYTES: usize = apply::MAX_CIPHERTEXT_BYTES * 5 + 32_768;
 
 #[derive(Serialize)]
 pub struct PushAckResponse {

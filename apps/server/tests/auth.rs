@@ -11,6 +11,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use http_body_util::BodyExt;
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
+use synapse_server::auth::mail::RecordingMailer;
 use synapse_server::auth::session::Clock;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -42,6 +43,35 @@ async fn auth_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 #[tokio::test]
+async fn signup_status_reports_whether_public_signup_is_enabled() {
+    async fn public_signup_flag(allow_public_signup: bool) -> serde_json::Value {
+        let mut settings = test_settings(None, Arc::new(RecordingMailer::default()));
+        settings.allow_public_signup = allow_public_signup;
+        let response = synapse_server::router_with_settings(settings)
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/signup")
+                    .body(Body::empty())
+                    .expect("the request is valid"),
+            )
+            .await
+            .expect("the router responds");
+        assert_eq!(response.status(), StatusCode::OK);
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+            .expect("signup status is json")
+    }
+
+    assert_eq!(
+        public_signup_flag(false).await,
+        serde_json::json!({ "public_signup": false })
+    );
+    assert_eq!(
+        public_signup_flag(true).await,
+        serde_json::json!({ "public_signup": true })
+    );
+}
+
+#[tokio::test]
 async fn signup_rejects_malformed_json() {
     let response = synapse_server::router(None)
         .oneshot(
@@ -58,6 +88,258 @@ async fn signup_rejects_malformed_json() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn signup_rejects_an_invitation_when_the_email_does_not_match() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let invite_token = "email-bound-invitation";
+    sqlx::query("INSERT INTO invites (id, email, token_hash, expires_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP + INTERVAL '1 hour')")
+        .bind(Uuid::new_v4().to_string())
+        .bind("invited@example.test")
+        .bind(Sha256::digest(invite_token.as_bytes()).to_vec())
+        .execute(&pool)
+        .await
+        .expect("invitation is stored");
+
+    let app = synapse_server::router(Some(pool.clone()));
+    let mismatched = request_json(
+        "/auth/signup",
+        r#"{"email":"other@example.test","password":"a secure password","invitation_token":"email-bound-invitation"}"#,
+    );
+    assert_eq!(
+        app.oneshot(mismatched).await.expect("response").status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .expect("user count"),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM invites WHERE accepted_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("invitation remains unused"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn signup_requires_matching_email_activation_before_login() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let invite_token = "matching-invitation";
+    sqlx::query("INSERT INTO invites (id, email, token_hash, expires_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP + INTERVAL '1 hour')")
+        .bind(Uuid::new_v4().to_string())
+        .bind("invited@example.test")
+        .bind(Sha256::digest(invite_token.as_bytes()).to_vec())
+        .execute(&pool)
+        .await
+        .expect("invitation is stored");
+    let mailer = Arc::new(RecordingMailer::default());
+    let app =
+        synapse_server::router_with_settings(test_settings(Some(pool.clone()), mailer.clone()));
+
+    let signup = request_json(
+        "/auth/signup",
+        r#"{"email":"invited@example.test","password":"a secure password","invitation_token":"matching-invitation"}"#,
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(signup)
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::CREATED
+    );
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT activated_at IS NULL FROM users")
+            .fetch_one(&pool)
+            .await
+            .expect("activation flag")
+    );
+
+    let login_before = request_json(
+        "/auth/login",
+        r#"{"email":"invited@example.test","password":"a secure password"}"#,
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(login_before)
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    let messages = mailer.messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].to, "invited@example.test");
+    assert!(!messages[0].body.contains("a secure password"));
+    let token = mailer
+        .activation_token()
+        .expect("activation token is mailed");
+    assert!(
+        messages[0]
+            .body
+            .contains(&format!("https://synapse.local/activate?token={token}"))
+    );
+
+    let invalid = request_json("/auth/activate", r#"{"token":"not-the-token"}"#);
+    assert_eq!(
+        app.clone()
+            .oneshot(invalid)
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let activate = dynamic_json("/auth/activate", &format!(r#"{{"token":"{token}"}}"#));
+    assert_eq!(
+        app.clone()
+            .oneshot(activate)
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let reused = dynamic_json("/auth/activate", &format!(r#"{{"token":"{token}"}}"#));
+    assert_eq!(
+        app.clone()
+            .oneshot(reused)
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let login = request_json(
+        "/auth/login",
+        r#"{"email":"invited@example.test","password":"a secure password"}"#,
+    );
+    assert_eq!(
+        app.oneshot(login).await.expect("response").status(),
+        StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
+async fn public_signup_also_requires_activation_before_login() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let mailer = Arc::new(RecordingMailer::default());
+    let mut settings = test_settings(Some(pool.clone()), mailer.clone());
+    settings.allow_public_signup = true;
+    let app = synapse_server::router_with_settings(settings);
+
+    assert_eq!(
+        app.clone()
+            .oneshot(request_json(
+                "/auth/signup",
+                r#"{"email":"public@example.test","password":"a secure password"}"#,
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request_json(
+                "/auth/login",
+                r#"{"email":"public@example.test","password":"a secure password"}"#,
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let token = mailer
+        .activation_token()
+        .expect("activation token is mailed");
+    assert_eq!(
+        app.clone()
+            .oneshot(dynamic_json(
+                "/auth/activate",
+                &format!(r#"{{"token":"{token}"}}"#),
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"public@example.test","password":"a secure password"}"#,
+        ))
+        .await
+        .expect("response")
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
+async fn expired_activation_token_cannot_unlock_the_account() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let mailer = Arc::new(RecordingMailer::default());
+    let mut settings = test_settings(Some(pool.clone()), mailer.clone());
+    settings.allow_public_signup = true;
+    let app = synapse_server::router_with_settings(settings);
+
+    assert_eq!(
+        app.clone()
+            .oneshot(request_json(
+                "/auth/signup",
+                r#"{"email":"late@example.test","password":"a secure password"}"#,
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::CREATED
+    );
+    sqlx::query(
+        "UPDATE account_activations SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'",
+    )
+    .execute(&pool)
+    .await
+    .expect("token expires");
+    let token = mailer
+        .activation_token()
+        .expect("activation token is mailed");
+    assert_eq!(
+        app.clone()
+            .oneshot(dynamic_json(
+                "/auth/activate",
+                &format!(r#"{{"token":"{token}"}}"#),
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"late@example.test","password":"a secure password"}"#,
+        ))
+        .await
+        .expect("response")
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
 #[test]
 fn password_hash_is_argon2id_salted_and_verifiable() {
     let first =
@@ -70,6 +352,103 @@ fn password_hash_is_argon2id_salted_and_verifiable() {
     assert_ne!(first, second);
     assert!(synapse_server::auth::password::verify("a secure password", &first).is_ok());
     assert!(synapse_server::auth::password::verify("wrong password", &first).is_err());
+}
+
+#[tokio::test]
+async fn development_fixture_user_can_log_in_without_mail_or_password_policy() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    synapse_server::auth::seed_dev_fixture_user(&pool, false)
+        .await
+        .expect("disabled fixture seed is a no-op");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE email = $1")
+            .bind(synapse_server::auth::DEV_FIXTURE_LOGIN)
+            .fetch_one(&pool)
+            .await
+            .expect("count"),
+        0
+    );
+
+    let stale_hash = synapse_server::auth::password::hash("an old password")
+        .expect("stale fixture password is valid");
+    sqlx::query(
+        "INSERT INTO users (id, email, password_hash, is_admin, activated_at) \
+         VALUES ($1::uuid, $2, $3, FALSE, NULL)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(synapse_server::auth::DEV_FIXTURE_LOGIN)
+    .bind(stale_hash.as_bytes())
+    .execute(&pool)
+    .await
+    .expect("stale fixture user is created");
+
+    synapse_server::auth::seed_dev_fixture_user(&pool, true)
+        .await
+        .expect("fixture user is created");
+    synapse_server::auth::seed_dev_fixture_user(&pool, true)
+        .await
+        .expect("fixture user is idempotent");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE email = $1")
+            .bind(synapse_server::auth::DEV_FIXTURE_LOGIN)
+            .fetch_one(&pool)
+            .await
+            .expect("count"),
+        1
+    );
+    assert!(
+        sqlx::query_scalar::<_, bool>(
+            "SELECT activated_at IS NOT NULL AND NOT is_admin FROM users WHERE email = $1",
+        )
+        .bind(synapse_server::auth::DEV_FIXTURE_LOGIN)
+        .fetch_one(&pool)
+        .await
+        .expect("fixture is an activated ordinary user")
+    );
+    let refreshed_hash =
+        sqlx::query_scalar::<_, Vec<u8>>("SELECT password_hash FROM users WHERE email = $1")
+            .bind(synapse_server::auth::DEV_FIXTURE_LOGIN)
+            .fetch_one(&pool)
+            .await
+            .expect("fixture password hash");
+    let refreshed_hash = String::from_utf8(refreshed_hash).expect("fixture hash is utf8");
+    assert!(synapse_server::auth::password::verify("test", &refreshed_hash).is_ok());
+
+    let mailer = Arc::new(RecordingMailer::default());
+    let mut settings = test_settings(Some(pool.clone()), mailer.clone());
+    settings.allow_public_signup = true;
+    let app = synapse_server::router_with_settings(settings);
+
+    assert_eq!(
+        app.clone()
+            .oneshot(request_json(
+                "/auth/signup",
+                r#"{"email":"test","password":"test"}"#,
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(mailer.messages().is_empty());
+
+    let login = app
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"test","password":"test"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(login.status(), StatusCode::NO_CONTENT);
+    assert!(
+        login
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|cookie| cookie.starts_with("session="))
+    );
 }
 
 #[tokio::test]
@@ -124,7 +503,7 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
     synapse_server::run_migrations(&pool)
         .await
         .expect("migrations apply");
-    sqlx::query("TRUNCATE sessions, invites, users CASCADE")
+    sqlx::query("TRUNCATE sessions, invites, account_activations, users CASCADE")
         .execute(&pool)
         .await
         .expect("auth tables reset");
@@ -138,7 +517,9 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
         .await
         .expect("invitation is stored");
 
-    let app = synapse_server::router(Some(pool.clone()));
+    let mailer = Arc::new(RecordingMailer::default());
+    let app =
+        synapse_server::router_with_settings(test_settings(Some(pool.clone()), mailer.clone()));
     let no_invite = request_json(
         "/auth/signup",
         r#"{"email":"person@example.test","password":"a secure password"}"#,
@@ -188,6 +569,21 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
             .expect("response")
             .status(),
         StatusCode::BAD_REQUEST
+    );
+
+    let activation_token = mailer
+        .activation_token()
+        .expect("activation mail contains a token");
+    assert_eq!(
+        app.clone()
+            .oneshot(dynamic_json(
+                "/auth/activate",
+                &format!(r#"{{"token":"{activation_token}"}}"#),
+            ))
+            .await
+            .expect("response")
+            .status(),
+        StatusCode::NO_CONTENT
     );
 
     let login = request_json(
@@ -344,7 +740,7 @@ async fn router_uses_injected_clock_for_session_creation_and_expiration() {
     let pool = test_pool().await;
     reset_auth_tables(&pool).await;
     let user_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1::uuid, $2, $3)")
+    sqlx::query("INSERT INTO users (id, email, password_hash, activated_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP)")
         .bind(user_id.to_string())
         .bind("clock@example.test")
         .bind(
@@ -416,7 +812,7 @@ async fn concurrent_signup_consumes_an_invitation_only_once() {
         async move {
             app.oneshot(request_json(
                 "/auth/signup",
-                r#"{"email":"first@example.test","password":"a secure password","invitation_token":"concurrently-consumed-invitation"}"#,
+            r#"{"email":"invited@example.test","password":"a secure password","invitation_token":"concurrently-consumed-invitation"}"#,
             ))
             .await
         }
@@ -424,7 +820,7 @@ async fn concurrent_signup_consumes_an_invitation_only_once() {
     let second = tokio::spawn(async move {
         app.oneshot(request_json(
             "/auth/signup",
-            r#"{"email":"second@example.test","password":"a secure password","invitation_token":"concurrently-consumed-invitation"}"#,
+            r#"{"email":"invited@example.test","password":"a secure password","invitation_token":"concurrently-consumed-invitation"}"#,
         ))
         .await
     });
@@ -510,6 +906,45 @@ async fn auth_rate_limit_rejects_excess_without_affecting_health() {
     assert_eq!(health.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+async fn auth_rate_limit_isolated_by_forwarded_client_address() {
+    let app = synapse_server::router(None);
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("x-forwarded-for", "192.0.2.10")
+                    .body(Body::from(
+                        r#"{"email":"a@example.test","password":"a secure password"}"#,
+                    ))
+                    .expect("request is valid"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    let different_client = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-forwarded-for", "192.0.2.11")
+                .body(Body::from(
+                    r#"{"email":"a@example.test","password":"a secure password"}"#,
+                ))
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(different_client.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
 fn request_json(uri: &str, body: &'static str) -> Request<Body> {
     Request::builder()
         .method("POST")
@@ -517,6 +952,32 @@ fn request_json(uri: &str, body: &'static str) -> Request<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
         .expect("valid request")
+}
+
+fn dynamic_json(uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_owned()))
+        .expect("valid request")
+}
+
+fn test_settings(
+    pool: Option<sqlx::PgPool>,
+    mailer: Arc<dyn synapse_server::auth::mail::Mailer>,
+) -> synapse_server::RouterSettings {
+    synapse_server::RouterSettings {
+        allow_public_signup: false,
+        blob_store: None,
+        clock: Arc::new(synapse_server::auth::session::SystemClock),
+        cookie_secure: true,
+        csrf_origin: "https://synapse.local".to_owned(),
+        enable_hsts: false,
+        mailer,
+        pool,
+        public_origin: "https://synapse.local".to_owned(),
+    }
 }
 
 async fn test_pool() -> sqlx::PgPool {
@@ -561,7 +1022,7 @@ async fn reset_auth_tables(pool: &sqlx::PgPool) {
     synapse_server::run_migrations(pool)
         .await
         .expect("migrations apply");
-    sqlx::query("TRUNCATE sessions, invites, users CASCADE")
+    sqlx::query("TRUNCATE sessions, invites, account_activations, users CASCADE")
         .execute(pool)
         .await
         .expect("auth tables reset");

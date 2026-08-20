@@ -32,6 +32,15 @@ pub fn hash(password: &str) -> Result<String, PasswordError> {
     if password.len() < MINIMUM_PASSWORD_LENGTH {
         return Err(PasswordError::Invalid);
     }
+    hash_unconstrained(password)
+}
+
+/// Hashes a password without the public length policy. Used only to seed the
+/// local development fixture account.
+pub(crate) fn hash_unconstrained(password: &str) -> Result<String, PasswordError> {
+    if password.is_empty() {
+        return Err(PasswordError::Invalid);
+    }
 
     argon2id()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
@@ -44,4 +53,18 @@ pub fn verify(password: &str, encoded: &str) -> Result<(), PasswordError> {
     argon2id()
         .verify_password(password.as_bytes(), &parsed)
         .map_err(|_| PasswordError::Invalid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_hash_keeps_the_length_policy() {
+        assert!(hash("test").is_err());
+        let encoded = hash_unconstrained("test").expect("fixture password hashes");
+        assert!(encoded.starts_with("$argon2id$"));
+        assert!(verify("test", &encoded).is_ok());
+        assert!(verify("wrong", &encoded).is_err());
+    }
 }

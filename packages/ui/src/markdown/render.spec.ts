@@ -16,7 +16,20 @@ describe("renderMarkdown", () => {
     expect(html).toMatch(/ligne un\s*<br\s*\/?>\s*ligne deux/);
   });
 
-  it("rend la syntaxe Markdown CommonMark courante", () => {
+  it("rend les wikilinks comme des ancres internes", () => {
+    const html = renderMarkdown("Voir [[Roadmap|la feuille]].");
+    expect(html).toContain('data-wikilink="Roadmap"');
+    expect(html).toContain("la feuille");
+    expect(html).not.toContain("javascript:");
+  });
+
+  it("n'exécute pas d'attributs injectés dans un wikilink", () => {
+    const html = renderMarkdown('[[cible" onclick="alert(1)]]');
+    expect(html).not.toMatch(/onclick=/i);
+    expect(html).not.toContain("javascript:");
+  });
+
+  it("rend le Markdown courant", () => {
     const html = renderMarkdown(
       "# Titre\n\n**gras** et *italique*\n\n- item\n\n`code`",
     );

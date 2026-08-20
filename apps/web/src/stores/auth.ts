@@ -18,9 +18,22 @@ interface RegisterInput {
   password: string;
 }
 
+export interface AuthSession {
+  createdAt: string;
+  current: boolean;
+  id: string;
+}
+
 function csrfHeaders(): HeadersInit {
   return {
     Origin: window.location.origin,
+  };
+}
+
+function jsonCsrfHeaders(): HeadersInit {
+  return {
+    Origin: window.location.origin,
+    "content-type": "application/json",
   };
 }
 
@@ -29,6 +42,7 @@ export const useAuthStore = defineStore("auth", {
     isAuthenticated: false,
     isOfflineSession: false,
     userId: null as string | null,
+    email: null as string | null,
   }),
   actions: {
     async restoreSession() {
@@ -40,6 +54,7 @@ export const useAuthStore = defineStore("auth", {
           this.isAuthenticated = false;
           this.isOfflineSession = false;
           this.userId = null;
+          this.email = null;
           return false;
         }
         const body = (await response.json()) as { user_id: string };
@@ -54,12 +69,28 @@ export const useAuthStore = defineStore("auth", {
           this.isAuthenticated = false;
           this.isOfflineSession = false;
           this.userId = null;
+          this.email = null;
           return false;
         }
         this.isAuthenticated = true;
         this.isOfflineSession = true;
         this.userId = remembered;
+        this.email = null;
         return true;
+      }
+    },
+    async fetchPublicSignup() {
+      try {
+        const response = await fetch("/auth/signup", {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          return false;
+        }
+        const body = (await response.json()) as { public_signup?: unknown };
+        return body.public_signup === true;
+      } catch {
+        return false;
       }
     },
     async register(input: RegisterInput) {
@@ -97,7 +128,7 @@ export const useAuthStore = defineStore("auth", {
     },
     async logout() {
       const vault = useVaultStore();
-      vault.lock();
+      await vault.clearDeviceData();
       try {
         const response = await fetch("/auth/logout", {
           credentials: "include",
@@ -111,8 +142,95 @@ export const useAuthStore = defineStore("auth", {
         this.isAuthenticated = false;
         this.isOfflineSession = false;
         this.userId = null;
+        this.email = null;
         await clearRememberedSession();
       }
+    },
+    async changePassword(currentPassword: string, newPassword: string) {
+      const response = await fetch("/auth/password", {
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+        credentials: "include",
+        headers: jsonCsrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Password change failed");
+      }
+    },
+    async listSessions(): Promise<{ email: string; sessions: AuthSession[] }> {
+      const response = await fetch("/auth/sessions", {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to list sessions");
+      }
+      const body = (await response.json()) as {
+        email?: unknown;
+        sessions?: Array<{
+          created_at?: unknown;
+          current?: unknown;
+          id?: unknown;
+        }>;
+      };
+      const email = typeof body.email === "string" ? body.email : "";
+      this.email = email || null;
+      const sessions = (body.sessions ?? []).flatMap((item) => {
+        if (
+          typeof item.id !== "string" ||
+          typeof item.created_at !== "string"
+        ) {
+          return [];
+        }
+        return [
+          {
+            createdAt: item.created_at,
+            current: item.current === true,
+            id: item.id,
+          },
+        ];
+      });
+      return { email, sessions };
+    },
+    async revokeSession(sessionId: string) {
+      const response = await fetch(`/auth/sessions/${sessionId}/revoke`, {
+        credentials: "include",
+        headers: csrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to revoke session");
+      }
+    },
+    async revokeOtherSessions() {
+      const response = await fetch("/auth/sessions/revoke-others", {
+        credentials: "include",
+        headers: csrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to revoke sessions");
+      }
+    },
+    async deleteAccount(password: string) {
+      const vault = useVaultStore();
+      const response = await fetch("/auth/account/delete", {
+        body: JSON.stringify({ password }),
+        credentials: "include",
+        headers: jsonCsrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Account deletion failed");
+      }
+      await vault.clearDeviceData();
+      this.isAuthenticated = false;
+      this.isOfflineSession = false;
+      this.userId = null;
+      this.email = null;
+      await clearRememberedSession();
     },
   },
 });

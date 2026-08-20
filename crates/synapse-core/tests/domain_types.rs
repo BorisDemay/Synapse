@@ -1,4 +1,6 @@
-use synapse_core::{ContentHash, NoteId, OperationId, Revision, VaultId, VaultPath};
+use synapse_core::{
+    ContentHash, NoteId, OperationId, Revision, VaultAssetPath, VaultId, VaultPath,
+};
 
 #[test]
 fn vault_path_rejects_parent_segments() {
@@ -50,6 +52,12 @@ fn vault_path_rejects_windows_ambiguous_segments() {
 #[test]
 fn vault_path_rejects_windows_alternate_data_streams() {
     assert!(VaultPath::parse("notes/project:metadata.md").is_err());
+}
+
+#[test]
+fn vault_asset_path_accepts_nested_files_under_attachments() {
+    let path = VaultAssetPath::parse("attachments\\scans\\doc.pdf").unwrap();
+    assert_eq!(path.as_str(), "attachments/scans/doc.pdf");
 }
 
 #[test]

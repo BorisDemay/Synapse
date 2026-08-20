@@ -90,7 +90,6 @@ impl<'de> Deserialize<'de> for EncryptedPushOperation {
         let raw = RawEncryptedPushOperation::deserialize(deserializer)?;
         if raw.protocol_version != PROTOCOL_VERSION
             || raw.aad_version != PROTOCOL_VERSION
-            || raw.base_revision == 0
             || raw.nonce.len() != 24
             || raw.ciphertext.len() < 16
             || !is_uuid(&raw.operation_id)
@@ -377,7 +376,7 @@ pub fn openapi_document() -> Value {
                         "operation_id": { "type": "string", "format": "uuid" },
                         "vault_id": { "type": "string", "format": "uuid" },
                         "note_id": { "type": "string", "format": "uuid" },
-                        "base_revision": { "type": "integer", "minimum": 1 },
+                        "base_revision": { "type": "integer", "minimum": 0 },
                         "ciphertext": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
                         "nonce": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 }, "minItems": 24, "maxItems": 24 },
                         "aad_version": { "type": "integer", "minimum": 1 },
@@ -407,7 +406,7 @@ pub fn openapi_document() -> Value {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["protocol_version", "operation_id", "vault_id", "note_id", "base_revision", "remote_revision", "base_ciphertext_hash", "local_ciphertext_hash", "remote_ciphertext_hash"],
-                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "operation_id": { "format": "uuid" }, "vault_id": { "format": "uuid" }, "note_id": { "format": "uuid" }, "base_revision": { "minimum": 1 }, "remote_revision": { "minimum": 1 }, "base_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" }, "local_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" }, "remote_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" } }
+                    "properties": { "protocol_version": { "const": PROTOCOL_VERSION }, "operation_id": { "format": "uuid" }, "vault_id": { "format": "uuid" }, "note_id": { "format": "uuid" }, "base_revision": { "minimum": 0, "description": "0 means vault genesis: the conflicting operation was built offline before any pull, so no base revision exists" }, "remote_revision": { "minimum": 1 }, "base_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$", "description": "64 zeros when base_revision is 0 (no base ciphertext exists at genesis)" }, "local_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" }, "remote_ciphertext_hash": { "pattern": "^[a-f0-9]{64}$" } }
                 }
             }
         }

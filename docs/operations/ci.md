@@ -8,15 +8,31 @@ commande locale unique `just verify`.
 - Rust stable avec `rustfmt` et `clippy`
 - `pnpm` 11.x et Node 22.17.x
 - Outils Rust : `just`, `cargo-nextest`, `cargo-deny` (`cargo install … --locked`)
-- PostgreSQL de test : `docker compose -f infra/docker/compose.test.yml up -d`
-- Pour le smoke Playwright : API sur `127.0.0.1:3000` et navigateurs Playwright
+- PostgreSQL de test/dev : `just db` (ou `docker compose -f infra/docker/compose.test.yml up -d`)
+- Pour le smoke Playwright : API sur `127.0.0.1:3000` (`just serve`) et navigateurs Playwright
 
-Exemple de démarrage API de test :
+`synapse_test` est réservé aux tests Cargo : ils y font `TRUNCATE` / `DROP SCHEMA`.
+Les comptes utilisés à la main doivent aller dans `synapse_dev`, persisté par un volume
+nommé. Relancer l’API ne doit plus recréer un compte.
+
+Exemple de démarrage API locale persistante :
 
 ```bash
+just serve
+```
+
+API et UI Vite ensemble : `just dev` (`http://127.0.0.1:3000` +
+`http://localhost:5173`). Client lourd : `just desktop` (même API +
+fenêtre Tauri, Vite `http://127.0.0.1:1420`).
+
+Équivalent manuel :
+
+```bash
+just db
 export SYNAPSE_BIND_ADDR=127.0.0.1:3000
-export SYNAPSE_DATABASE_URL=postgres://postgres@127.0.0.1:55432/synapse_test
-export SYNAPSE_STORAGE_PATH=/tmp/synapse-blobs
+export SYNAPSE_DATABASE_URL=postgres://postgres@127.0.0.1:55432/synapse_dev
+export SYNAPSE_STORAGE_PATH=./synapse-blobs
+export SYNAPSE_MAIL_DIRECTORY=./synapse-mail
 export SYNAPSE_ALLOWED_ORIGIN=http://127.0.0.1:5173
 export SYNAPSE_ALLOW_PUBLIC_SIGNUP=true
 export SYNAPSE_COOKIE_SECURE=false

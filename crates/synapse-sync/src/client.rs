@@ -29,6 +29,7 @@ impl WakeSignal {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PushAck {
     pub operation_id: String,
+    pub revision: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,10 +39,11 @@ pub enum PullOutcome {
     ResnapshotRequired,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TransportError {
     Network,
     Protocol,
+    Conflict(Box<Conflict>),
 }
 
 impl fmt::Display for TransportError {
@@ -49,6 +51,9 @@ impl fmt::Display for TransportError {
         match self {
             Self::Network => formatter.write_str("sync transport is unavailable"),
             Self::Protocol => formatter.write_str("sync protocol response is invalid"),
+            Self::Conflict(_) => {
+                formatter.write_str("sync operation conflicts with a remote revision")
+            }
         }
     }
 }

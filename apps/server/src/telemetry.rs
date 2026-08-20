@@ -47,6 +47,7 @@ fn is_sensitive_key(key: &str) -> bool {
             | "authorization"
             | "token"
             | "invitation_token"
+            | "activation_token"
             | "session"
             | "session_token"
             | "ciphertext"

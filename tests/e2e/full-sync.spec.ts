@@ -41,7 +41,7 @@ test("full encrypted sync path survives conflict and reload", async ({
     webPage.getByRole("treeitem", { name: "vertical seed" }),
   ).toBeVisible({ timeout: 30_000 });
   await webPage.getByRole("treeitem", { name: "vertical seed" }).click();
-  await expect(webPage.getByLabel("Aperçu Markdown")).toContainText(
+  await expect(webPage.getByLabel("Éditeur Markdown")).toContainText(
     "from desktop stand-in",
     { timeout: 30_000 },
   );
@@ -72,7 +72,7 @@ test("full encrypted sync path survives conflict and reload", async ({
     .getByRole("button", { name: "Garder la version locale" })
     .click();
   await expectSynced(desktopPage);
-  await expect(desktopPage.getByLabel("Aperçu Markdown")).toContainText(
+  await expect(desktopPage.getByLabel("Éditeur Markdown")).toContainText(
     "desktop offline edit",
   );
 
@@ -82,7 +82,7 @@ test("full encrypted sync path survives conflict and reload", async ({
     desktopPage.getByRole("treeitem", { name: "vertical seed" }),
   ).toBeVisible({ timeout: 30_000 });
   await desktopPage.getByRole("treeitem", { name: "vertical seed" }).click();
-  await expect(desktopPage.getByLabel("Aperçu Markdown")).toContainText(
+  await expect(desktopPage.getByLabel("Éditeur Markdown")).toContainText(
     "desktop offline edit",
     { timeout: 30_000 },
   );

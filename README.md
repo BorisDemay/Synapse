@@ -6,7 +6,7 @@
 
 Synapse est un projet **from scratch** visant à offrir une expérience de prise de notes Markdown rapide, hors-ligne et fiable, disponible via :
 
-- un **client lourd** pour travailler directement sur un coffre local ;
+- un **client lourd** Tauri qui embarque le même coffre chiffré que le web ;
 - une **interface web** moderne pour accéder aux mêmes contenus depuis un navigateur ;
 - un serveur optionnel, simple à auto-héberger, qui assure la synchronisation temps réel et le partage contrôlé.
 
@@ -25,7 +25,7 @@ Les fichiers Markdown restent l’unité de vérité : ils doivent demeurer lisi
 
 ### Gestion du coffre
 
-- Ouverture d’un dossier local contenant des fichiers `.md` et des pièces jointes.
+- Cache local chiffré, utilisable hors connexion, pour chaque coffre autorisé.
 - Création, renommage, déplacement et suppression de notes/dossiers.
 - Surveillance du système de fichiers et prise en compte des modifications externes.
 - Métadonnées YAML front matter, tags, liens `[[wikilinks]]`, backlinks et graphe de relations.
@@ -132,7 +132,10 @@ Les frontières de responsabilité du monorepo sont consignées dans les ADR :
 
 - [ADR 0001 — Monorepo et frontières de confiance](docs/adr/0001-monorepo-and-boundaries.md)
 - [ADR 0002 — Synchronisation par opérations et révisions](docs/adr/0002-sync-versioning.md)
-- [ADR 0003 — Les fichiers locaux sont canoniques](docs/adr/0003-local-files-are-canonical.md)
+- [ADR 0011 — Le client web chiffré est canonique](docs/adr/0011-web-client-canonical.md)
+- [ADR 0007 — Éditeur Markdown à rendu instantané](docs/adr/0007-vditor-instant-rendering-editor.md)
+- [ADR 0008 — Assistant Codex optionnel côté client](docs/adr/0008-client-side-codex-assistant.md)
+- [ADR 0010 — Item de coffre chiffré](docs/adr/0010-encrypted-vault-item.md)
 
 Le [modèle de menace du MVP](docs/security/threat-model.md) précise les actifs,
 frontières de confiance, menaces et contrôles. Le serveur est un coordinateur
@@ -164,6 +167,25 @@ opaque : il n'accède jamais au contenu des coffres en clair.
 Les commandes ci-dessous ont été exécutées avec succès sur le dépôt actuel.
 Ne documenter ici que ce qui a réellement passé.
 
+### Développement local
+
+```bash
+just dev
+```
+
+Démarre PostgreSQL (`synapse_dev`), l’API Rust (`http://127.0.0.1:3000`) et
+l’UI Vite (`http://localhost:5173`) dans un seul terminal. `Ctrl+C` arrête les
+deux. En deux terminaux : `just serve` puis `just web`.
+
+```bash
+just desktop
+```
+
+Démarre PostgreSQL (`synapse_dev`), l’API Rust (`http://127.0.0.1:3000`) et
+la fenêtre native Tauri (Vite `http://127.0.0.1:1420`) dans un seul terminal.
+`Ctrl+C` arrête les deux. L’édition utilise le cache chiffré local et ne bloque
+pas l’interface pendant une indisponibilité réseau.
+
 ### Qualité
 
 ```bash
@@ -173,6 +195,14 @@ just verify
 Enchaîne format Rust, clippy (`-D warnings`), `cargo nextest`, Vitest,
 typecheck, Prettier, `cargo deny check`, `pnpm audit --prod` et le smoke
 Playwright `tests/e2e/web-register-save.spec.ts`. Détails : `docs/operations/ci.md`.
+
+Le client desktop (éditeur local, sync optionnelle) est aussi couvert par :
+
+```bash
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+pnpm --filter @synapse/desktop test
+pnpm --filter @synapse/desktop typecheck
+```
 
 ### Self-hosting Docker Compose
 
@@ -189,9 +219,9 @@ Guide opérateur : `docs/operations/install.md`, sauvegarde :
 
 ### Parcours chiffré web / sync
 
-Prérequis : PostgreSQL de test (`infra/docker/compose.test.yml`) et API locale
-sur `127.0.0.1:3000` avec `SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` et
-`SYNAPSE_COOKIE_SECURE=false`.
+Prérequis : `just serve` (PostgreSQL `synapse_dev` persistante, distincte de
+`synapse_test` que les tests Cargo vident) et
+`SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` / `SYNAPSE_COOKIE_SECURE=false`.
 
 ```bash
 pnpm playwright test tests/e2e/full-sync.spec.ts
@@ -213,12 +243,16 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
 
 ### Limites connues du MVP
 
-- Le client Tauri ouvre un coffre local ; le parcours sync desktop ↔ web complet
-  via WebDriver Tauri n’est pas encore automatisé. Le scénario vertical utilise
-  deux contextes navigateur (stand-in desktop + web).
+- Le client Tauri embarque le client web chiffré via un pont Rust fermé. Il ne
+  reçoit aucun accès filesystem ou HTTP générique ; la session native reste en
+  mémoire. Les anciens coffres de dossier sont conservés sans suppression
+  implicite pendant leur migration explicite.
 - Aucun contenu de coffre en clair n’atteint le serveur ; la phrase de
   déchiffrement reste locale.
-- Pas de SaaS obligatoire, pas de télémétrie distante.
+- Pas de SaaS obligatoire, pas de télémétrie distante. Un chat Codex
+  optionnel peut partir du client déverrouillé avec une clé fournie par
+  l’utilisateur ; les notes liées vont alors vers OpenAI, jamais vers le
+  serveur Synapse (ADR 0008). La CI ne valide pas d’appel live à Codex.
 - SBOM CycloneDX : `just sbom` écrit sous `target/sbom/` (non versionné).
 
 ## Feuille de route
@@ -251,7 +285,9 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
 
 - Compatibilité binaire ou protocolaire avec Obsidian Sync.
 - Marketplace de plugins avant la stabilisation du modèle de sécurité.
-- Fonctionnalités d’IA envoyant les notes vers un tiers par défaut.
+- Intelligence artificielle obligatoire, ou relais des notes en clair via le
+  serveur Synapse. Un chat Codex optionnel peut partir du client déverrouillé
+  avec la clé de l’utilisateur (ADR 0008).
 - Dépendance obligatoire à un service cloud propriétaire.
 
 ## Stack retenue — Vue.js, Rust et logiciels libres
@@ -263,7 +299,7 @@ Le projet retient une stack **open source, auto-hébergeable et sans dépendance
 | Client lourd | **Tauri 2**, **Rust**, **Vue 3**, TypeScript, Vite | Tauri (MIT/Apache-2.0), Vue (MIT) ; application native légère et sécurisée |
 | Interface web | **Vue 3**, TypeScript, Vite, Vue Router, Pinia | MIT ; SPA statique servie par le serveur ou un proxy inverse |
 | Design système | Tailwind CSS ou UnoCSS, composants Vue internes | MIT ; aucun kit UI propriétaire requis |
-| Éditeur Markdown | CodeMirror 6 + rendu Markdown basé sur markdown-it | MIT ; édition texte performante et extensible |
+| Éditeur Markdown | Vditor 3 en mode IR + prévisualisation markdown-it | MIT ; rendu instantané CommonMark/GFM, ressources embarquées localement |
 | Serveur | **Rust**, Axum, Tokio, Tower | MIT ; API HTTP et synchronisation temps réel à faible empreinte |
 | Contrats API | OpenAPI, JSON Schema, génération de clients TypeScript | Standards ouverts ; protocole versionné et documenté |
 | Temps réel | WebSocket sécurisé, opérations idempotentes, synchronisation delta | Standard ouvert ; protocole applicatif documenté |

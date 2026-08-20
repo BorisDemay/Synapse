@@ -3,31 +3,228 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MarkdownEditor from "../MarkdownEditor.vue";
 
+const vditorMock = vi.hoisted(() => {
+  type Options = {
+    after?: () => void;
+    cache?: { enable?: boolean };
+    cdn?: string;
+    image?: { isPreview?: boolean };
+    input?: (value: string) => void;
+    link?: { isOpen?: boolean };
+    mode?: string;
+    preview?: {
+      markdown?: { sanitize?: boolean };
+      render?: { media?: { enable?: boolean } };
+    };
+    tab?: string;
+    toolbar?: Array<string | { name: string }>;
+    value?: string;
+  };
+
+  let options: Options | undefined;
+  let root: HTMLElement | undefined;
+  const instance = {
+    destroy: vi.fn(),
+    getValue: vi.fn(() => options?.value ?? ""),
+    setTheme: vi.fn(),
+    setValue: vi.fn(),
+  };
+  const Constructor = vi.fn(function (
+    this: unknown,
+    nextRoot: HTMLElement,
+    nextOptions: Options,
+  ) {
+    root = nextRoot;
+    options = nextOptions;
+    nextRoot.innerHTML = `
+      <div class="vditor-toolbar">
+        <div class="vditor-toolbar__item">
+          <button data-type="bold" aria-label="Gras"></button>
+        </div>
+      </div>
+      <div class="vditor-ir">
+        <div contenteditable="true"></div>
+      </div>
+    `;
+    nextOptions.after?.();
+    return instance;
+  });
+
+  return {
+    Constructor,
+    instance,
+    options: () => options,
+    reset() {
+      options = undefined;
+      root = undefined;
+      Constructor.mockClear();
+      Object.values(instance).forEach((mock) => mock.mockClear());
+    },
+    root: () => root,
+  };
+});
+
+vi.mock("vditor", () => ({ default: vditorMock.Constructor }));
+
 describe("MarkdownEditor", () => {
   beforeEach(() => {
-    Object.defineProperty(Range.prototype, "getClientRects", {
-      configurable: true,
-      value: () => [],
-    });
+    vi.useFakeTimers();
+    vditorMock.reset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("enregistre une seule fois après une rafale de modifications", async () => {
-    vi.useFakeTimers();
+  it("uses complete instant rendering without persistent or remote content", () => {
+    mount(MarkdownEditor, {
+      props: { modelValue: "# Titre\n\n- Élément" },
+    });
+
+    const options = vditorMock.options();
+    expect(options).toBeDefined();
+    expect(options).toMatchObject({
+      cache: { enable: false },
+      image: { isPreview: false },
+      link: { isOpen: false },
+      mode: "ir",
+      lang: "fr_FR",
+      undoDelay: 80,
+      preview: {
+        markdown: { sanitize: true },
+        render: { media: { enable: false } },
+      },
+      tab: "    ",
+      value: "# Titre\n\n- Élément",
+    });
+    expect(new URL(options?.cdn ?? "").origin).toBe(window.location.origin);
+    expect(options?.toolbar).not.toContain("upload");
+    expect(options?.toolbar).not.toContain("record");
+    const editable = vditorMock
+      .root()
+      ?.querySelector('[contenteditable="true"]');
+    expect(editable?.getAttribute("aria-label")).toBe("Éditeur Markdown");
+    expect(editable?.getAttribute("lang")).toBe("fr");
+  });
+
+  it("shows explicit French labels in the formatting toolbar", () => {
     const wrapper = mount(MarkdownEditor, {
       props: { modelValue: "" },
     });
-    const content = wrapper.get('[contenteditable="true"]');
 
-    content.element.textContent = "# Première version";
-    await content.trigger("input", { inputType: "insertText" });
-    content.element.textContent = "# Version finale";
-    await content.trigger("input", { inputType: "insertText" });
+    expect(wrapper.get('.vditor-toolbar button[data-type="bold"]').text()).toBe(
+      "Gras",
+    );
+    expect(
+      wrapper.get(".synapse-toolbar-label").attributes("aria-hidden"),
+    ).toBe("true");
+  });
+
+  it("marks the formatting toolbar so it can shrink and stay centered", () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+
+    const toolbar = wrapper.get(".vditor-toolbar");
+    expect(toolbar.classes()).toContain("synapse-toolbar");
+    expect(toolbar.attributes("role")).toBe("toolbar");
+  });
+
+  it("keeps table actions in the context menu without hover buttons", () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+
+    const names = (vditorMock.options()?.toolbar ?? []).flatMap((item) =>
+      typeof item === "string" ? [item] : [item.name],
+    );
+
+    expect(names).not.toEqual(
+      expect.arrayContaining([
+        "synapse-table-row-add",
+        "synapse-table-row-delete",
+        "synapse-table-column-add",
+        "synapse-table-column-delete",
+      ]),
+    );
+    expect(wrapper.find(".synapse-table-controls").exists()).toBe(false);
+    expect(wrapper.get(".synapse-table-context-menu").attributes("role")).toBe(
+      "menu",
+    );
+  });
+
+  it("emits each Markdown update and saves once after a typing burst", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+    const input = vditorMock.options()?.input;
+
+    input?.("- premier");
+    input?.("- premier\n- second");
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(wrapper.emitted("save")).toEqual([["# Version finale"]]);
+    expect(wrapper.emitted("update:modelValue")).toEqual([
+      ["- premier"],
+      ["- premier\n- second"],
+    ]);
+    expect(wrapper.emitted("save")).toEqual([["- premier\n- second"]]);
+  });
+
+  it("updates an open editor when another note becomes active", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "# Première" },
+    });
+
+    await wrapper.setProps({ modelValue: "# Deuxième" });
+
+    expect(vditorMock.instance.setValue).toHaveBeenCalledWith(
+      "# Deuxième",
+      true,
+    );
+  });
+
+  it("emits dropped and pasted files for vault attachments", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+    const file = new File(["png"], "photo.png", { type: "image/png" });
+    const data = {
+      files: [file],
+    } as unknown as DataTransfer;
+
+    await wrapper.get(".markdown-editor").trigger("paste", {
+      clipboardData: data,
+    });
+    expect(wrapper.emitted("attach-files")?.[0]).toEqual([[file]]);
+  });
+
+  it("rewrites attachment paths to blob URLs", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: {
+        attachmentUrls: { "attachments/photo.png": "blob:http://local/photo" },
+        modelValue: "![photo](attachments/photo.png)",
+      },
+    });
+    const image = document.createElement("img");
+    image.setAttribute("src", "attachments/photo.png");
+    vditorMock.root()?.append(image);
+    await wrapper.setProps({
+      attachmentUrls: { "attachments/photo.png": "blob:http://local/photo" },
+    });
+
+    expect(image.getAttribute("src")).toBe("blob:http://local/photo");
+  });
+
+  it("destroys the editor and cancels pending saves on unmount", () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+    vditorMock.options()?.input?.("contenu non enregistré");
+
+    wrapper.unmount();
+    vi.runAllTimers();
+
+    expect(vditorMock.instance.destroy).toHaveBeenCalledOnce();
+    expect(wrapper.emitted("save")).toBeUndefined();
   });
 });

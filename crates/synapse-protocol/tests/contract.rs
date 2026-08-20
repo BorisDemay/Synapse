@@ -126,6 +126,16 @@ fn resnapshot_error_is_closed_opaque_and_instructs_null_cursor_retry() {
 }
 
 #[test]
+fn encrypted_push_accepts_zero_base_revision_used_by_the_web_client() {
+    let mut operation = fixture_encrypted_operation();
+    operation.base_revision = 0;
+    let json = serde_json::to_string(&operation).expect("operation serializes");
+    let decoded: EncryptedPushOperation =
+        serde_json::from_str(&json).expect("first web revision uses base_revision 0");
+    assert_eq!(decoded.base_revision, 0);
+}
+
+#[test]
 fn deserialization_rejects_plaintext_identifiers_and_invalid_crypto_metadata() {
     let invalid_identifier = serde_json::from_str::<EncryptedPushOperation>(
         r##"{"protocol_version":1,"operation_id":"# note secrète","vault_id":"0198e5de-1111-7222-8333-444455556666","note_id":"0198e5de-7777-7888-8999-aaaabbbbcccc","base_revision":4,"ciphertext":[1,2,3],"nonce":[17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17],"aad_version":1,"ciphertext_hash":"f6d6f3ae0fc5e8a4feab46c293fe3d15eb34d8f5ca2dd01fc2cad6df1ddf6fb2"}"##,
@@ -154,6 +164,7 @@ fn generated_openapi_document_is_stable_and_exposes_only_opaque_payloads() {
         &openapi_document()["components"]["schemas"]["EncryptedPushOperation"]["properties"];
     assert!(properties.get("markdown").is_none());
     assert!(properties.get("title").is_none());
+    assert!(properties.get("path").is_none());
     let pull_request = &openapi_document()["components"]["schemas"]["PullRequest"];
     assert_eq!(pull_request["additionalProperties"], false);
     assert_eq!(

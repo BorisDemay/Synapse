@@ -1,22 +1,71 @@
 <script setup lang="ts">
 import {
+  AiChat,
+  AiConversationPanel,
   AppShell,
+  BacklinksPanel,
   ConflictResolver,
+  NoteRelationsPanel,
   MarkdownEditor,
-  MarkdownPreview,
+  SearchPalette,
+  SettingsPanel,
+  ThemeToggle,
   VaultTree,
+  backlinksFor,
+  buildVaultTree,
+  parseNote,
+  resolveWikilink,
+  sanitizeAttachmentFileName,
+  searchLocalNotes,
+  uniqueTags,
+  useTheme,
+  wikilinkPath,
+  type PaletteCommand,
+  type QueryNote,
+  type SettingsSession,
   type VaultTreeNode,
 } from "@synapse/ui";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
+import Button from "primevue/button";
+
+import { isTrustedDeviceSupported } from "../crypto/trusted-device";
 import { uuidV7 } from "../crypto/vault-key";
+import { buildMarkdownZip } from "../export/markdown-zip";
+import { useAssistantStore } from "../stores/assistant";
+import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 
 const vault = useVaultStore();
-const content = ref("# Nouvelle note\n\nÉcrivez ici…\n");
+const auth = useAuthStore();
+const assistant = useAssistantStore();
+const router = useRouter();
+const content = ref("# Nouvelle note\n\n");
 const noteId = ref<string>(uuidV7());
 const selectedNoteId = ref<string | null>(null);
 const formError = ref("");
+const assistantOpen = ref(false);
+const assistantHistoryOpen = ref(true);
+const noteHistoryOpen = ref(true);
+const settingsOpen = ref(false);
+const searchQuery = ref("");
+const tagFilter = ref("");
+const blobUrls = ref<Record<string, string>>({});
+const theme = useTheme();
+const deviceTrusted = ref(false);
+const deviceSupported = isTrustedDeviceSupported();
+const settingsError = ref("");
+const settingsStatus = ref("");
+const accountEmail = ref("");
+const sessions = ref<SettingsSession[]>([]);
+let pendingSave:
+  | {
+      content: string;
+      noteId: string;
+    }
+  | undefined;
+let saveInFlight: Promise<void> | undefined;
 
 function noteTitle(markdown: string, fallback: string): string {
   const heading = markdown
@@ -33,43 +82,201 @@ function noteTitle(markdown: string, fallback: string): string {
   return firstLine?.slice(0, 48) || fallback;
 }
 
-const treeNodes = computed<VaultTreeNode[]>(() =>
+function rootNotePath(path: string | undefined, id: string): string {
+  return path?.split("/").filter(Boolean).pop() ?? `${id.slice(0, 8)}.md`;
+}
+
+const queryNotes = computed<QueryNote[]>(() =>
   Array.from(vault.notes.entries()).map(([id, note]) => ({
+    content: note.content,
     id,
     label: noteTitle(note.content, id.slice(0, 8)),
+    path: rootNotePath(note.path, id),
+  })),
+);
+
+const treeNodes = computed<VaultTreeNode[]>(() => {
+  const sources = queryNotes.value
+    .filter((note) => {
+      if (!tagFilter.value) {
+        return true;
+      }
+      return parseNote(note.content).tags.includes(tagFilter.value);
+    })
+    .map((note) => ({
+      id: note.id,
+      kind: "note" as const,
+      label: note.label,
+      path: note.path,
+      syncStatus: vault.noteSyncStatus(note.id),
+      tags: parseNote(note.content).tags,
+    }));
+  const attached = Array.from(vault.attachments.entries()).map(
+    ([id, file]) => ({
+      id,
+      kind: "attachment" as const,
+      label: file.path.split("/").pop() ?? file.path,
+      path: file.path,
+      syncStatus: vault.noteSyncStatus(id),
+    }),
+  );
+  return buildVaultTree([...sources, ...attached]);
+});
+
+const searchResults = computed(() =>
+  searchLocalNotes(queryNotes.value, searchQuery.value),
+);
+
+const paletteCommands = computed<PaletteCommand[]>(() => [
+  { id: "new-note", label: "Nouvelle note" },
+  { id: "new-folder", label: "Nouveau dossier" },
+  { id: "lock", label: "Verrouiller le coffre" },
+  { id: "settings", label: "Paramètres" },
+  { id: "theme", label: "Basculer le thème" },
+  { id: "export", label: "Exporter Markdown" },
+]);
+
+const allTags = computed(() => uniqueTags(queryNotes.value));
+
+const currentQueryNote = computed(() =>
+  queryNotes.value.find((note) => note.id === noteId.value),
+);
+
+const currentBacklinks = computed(() => {
+  const current = currentQueryNote.value;
+  return current ? backlinksFor(queryNotes.value, current) : [];
+});
+
+const historyEntries = computed(() =>
+  vault.historyFor(noteId.value).map((entry) => ({
+    label: `Révision ${entry.revision}`,
+    recordedAt: entry.recordedAt,
+    revision: entry.revision,
   })),
 );
 
 function selectNote(id: string) {
+  const attached = vault.attachments.get(id);
+  if (attached) {
+    const url = blobUrls.value[attached.path];
+    if (url) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attached.path.split("/").pop() ?? "fichier";
+      link.click();
+    }
+    return;
+  }
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
   formError.value = "";
 }
 
-function startNewNote() {
+function attachNote(id: string) {
+  assistant.attachNote(id);
+  assistantOpen.value = true;
+}
+
+async function connectAssistant(token: string) {
+  formError.value = "";
+  try {
+    await assistant.connect(token);
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Connexion Codex impossible.";
+  }
+}
+
+async function connectChatgpt() {
+  formError.value = "";
+  try {
+    await assistant.connectWithChatgpt();
+  } catch {
+    // The store already exposes a safe, redacted error.
+  }
+}
+
+async function sendAssistant(prompt: string) {
+  try {
+    showNote(await assistant.send(prompt));
+  } catch {
+    // The store already exposes a safe, redacted error.
+  }
+}
+
+function showNote(id: string) {
+  selectedNoteId.value = id;
+  noteId.value = id;
+  content.value = vault.notes.get(id)?.content ?? "";
+}
+
+function startNewNote(folder?: string) {
   noteId.value = uuidV7();
   selectedNoteId.value = null;
   content.value = "# Nouvelle note\n\n";
   formError.value = "";
+  if (folder) {
+    void vault.saveNote({
+      content: content.value,
+      id: noteId.value,
+      path: `${folder.replace(/\/$/u, "")}/nouvelle.md`,
+    });
+    selectedNoteId.value = noteId.value;
+  }
+}
+
+async function deleteNote(id: string) {
+  if (pendingSave?.noteId === id) {
+    pendingSave = undefined;
+  }
+  formError.value = "";
+  try {
+    await vault.deleteNote(id);
+    assistant.detachNote(id);
+    if (selectedNoteId.value === id || noteId.value === id) {
+      startNewNote();
+    }
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Suppression impossible.";
+  }
 }
 
 async function save(nextContent = content.value) {
   content.value = nextContent;
-  formError.value = "";
-  try {
-    await vault.saveNote({
-      content: nextContent,
-      id: noteId.value,
-    });
-    selectedNoteId.value = noteId.value;
-    if (vault.syncStatus === "error" || vault.syncStatus === "conflict") {
-      formError.value = vault.lastError ?? "Enregistrement impossible.";
-    }
-  } catch (error) {
-    formError.value =
-      error instanceof Error ? error.message : "Enregistrement impossible.";
+  pendingSave = { content: nextContent, noteId: noteId.value };
+  if (saveInFlight) {
+    return saveInFlight;
   }
+
+  saveInFlight = (async () => {
+    while (pendingSave) {
+      const currentSave = pendingSave;
+      pendingSave = undefined;
+      formError.value = "";
+      try {
+        await vault.saveNote({
+          content: currentSave.content,
+          id: currentSave.noteId,
+          path: vault.notes.get(currentSave.noteId)?.path,
+        });
+        if (noteId.value === currentSave.noteId) {
+          selectedNoteId.value = currentSave.noteId;
+        }
+        if (vault.syncStatus === "error" || vault.syncStatus === "conflict") {
+          formError.value = vault.lastError ?? "Enregistrement impossible.";
+        }
+      } catch (error) {
+        formError.value =
+          error instanceof Error ? error.message : "Enregistrement impossible.";
+      }
+    }
+  })().finally(() => {
+    saveInFlight = undefined;
+  });
+
+  return saveInFlight;
 }
 
 async function onOnline() {
@@ -92,15 +299,268 @@ async function resolveWith(contentChoice: string) {
   }
 }
 
+async function logout() {
+  try {
+    await auth.logout();
+  } finally {
+    await router.replace("/login");
+  }
+}
+
+async function refreshDeviceTrust() {
+  if (!vault.currentVaultId) {
+    deviceTrusted.value = false;
+    return;
+  }
+  deviceTrusted.value = await vault.hasTrustedDevice(vault.currentVaultId);
+}
+
+async function forgetDevice() {
+  if (!vault.currentVaultId) {
+    return;
+  }
+  if (
+    !confirm(
+      "Oublier cet appareil exigera la phrase de déchiffrement au prochain chargement.",
+    )
+  ) {
+    return;
+  }
+  await vault.forgetTrustedDevice(vault.currentVaultId);
+  deviceTrusted.value = false;
+}
+
+async function rememberDevice() {
+  try {
+    await vault.rememberCurrentDevice();
+    deviceTrusted.value = true;
+  } catch {
+    formError.value = "Impossible d’enregistrer cet appareil.";
+  }
+}
+
+async function lockVault() {
+  settingsOpen.value = false;
+  vault.lockAndRequirePassphrase();
+  await router.push("/unlock");
+}
+
+async function loadAccountSettings() {
+  settingsError.value = "";
+  if (auth.isOfflineSession) {
+    return;
+  }
+  try {
+    const listed = await auth.listSessions();
+    accountEmail.value = listed.email;
+    sessions.value = listed.sessions;
+  } catch {
+    settingsError.value = "Impossible de charger les sessions.";
+  }
+}
+
+async function changePassword(current: string, next: string) {
+  settingsError.value = "";
+  settingsStatus.value = "";
+  try {
+    await auth.changePassword(current, next);
+    settingsStatus.value =
+      "Mot de passe mis à jour. Les autres sessions ont été révoquées.";
+    await loadAccountSettings();
+  } catch {
+    settingsError.value = "Impossible de changer le mot de passe.";
+  }
+}
+
+async function changePassphrase(current: string, next: string) {
+  settingsError.value = "";
+  settingsStatus.value = "";
+  try {
+    await vault.changePassphrase(current, next);
+    settingsStatus.value = "Phrase de déchiffrement mise à jour.";
+  } catch {
+    settingsError.value =
+      "Impossible de changer la phrase. Vérifiez la phrase actuelle.";
+  }
+}
+
+async function exportNotes() {
+  settingsError.value = "";
+  try {
+    await save();
+    const zip = buildMarkdownZip(
+      vault.markdownExportNotes(),
+      vault.markdownExportAttachments(),
+    );
+    const blob = new Blob([zip], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "synapse-notes.zip";
+    link.click();
+    URL.revokeObjectURL(url);
+    settingsStatus.value = "Export Markdown téléchargé.";
+  } catch {
+    settingsError.value = "Export impossible.";
+  }
+}
+
+async function revokeSession(id: string) {
+  settingsError.value = "";
+  try {
+    await auth.revokeSession(id);
+    await loadAccountSettings();
+  } catch {
+    settingsError.value = "Impossible de révoquer la session.";
+  }
+}
+
+async function revokeOtherSessions() {
+  settingsError.value = "";
+  try {
+    await auth.revokeOtherSessions();
+    settingsStatus.value = "Les autres sessions ont été révoquées.";
+    await loadAccountSettings();
+  } catch {
+    settingsError.value = "Impossible de révoquer les sessions.";
+  }
+}
+
+async function deleteAccount(password: string) {
+  settingsError.value = "";
+  try {
+    await auth.deleteAccount(password);
+    settingsOpen.value = false;
+    await router.push("/login");
+  } catch {
+    settingsError.value =
+      "Suppression impossible. Vérifiez le mot de passe du compte.";
+  }
+}
+
+function runCommand(id: string) {
+  if (id === "new-note") {
+    startNewNote();
+  } else if (id === "new-folder") {
+    const name = window.prompt("Nom du dossier");
+    if (name?.trim()) {
+      startNewNote(name.trim().replaceAll("..", ""));
+    }
+  } else if (id === "lock") {
+    void lockVault();
+  } else if (id === "settings") {
+    settingsOpen.value = true;
+  } else if (id === "theme") {
+    theme.toggleTheme();
+  } else if (id === "export") {
+    void exportNotes();
+  }
+}
+
+async function openWikilink(target: string) {
+  const existing = resolveWikilink(queryNotes.value, target);
+  if (existing) {
+    selectNote(existing.id);
+    return;
+  }
+  const path = wikilinkPath(
+    target,
+    rootNotePath(vault.notes.get(noteId.value)?.path, "nouvelle"),
+  );
+  const id = uuidV7();
+  const markdown = `# ${target}\n\n`;
+  await vault.saveNote({ content: markdown, id, path });
+  selectNote(id);
+}
+
+async function attachFiles(files: File[]) {
+  for (const file of files) {
+    const name = sanitizeAttachmentFileName(file.name);
+    const path = `attachments/${name}`;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      await vault.saveAttachment({
+        bytes,
+        contentType: file.type || "application/octet-stream",
+        path,
+      });
+    } catch (error) {
+      formError.value =
+        error instanceof Error ? error.message : "Pièce jointe refusée.";
+      continue;
+    }
+    const snippet = file.type.startsWith("image/")
+      ? `![${name}](${path})`
+      : `[${name}](${path})`;
+    content.value = `${content.value.trimEnd()}\n\n${snippet}\n`;
+    await save(content.value);
+  }
+}
+
+async function restoreHistory(revision: number) {
+  try {
+    await vault.restoreRevision(noteId.value, revision);
+    content.value = vault.notes.get(noteId.value)?.content ?? content.value;
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Restauration impossible.";
+  }
+}
+
+function refreshBlobUrls() {
+  for (const url of Object.values(blobUrls.value)) {
+    URL.revokeObjectURL(url);
+  }
+  const next: Record<string, string> = {};
+  for (const file of vault.attachments.values()) {
+    next[file.path] = URL.createObjectURL(
+      new Blob([file.bytes], { type: file.contentType }),
+    );
+  }
+  blobUrls.value = next;
+}
+
 onMounted(() => {
   window.addEventListener("online", onOnline);
   if (navigator.onLine) {
     void vault.flushPendingOperations();
   }
+  if (vault.isUnlocked) {
+    void assistant.restore();
+  }
+  void refreshDeviceTrust();
 });
 
 onUnmounted(() => {
   window.removeEventListener("online", onOnline);
+  for (const url of Object.values(blobUrls.value)) {
+    URL.revokeObjectURL(url);
+  }
+});
+
+watch(
+  () => vault.isUnlocked,
+  (unlocked) => {
+    if (unlocked) {
+      void assistant.restore();
+      return;
+    }
+    assistant.lockSession();
+  },
+);
+
+watch(
+  () => [...vault.attachments.values()].map((file) => file.path).join("|"),
+  () => refreshBlobUrls(),
+);
+
+watch(settingsOpen, (open) => {
+  if (!open) {
+    return;
+  }
+  settingsStatus.value = "";
+  settingsError.value = "";
+  void loadAccountSettings();
 });
 </script>
 
@@ -108,14 +568,95 @@ onUnmounted(() => {
   <AppShell class="vault-page">
     <template #navigation>
       <header class="vault-nav-header">
-        <h1>Coffre</h1>
-        <p role="status">{{ vault.syncStatus }}</p>
-        <button type="button" @click="startNewNote">Nouvelle note</button>
+        <div class="vault-brand-row">
+          <div class="brand-mark">
+            <span class="brand-symbol" aria-hidden="true">S</span>
+            <span>Synapse</span>
+          </div>
+          <ThemeToggle />
+        </div>
+        <div class="vault-heading">
+          <div>
+            <span class="eyebrow">ESPACE PRIVÉ</span>
+            <h1>Coffre</h1>
+          </div>
+          <span class="sync-pill" :data-status="vault.syncStatus" role="status">
+            <span class="sync-dot" aria-hidden="true" />
+            {{ vault.syncStatus }}
+          </span>
+        </div>
+        <Button
+          class="new-note-button"
+          icon="pi pi-plus"
+          label="Nouvelle note"
+          outlined
+          type="button"
+          @click="startNewNote()"
+        />
       </header>
-      <VaultTree :nodes="treeNodes" @select="selectNote" />
+      <div v-if="allTags.length" class="tag-filter" aria-label="Tags">
+        <button
+          v-for="tag in allTags"
+          :key="tag"
+          type="button"
+          :data-active="tagFilter === tag ? 'true' : undefined"
+          @click="tagFilter = tagFilter === tag ? '' : tag"
+        >
+          #{{ tag }}
+        </button>
+      </div>
+      <div class="sidebar-section-label">NOTES</div>
+      <VaultTree
+        :attached-ids="assistant.attachedNoteIds"
+        :nodes="treeNodes"
+        @attach="attachNote"
+        @delete="deleteNote"
+        @select="selectNote"
+      />
+      <div class="sidebar-footer">
+        <button
+          class="settings-button"
+          type="button"
+          aria-haspopup="dialog"
+          aria-label="Ouvrir les paramètres"
+          @click="settingsOpen = true"
+        >
+          <span class="settings-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                fill="currentColor"
+                d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.6.24-1.15.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.48a.5.5 0 0 0 .12.64L4.86 10.7c-.04.31-.06.63-.06.94s.02.63.06.94L2.83 14.16a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.48.39 1.03.7 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.6-.24 1.15-.55 1.63-.94l2.39.96c.24.1.51.01.64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"
+              />
+            </svg>
+          </span>
+          Paramètres
+        </button>
+        <button class="logout-button" type="button" @click="logout">
+          <span aria-hidden="true">↪</span>
+          Se déconnecter
+        </button>
+      </div>
     </template>
 
     <section class="vault-workspace" aria-label="Édition de note">
+      <header class="workspace-header">
+        <div>
+          <span class="eyebrow">ÉDITION MARKDOWN</span>
+        </div>
+        <div class="workspace-meta">
+          <span v-if="auth.isOfflineSession" class="offline-label"
+            >Session hors ligne</span
+          >
+          <span class="save-hint">Sauvegarde automatique</span>
+          <Button
+            v-if="!assistantOpen"
+            label="Codex"
+            outlined
+            type="button"
+            @click="assistantOpen = true"
+          />
+        </div>
+      </header>
       <ConflictResolver
         v-if="vault.activeConflict"
         :base="vault.activeConflict.base"
@@ -128,97 +669,396 @@ onUnmounted(() => {
         @edit-manual="resolveWith(vault.activeConflict.manualDraft)"
       />
       <template v-else>
-        <div class="vault-panes">
-          <MarkdownEditor v-model="content" @save="save" />
-          <MarkdownPreview :source="content" />
-        </div>
-        <div class="vault-actions">
-          <button type="button" @click="save()">Enregistrer</button>
+        <div class="editor-surface">
+          <MarkdownEditor
+            v-model="content"
+            :attachment-urls="blobUrls"
+            @attach-files="attachFiles"
+            @open-wikilink="openWikilink"
+            @save="save"
+          />
         </div>
       </template>
-      <p v-if="formError || vault.lastError" role="alert">
+      <p
+        v-if="formError || vault.lastError"
+        class="workspace-error"
+        role="alert"
+      >
         {{ formError || vault.lastError }}
       </p>
     </section>
+    <template #relations v-if="assistantOpen && noteHistoryOpen">
+      <NoteRelationsPanel
+        :backlinks="currentBacklinks"
+        :history="historyEntries"
+        @close="noteHistoryOpen = false"
+        @restore="restoreHistory"
+        @select="selectNote"
+      />
+    </template>
+    <template #assistantHistory v-if="assistantOpen && assistantHistoryOpen">
+      <AiConversationPanel
+        :active-conversation-id="assistant.activeConversationId"
+        :busy="assistant.busy"
+        :conversations="assistant.conversationSummaries"
+        @close="assistantHistoryOpen = false"
+        @new-conversation="assistant.newConversation"
+        @open-conversation="assistant.openConversation"
+      />
+    </template>
+    <template #assistant v-if="assistantOpen">
+      <AiChat
+        :attachments="assistant.attachments"
+        :busy="assistant.busy"
+        :connected="assistant.connected"
+        :conversations-panel-open="assistantHistoryOpen"
+        :device-login="assistant.deviceLogin"
+        :error="assistant.error"
+        :fast="assistant.fast"
+        :fast-available="Boolean(assistant.fastTier)"
+        :fast-label="assistant.fastTier?.name ?? assistant.fastTier?.id"
+        :history-panel-open="noteHistoryOpen"
+        :messages="assistant.messages"
+        :model="assistant.model"
+        :models="assistant.models"
+        :reasoning-effort="assistant.reasoningEffort"
+        :reasoning-levels="assistant.reasoningLevels"
+        @cancel-chatgpt="assistant.cancelChatgptLogin"
+        @connect="connectAssistant"
+        @connect-chatgpt="connectChatgpt"
+        @close-panel="assistantOpen = false"
+        @detach="assistant.detachNote"
+        @disconnect="assistant.disconnect"
+        @send="sendAssistant"
+        @toggle-conversations="assistantHistoryOpen = !assistantHistoryOpen"
+        @toggle-history="noteHistoryOpen = !noteHistoryOpen"
+        @update:fast="assistant.setFast"
+        @update:model="assistant.setModel"
+        @update:reasoning-effort="assistant.setReasoningEffort"
+      />
+    </template>
   </AppShell>
+  <SettingsPanel
+    :account-email="accountEmail"
+    :device-supported="deviceSupported"
+    :device-trusted="deviceTrusted"
+    :error-message="settingsError"
+    :offline="auth.isOfflineSession"
+    :open="settingsOpen"
+    :sessions="sessions"
+    :status-message="settingsStatus"
+    @change-passphrase="changePassphrase"
+    @change-password="changePassword"
+    @close="settingsOpen = false"
+    @delete-account="deleteAccount"
+    @export-notes="exportNotes"
+    @forget-device="forgetDevice"
+    @lock-vault="lockVault"
+    @remember-device="rememberDevice"
+    @revoke-other-sessions="revokeOtherSessions"
+    @revoke-session="revokeSession"
+  />
+  <SearchPalette
+    :commands="paletteCommands"
+    :query="searchQuery"
+    :results="searchResults"
+    @run="runCommand"
+    @select="selectNote"
+    @update:query="searchQuery = $event"
+  />
 </template>
 
 <style scoped>
 .vault-page {
-  display: grid;
-  grid-template-columns: minmax(14rem, 18rem) 1fr;
   min-height: 100vh;
-  background:
-    radial-gradient(ellipse 80% 50% at 0% 0%, #d9e4ef 0%, transparent 55%),
-    linear-gradient(160deg, #e8edf2 0%, #f3f5f7 45%, #e4e9ee 100%);
 }
 
-.vault-page > :deep(aside) {
-  border-right: 1px solid #b8c2cc;
-  background: rgba(243, 246, 249, 0.92);
-  padding: 1rem;
+.vault-page > :deep(.app-shell-sidebar) {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.35rem 1rem;
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 65%,
+    var(--synapse-color-surface)
+  );
+  backdrop-filter: blur(6px);
 }
 
-.vault-page > :deep(main) {
-  padding: 1rem 1.25rem;
-  min-width: 0;
+.vault-page > :deep(.app-shell-content) {
+  padding: 0;
+}
+
+.vault-page > :deep(.app-shell-assistant) {
+  padding: 1.25rem 1rem;
 }
 
 .vault-nav-header {
   display: grid;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: 1.2rem;
 }
 
-.vault-nav-header h1 {
-  margin: 0;
-  font-size: 1.25rem;
+.vault-brand-row,
+.vault-heading,
+.workspace-header,
+.workspace-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.brand-symbol {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--synapse-radius-md);
+  color: var(--synapse-color-accent-contrast);
+  background: linear-gradient(
+    135deg,
+    var(--synapse-color-accent),
+    var(--synapse-color-accent-strong)
+  );
+  font-size: 0.95rem;
+  box-shadow: var(--synapse-shadow-sm);
+}
+
+.vault-heading h1,
+.workspace-header h2 {
+  margin: 0.2rem 0 0;
+  letter-spacing: -0.04em;
+}
+
+.vault-heading h1 {
+  font-size: 1.4rem;
+}
+
+.workspace-header h2 {
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
+}
+
+.eyebrow,
+.sidebar-section-label {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+}
+
+.sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  color: var(--synapse-color-success);
+  background: color-mix(in srgb, var(--synapse-color-success) 12%, transparent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.sync-pill[data-status="offline"] {
+  color: var(--synapse-color-warning);
+  background: color-mix(in srgb, var(--synapse-color-warning) 12%, transparent);
+}
+
+.sync-pill[data-status="conflict"],
+.sync-pill[data-status="error"] {
+  color: var(--synapse-color-danger);
+  background: color-mix(in srgb, var(--synapse-color-danger) 12%, transparent);
+}
+
+.sync-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.new-note-button {
+  width: 100%;
+}
+
+.tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.tag-filter button {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: 999px;
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tag-filter button[data-active="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+}
+
+.sidebar-section-label {
+  padding-inline: 0.7rem;
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--synapse-color-border);
+}
+
+.settings-button,
+.logout-button {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.65rem 0.7rem;
+  border: 0;
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  text-align: start;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+}
+
+.settings-icon {
+  display: grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.settings-button:hover {
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-muted);
+}
+
+.logout-button:hover {
+  color: var(--synapse-color-danger);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-danger) 8%,
+    var(--synapse-color-surface-muted)
+  );
 }
 
 .vault-workspace {
   display: grid;
-  grid-template-rows: 1fr auto auto;
-  gap: 0.75rem;
-  height: calc(100vh - 2rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  min-width: 0;
+  height: 100vh;
+  padding: 0;
 }
 
-.vault-panes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  min-height: 0;
+.workspace-header {
+  padding: 1.25rem clamp(1rem, 3vw, 2rem) 1rem;
+  border-bottom: 1px solid var(--synapse-color-border);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 55%,
+    var(--synapse-color-surface)
+  );
+  backdrop-filter: blur(4px);
 }
 
-.vault-panes :deep(.markdown-editor),
-.vault-panes :deep(.markdown-preview) {
+.editor-surface {
+  min-width: 0;
   min-height: 24rem;
-  border: 1px solid #b8c2cc;
   overflow: auto;
-  background: #fbfcfd;
+  background: var(--synapse-color-surface);
 }
 
-.vault-panes :deep(.markdown-editor .cm-editor) {
+.editor-surface :deep(.markdown-editor) {
   height: 100%;
+  min-width: 0;
   min-height: 24rem;
 }
 
-.vault-panes :deep(.markdown-preview) {
-  padding: 1rem 1.25rem;
-  line-height: 1.55;
+.editor-surface :deep(.vditor) {
+  min-width: 0;
+  min-height: 60vh;
 }
 
-.vault-actions {
-  display: flex;
-  gap: 0.75rem;
+.workspace-meta {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.8rem;
+}
+
+.save-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.save-hint::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--synapse-color-success);
+}
+
+.offline-label {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  color: var(--synapse-color-warning);
+  background: color-mix(in srgb, var(--synapse-color-warning) 12%, transparent);
+  font-weight: 700;
+}
+
+.workspace-error {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--synapse-color-danger) 30%,
+      var(--synapse-color-border)
+    );
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-danger);
+  background: color-mix(in srgb, var(--synapse-color-danger) 9%, transparent);
 }
 
 @media (max-width: 860px) {
-  .vault-page {
-    grid-template-columns: 1fr;
+  .vault-page > :deep(.app-shell-sidebar) {
+    max-height: 22rem;
   }
 
-  .vault-panes {
-    grid-template-columns: 1fr;
+  .vault-workspace {
+    height: auto;
+    min-height: 70vh;
+  }
+
+  .workspace-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .workspace-meta {
+    flex-wrap: wrap;
   }
 }
 </style>

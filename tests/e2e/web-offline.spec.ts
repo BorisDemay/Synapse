@@ -18,7 +18,9 @@ test("edits offline then syncs the encrypted outbox after reconnect", async ({
   ).toBeVisible({ timeout: 30_000 });
   await page.getByLabel("Phrase de déchiffrement").fill(passphrase);
   await page.getByRole("button", { name: "Créer et déverrouiller" }).click();
-  await expect(page.getByRole("heading", { name: "Coffre" })).toBeVisible({
+  await expect(
+    page.getByRole("heading", { name: "Coffre", exact: true }),
+  ).toBeVisible({
     timeout: 30_000,
   });
 
@@ -39,7 +41,7 @@ test("edits offline then syncs the encrypted outbox after reconnect", async ({
   await expect(page.getByRole("status")).toHaveText("offline", {
     timeout: 30_000,
   });
-  await expect(page.getByLabel("Aperçu Markdown")).toContainText("offline edit");
+  await expect(page.getByLabel("Éditeur Markdown")).toContainText("offline edit");
 
   await context.setOffline(false);
   await page.evaluate(async () => {

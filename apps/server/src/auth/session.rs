@@ -41,7 +41,7 @@ impl SessionToken {
         URL_SAFE_NO_PAD.encode(self.0)
     }
 
-    fn hash(&self) -> Vec<u8> {
+    pub(crate) fn hash(&self) -> Vec<u8> {
         Sha256::digest(self.0).to_vec()
     }
 }
@@ -102,6 +102,87 @@ pub async fn revoke(pool: &PgPool, token: &SessionToken) -> Result<(), SessionEr
     sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
         .bind(token.hash())
         .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|_| SessionError::Database)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedSession {
+    pub created_at: String,
+    pub current: bool,
+    pub id: String,
+}
+
+pub async fn list_for_user(
+    pool: &PgPool,
+    user_id: Uuid,
+    current: &SessionToken,
+    now: SystemTime,
+) -> Result<Vec<ListedSession>, SessionError> {
+    let current_hash = current.hash();
+    let rows = sqlx::query_as::<_, (String, String, Vec<u8>)>(
+        "SELECT id::text, created_at::text, token_hash FROM sessions \
+         WHERE user_id = $1::uuid AND expires_at > to_timestamp($2) \
+         ORDER BY created_at DESC",
+    )
+    .bind(user_id.to_string())
+    .bind(unix_seconds(now)?)
+    .fetch_all(pool)
+    .await
+    .map_err(|_| SessionError::Database)?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, created_at, token_hash)| ListedSession {
+            current: token_hash == current_hash,
+            created_at,
+            id,
+        })
+        .collect())
+}
+
+pub async fn revoke_id(
+    pool: &PgPool,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> Result<bool, SessionError> {
+    let result = sqlx::query("DELETE FROM sessions WHERE id = $1::uuid AND user_id = $2::uuid")
+        .bind(session_id.to_string())
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await
+        .map_err(|_| SessionError::Database)?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn revoke_others(
+    pool: &PgPool,
+    user_id: Uuid,
+    current: &SessionToken,
+) -> Result<(), SessionError> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = $1::uuid AND token_hash <> $2")
+        .bind(user_id.to_string())
+        .bind(current.hash())
+        .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|_| SessionError::Database)
+}
+
+pub async fn delete_account(pool: &PgPool, user_id: Uuid) -> Result<(), SessionError> {
+    let mut transaction = pool.begin().await.map_err(|_| SessionError::Database)?;
+    sqlx::query("DELETE FROM vaults WHERE owner_user_id = $1::uuid")
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| SessionError::Database)?;
+    sqlx::query("DELETE FROM users WHERE id = $1::uuid")
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| SessionError::Database)?;
+    transaction
+        .commit()
         .await
         .map(|_| ())
         .map_err(|_| SessionError::Database)

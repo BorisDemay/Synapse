@@ -75,4 +75,27 @@ async fn mutation_writes_the_file_indexes_it_and_enqueues_only_encrypted_payload
             .any(|window| window == b"# Private note"),
         "pending operation must not contain plaintext Markdown"
     );
+    assert!(
+        !payload
+            .windows(b"notes/atomic.md".len())
+            .any(|window| window == b"notes/atomic.md"),
+        "pending operation must not contain the vault path"
+    );
+
+    let update = VaultMutation::new(
+        note_id.clone(),
+        VaultPath::parse("notes/atomic.md").expect("valid path"),
+        "# Private note\nUpdated [[Roadmap]].",
+        Revision::new(2).expect("positive revision"),
+        Revision::new(1).expect("positive base revision"),
+        2,
+    );
+    orchestrator
+        .mutate(&update)
+        .await
+        .expect("existing note can be replaced");
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("notes/atomic.md")).expect("file reads"),
+        "# Private note\nUpdated [[Roadmap]]."
+    );
 }

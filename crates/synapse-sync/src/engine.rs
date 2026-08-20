@@ -146,6 +146,13 @@ where
     }
 
     pub fn synchronize(&mut self) -> Result<SyncState, SyncError> {
+        let (state, _) = self.synchronize_with_pulled()?;
+        Ok(state)
+    }
+
+    pub fn synchronize_with_pulled(
+        &mut self,
+    ) -> Result<(SyncState, Vec<EncryptedPushOperation>), SyncError> {
         for payload in self.store.pending_operation_payloads()? {
             let operation = serde_json::from_slice::<EncryptedPushOperation>(&payload)
                 .map_err(|_| SyncError::Protocol)?;
@@ -156,7 +163,7 @@ where
                 SyncState::Synced => self
                     .store
                     .acknowledge_operation_id(&operation.operation_id)?,
-                state => return Ok(state),
+                state => return Ok((state, Vec::new())),
             }
         }
 
@@ -169,7 +176,7 @@ where
         if signal.vault_id != self.vault_id {
             return Err(SyncError::Protocol);
         }
-        self.pull_until_current_cursor()
+        self.pull_until_current_cursor().map(|(state, _)| state)
     }
 
     fn push_until_ack(&self, operation: &EncryptedPushOperation) -> Result<SyncState, SyncError> {
@@ -187,13 +194,16 @@ where
                         .scheduler
                         .schedule(self.retry_policy.delay_millis(attempt));
                 }
+                Err(TransportError::Conflict(_)) => return Ok(SyncState::Conflict),
                 Err(TransportError::Protocol) => return Err(SyncError::Protocol),
             }
         }
         Ok(SyncState::Pending)
     }
 
-    fn pull_until_current_cursor(&self) -> Result<SyncState, SyncError> {
+    fn pull_until_current_cursor(
+        &self,
+    ) -> Result<(SyncState, Vec<EncryptedPushOperation>), SyncError> {
         let cursor = self
             .store
             .sync_cursor(&self.vault_id)?
@@ -201,13 +211,16 @@ where
             .transpose()
             .map_err(|_| SyncError::Protocol)?;
         match self.pull(cursor) {
-            Err(TransportError::Network) => Ok(SyncState::Pending),
-            Err(TransportError::Protocol) => Err(SyncError::Protocol),
+            Err(TransportError::Network) => Ok((SyncState::Pending, Vec::new())),
+            Err(TransportError::Protocol | TransportError::Conflict(_)) => Err(SyncError::Protocol),
             Ok(outcome) => self.handle_pull_outcome(outcome),
         }
     }
 
-    fn handle_pull_outcome(&self, outcome: PullOutcome) -> Result<SyncState, SyncError> {
+    fn handle_pull_outcome(
+        &self,
+        outcome: PullOutcome,
+    ) -> Result<(SyncState, Vec<EncryptedPushOperation>), SyncError> {
         match outcome {
             PullOutcome::Page(page) => {
                 if page.protocol_version != PROTOCOL_VERSION {
@@ -217,30 +230,35 @@ where
                     self.store
                         .set_sync_cursor(&self.vault_id, next_cursor.as_str())?;
                 }
-                Ok(SyncState::Synced)
+                Ok((SyncState::Synced, page.operations))
             }
-            PullOutcome::Conflict(_) => Ok(SyncState::Conflict),
+            PullOutcome::Conflict(_) => Ok((SyncState::Conflict, Vec::new())),
             PullOutcome::ResnapshotRequired => {
                 self.store.clear_sync_cursor(&self.vault_id)?;
                 match self.pull(None) {
-                    Err(TransportError::Network) => Ok(SyncState::Pending),
-                    Err(TransportError::Protocol) => Err(SyncError::Protocol),
+                    Err(TransportError::Network) => Ok((SyncState::Pending, Vec::new())),
+                    Err(TransportError::Protocol | TransportError::Conflict(_)) => {
+                        Err(SyncError::Protocol)
+                    }
                     Ok(outcome) => self.handle_resnapshot_outcome(outcome),
                 }
             }
         }
     }
 
-    fn handle_resnapshot_outcome(&self, outcome: PullOutcome) -> Result<SyncState, SyncError> {
+    fn handle_resnapshot_outcome(
+        &self,
+        outcome: PullOutcome,
+    ) -> Result<(SyncState, Vec<EncryptedPushOperation>), SyncError> {
         match outcome {
             PullOutcome::Page(page) if page.protocol_version == PROTOCOL_VERSION => {
                 if let Some(next_cursor) = page.next_cursor {
                     self.store
                         .set_sync_cursor(&self.vault_id, next_cursor.as_str())?;
                 }
-                Ok(SyncState::Synced)
+                Ok((SyncState::Synced, page.operations))
             }
-            PullOutcome::Conflict(_) => Ok(SyncState::Conflict),
+            PullOutcome::Conflict(_) => Ok((SyncState::Conflict, Vec::new())),
             PullOutcome::ResnapshotRequired | PullOutcome::Page(_) => Err(SyncError::Protocol),
         }
     }

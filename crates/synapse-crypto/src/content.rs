@@ -50,14 +50,14 @@ impl Aad {
         }
     }
 
+    /// Wire AAD used by web and desktop. `revision` may be `0` for the first
+    /// encrypted push of a vault (`base_revision` on the protocol).
+    pub fn wire_bytes(vault_id: &VaultId, note_id: &NoteId, revision: u64) -> Vec<u8> {
+        format!("synapse/aad/{AAD_VERSION}/{vault_id}/{note_id}/{revision}").into_bytes()
+    }
+
     fn bytes(&self) -> Vec<u8> {
-        format!(
-            "synapse/aad/{AAD_VERSION}/{}/{}/{}",
-            self.vault_id,
-            self.note_id,
-            self.revision.get()
-        )
-        .into_bytes()
+        Self::wire_bytes(&self.vault_id, &self.note_id, self.revision.get())
     }
 }
 
@@ -71,6 +71,10 @@ impl EncryptedContent {
     /// are never exposed.
     pub fn into_transport_parts(self) -> ([u8; 24], Vec<u8>) {
         (self.nonce, self.ciphertext)
+    }
+
+    pub fn from_transport_parts(nonce: [u8; 24], ciphertext: Vec<u8>) -> Self {
+        Self { nonce, ciphertext }
     }
 }
 
@@ -119,12 +123,17 @@ impl VaultCipher {
 
     pub fn encrypt(&self, aad: &Aad, plaintext: &[u8]) -> Result<EncryptedContent, CryptoError> {
         let nonce: [u8; 24] = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
+        self.encrypt_with_nonce(&aad.bytes(), plaintext, nonce)
+    }
+
+    pub fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<EncryptedContent, CryptoError> {
+        let nonce: [u8; 24] = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
         self.encrypt_with_nonce(aad, plaintext, nonce)
     }
 
     fn encrypt_with_nonce(
         &self,
-        aad: &Aad,
+        aad: &[u8],
         plaintext: &[u8],
         nonce: [u8; 24],
     ) -> Result<EncryptedContent, CryptoError> {
@@ -144,7 +153,7 @@ impl VaultCipher {
                 (&nonce).into(),
                 Payload {
                     msg: plaintext,
-                    aad: &aad.bytes(),
+                    aad,
                 },
             )
             .map_err(|_| CryptoError::EncryptionFailed)?;
@@ -153,6 +162,10 @@ impl VaultCipher {
     }
 
     pub fn decrypt(&self, aad: &Aad, content: &EncryptedContent) -> Result<Vec<u8>, CryptoError> {
+        self.open(&aad.bytes(), content)
+    }
+
+    pub fn open(&self, aad: &[u8], content: &EncryptedContent) -> Result<Vec<u8>, CryptoError> {
         let cipher = XChaCha20Poly1305::new_from_slice(&self.key.0[..])
             .map_err(|_| CryptoError::DecryptionFailed)?;
         cipher
@@ -160,7 +173,7 @@ impl VaultCipher {
                 (&content.nonce).into(),
                 Payload {
                     msg: &content.ciphertext,
-                    aad: &aad.bytes(),
+                    aad,
                 },
             )
             .map_err(|_| CryptoError::DecryptionFailed)
@@ -184,12 +197,12 @@ mod tests {
         let nonce = [7_u8; 24];
 
         cipher
-            .encrypt_with_nonce(&aad, b"first", nonce)
+            .encrypt_with_nonce(&aad.bytes(), b"first", nonce)
             .expect("first use succeeds");
 
         assert_eq!(
             cipher
-                .encrypt_with_nonce(&aad, b"second", nonce)
+                .encrypt_with_nonce(&aad.bytes(), b"second", nonce)
                 .expect_err("nonce reuse is rejected"),
             CryptoError::NonceAlreadyUsed
         );

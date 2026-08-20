@@ -1,6 +1,8 @@
 # Synapse local quality gates (AGPLv3).
 # Requires: Rust toolchain, pnpm, just, cargo-nextest, cargo-deny.
-# Integration/e2e paths expect PostgreSQL on 127.0.0.1:55432 (see infra/docker/compose.test.yml).
+# Tests use synapse_test on 127.0.0.1:55432. Interactive `just serve` / `just dev`
+# / `just desktop` use synapse_dev on the same instance so cargo tests
+# (DROP SCHEMA / TRUNCATE) cannot delete local accounts.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
@@ -8,6 +10,69 @@ export PATH := env_var_or_default("HOME", "/root") + "/.cargo/bin:" + env_var("P
 
 default:
     @just --list
+
+# Start the shared test/dev PostgreSQL (synapse_test for cargo tests, synapse_dev for the API).
+db:
+    docker compose -f infra/docker/compose.test.yml up -d --wait
+    docker compose -f infra/docker/compose.test.yml exec -T postgres \
+      psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'synapse_dev'" \
+      | grep -qx 1 \
+      || docker compose -f infra/docker/compose.test.yml exec -T postgres \
+        psql -U postgres -c "CREATE DATABASE synapse_dev"
+
+# Local API against the persistent synapse_dev database (not the wipeable test DB).
+# JSON API only — pair with `just web`, or use `just dev` for both.
+serve: db
+    @echo "API  http://${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}"
+    @echo "UI   http://localhost:5173"
+    mkdir -p synapse-blobs synapse-mail
+    SYNAPSE_BIND_ADDR="${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}" \
+    SYNAPSE_DATABASE_URL="${SYNAPSE_DATABASE_URL:-postgres://postgres@127.0.0.1:55432/synapse_dev}" \
+    SYNAPSE_STORAGE_PATH="${SYNAPSE_STORAGE_PATH:-$PWD/synapse-blobs}" \
+    SYNAPSE_MAIL_DIRECTORY="${SYNAPSE_MAIL_DIRECTORY:-$PWD/synapse-mail}" \
+    SYNAPSE_ALLOWED_ORIGIN="${SYNAPSE_ALLOWED_ORIGIN:-http://localhost:5173}" \
+    SYNAPSE_ALLOW_PUBLIC_SIGNUP="${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}" \
+    SYNAPSE_COOKIE_SECURE="${SYNAPSE_COOKIE_SECURE:-false}" \
+    SYNAPSE_ENV="${SYNAPSE_ENV:-development}" \
+      cargo run -p synapse-server
+
+# Vite web UI; proxies API calls to just serve on :3000.
+web:
+    pnpm --filter @synapse/web dev --host localhost --port 5173
+
+# API + Vite in one terminal. Ctrl+C stops both.
+[parallel]
+dev: serve web
+
+# Native Tauri client + local API. Ctrl+C stops both.
+[parallel]
+desktop: desktop-serve tauri
+
+# API for the desktop client. CSRF origin matches the instance URL (ADR 0009).
+[private]
+desktop-serve: db
+    @echo "API      http://${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}"
+    @echo "Desktop  native window (Vite http://127.0.0.1:1420)"
+    mkdir -p synapse-blobs synapse-mail
+    SYNAPSE_BIND_ADDR="${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}" \
+    SYNAPSE_DATABASE_URL="${SYNAPSE_DATABASE_URL:-postgres://postgres@127.0.0.1:55432/synapse_dev}" \
+    SYNAPSE_STORAGE_PATH="${SYNAPSE_STORAGE_PATH:-$PWD/synapse-blobs}" \
+    SYNAPSE_MAIL_DIRECTORY="${SYNAPSE_MAIL_DIRECTORY:-$PWD/synapse-mail}" \
+    SYNAPSE_ALLOWED_ORIGIN="${SYNAPSE_ALLOWED_ORIGIN:-http://127.0.0.1:3000}" \
+    SYNAPSE_ALLOW_PUBLIC_SIGNUP="${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}" \
+    SYNAPSE_COOKIE_SECURE="${SYNAPSE_COOKIE_SECURE:-false}" \
+    SYNAPSE_ENV="${SYNAPSE_ENV:-development}" \
+      cargo run -p synapse-server
+
+# Tauri window only (local vault). Pair with `just desktop` for Postgres + API.
+# WSLg forwards the XKB layout to WebKit; default to French while allowing an override.
+tauri:
+    if [ -n "${WSL_INTEROP:-}" ] && command -v setxkbmap >/dev/null 2>&1; then \
+      setxkbmap -layout "${SYNAPSE_KEYBOARD_LAYOUT:-fr}"; \
+    fi; \
+    GDK_BACKEND="${GDK_BACKEND:-x11}" \
+    WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}" \
+      pnpm --filter @synapse/desktop tauri dev
 
 # Format check, clippy, tests, frontend gates, Playwright smoke, cargo-deny, pnpm audit.
 verify: fmt-check clippy test-rust test-js typecheck lint audit-rust audit-js e2e-smoke

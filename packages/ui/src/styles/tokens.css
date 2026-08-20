@@ -1,42 +1,360 @@
 :root {
-  --synapse-color-surface: #ffffff;
-  --synapse-color-surface-muted: #f4f4f5;
-  --synapse-color-text: #18181b;
-  --synapse-color-border: #d4d4d8;
-  --synapse-color-accent: #2563eb;
+  --synapse-color-surface: #f8fafc;
+  --synapse-color-surface-raised: #ffffff;
+  --synapse-color-surface-muted: #eef2f7;
+  --synapse-color-surface-accent: #e8f0ff;
+  --synapse-color-text: #172033;
+  --synapse-color-text-muted: #64748b;
+  --synapse-color-border: #d9e1ec;
+  --synapse-color-accent: #4f46e5;
+  --synapse-color-accent-strong: #3730a3;
+  --synapse-color-accent-contrast: #ffffff;
+  --synapse-color-success: #0f9f6e;
+  --synapse-color-warning: #c47b14;
+  --synapse-color-danger: #d14343;
+  --synapse-shadow-sm: 0 1px 2px rgb(15 23 42 / 5%);
+  --synapse-shadow-md: 0 18px 50px rgb(15 23 42 / 10%);
   --synapse-space-1: 0.25rem;
   --synapse-space-2: 0.5rem;
   --synapse-space-3: 0.75rem;
   --synapse-space-4: 1rem;
-  --synapse-radius: 0.375rem;
+  --synapse-space-5: 1.25rem;
+  --synapse-space-6: 1.5rem;
+  --synapse-space-8: 2rem;
+  --synapse-radius-sm: 0.5rem;
+  --synapse-radius-md: 0.8rem;
+  --synapse-radius-lg: 1.2rem;
+  --synapse-font-sans: "Inter", "Avenir Next", "Segoe UI", sans-serif;
+  --synapse-font-mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+}
+
+.synapse-dark {
+  --synapse-color-surface: #0f172a;
+  --synapse-color-surface-raised: #172033;
+  --synapse-color-surface-muted: #1e293b;
+  --synapse-color-surface-accent: #25245a;
+  --synapse-color-text: #e5e7eb;
+  --synapse-color-text-muted: #a5b4c7;
+  --synapse-color-border: #334155;
+  --synapse-color-accent: #818cf8;
+  --synapse-color-accent-strong: #a5b4fc;
+  --synapse-color-accent-contrast: #111827;
+  --synapse-shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --synapse-shadow-md: 0 18px 50px rgb(0 0 0 / 30%);
 }
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+  grid-template-columns: 17rem minmax(0, 1fr);
   min-height: 100%;
   color: var(--synapse-color-text);
-  background: var(--synapse-color-surface);
+  background:
+    radial-gradient(
+      circle at 12% 0%,
+      var(--synapse-color-surface-accent),
+      transparent 28rem
+    ),
+    var(--synapse-color-surface);
+}
+
+.app-shell:has(> .app-shell-relations) {
+  grid-template-columns: 17rem minmax(0, 1fr) 16rem;
+}
+
+.app-shell:has(> .app-shell-assistant) {
+  grid-template-columns: 17rem minmax(0, 1fr) minmax(18rem, 24rem);
+}
+
+.app-shell:has(> .app-shell-assistant-history) {
+  grid-template-columns: 17rem minmax(0, 1fr) minmax(13rem, 16rem);
+}
+
+.app-shell:has(> .app-shell-relations):has(> .app-shell-assistant) {
+  grid-template-columns: 17rem minmax(0, 1fr) 16rem minmax(18rem, 24rem);
+}
+
+.app-shell:has(> .app-shell-assistant-history):has(> .app-shell-assistant) {
+  grid-template-columns: 17rem minmax(0, 1fr) minmax(13rem, 16rem) minmax(
+      18rem,
+      24rem
+    );
+}
+
+.app-shell:has(> .app-shell-relations):has(> .app-shell-assistant-history):has(
+    > .app-shell-assistant
+  ) {
+  grid-template-columns: 17rem minmax(0, 1fr) 16rem minmax(13rem, 16rem) minmax(
+      18rem,
+      24rem
+    );
 }
 
 .app-shell > aside {
-  padding: var(--synapse-space-4);
-  background: var(--synapse-color-surface-muted);
+  padding: var(--synapse-space-5);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 90%,
+    transparent
+  );
   border-inline-end: 1px solid var(--synapse-color-border);
 }
 
 .app-shell > main {
   min-width: 0;
-  padding: var(--synapse-space-4);
+  padding: var(--synapse-space-6);
+}
+
+.app-shell > .app-shell-relations,
+.app-shell > .app-shell-assistant,
+.app-shell > .app-shell-assistant-history {
+  display: flex;
+  min-width: 0;
+  padding: var(--synapse-space-5);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 92%,
+    transparent
+  );
+  border-inline-start: 1px solid var(--synapse-color-border);
+}
+
+.app-shell > .app-shell-relations {
+  flex-direction: column;
+  gap: 1.25rem;
+  overflow: auto;
+}
+
+.app-shell > .app-shell-assistant-history {
+  overflow: auto;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--synapse-space-2);
+  border: 1px solid var(--synapse-color-border);
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  cursor: pointer;
+  font: inherit;
+  box-shadow: var(--synapse-shadow-sm);
+}
+
+.theme-toggle:hover {
+  border-color: var(--synapse-color-accent);
+}
+
+.p-button,
+button[data-pc-name="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--synapse-color-accent);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-accent-contrast);
+  background: var(--synapse-color-accent);
+  box-shadow: var(--synapse-shadow-sm);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.p-button:hover:not(:disabled),
+button[data-pc-name="button"]:hover:not(:disabled) {
+  border-color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-accent-strong);
+}
+
+.p-button:active:not(:disabled),
+button[data-pc-name="button"]:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.p-button:disabled,
+button[data-pc-name="button"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.p-button.p-button-outlined,
+button[data-pc-name="button"][data-p-variant="outlined"],
+button[data-pc-name="button"][data-p-outlined] {
+  color: var(--synapse-color-accent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.p-button.p-button-outlined:hover:not(:disabled),
+button[data-pc-name="button"][data-p-variant="outlined"]:hover:not(:disabled),
+button[data-pc-name="button"][data-p-outlined]:hover:not(:disabled) {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+}
+
+.p-inputtext,
+.p-textarea,
+.p-password-input,
+input[data-pc-name="inputtext"],
+input[data-pc-extend="inputtext"],
+textarea[data-pc-name="textarea"] {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  font: inherit;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.p-inputtext::placeholder,
+.p-textarea::placeholder,
+input[data-pc-name="inputtext"]::placeholder,
+input[data-pc-extend="inputtext"]::placeholder,
+textarea[data-pc-name="textarea"]::placeholder {
+  color: var(--synapse-color-text-muted);
+}
+
+.p-inputtext:enabled:focus,
+.p-textarea:enabled:focus,
+.p-password-input:enabled:focus,
+input[data-pc-name="inputtext"]:enabled:focus,
+input[data-pc-extend="inputtext"]:enabled:focus,
+textarea[data-pc-name="textarea"]:enabled:focus {
+  border-color: var(--synapse-color-accent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--synapse-color-accent) 18%, transparent);
+  outline: 0;
+}
+
+.p-password,
+div[data-pc-name="password"] {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+}
+
+.p-password-input,
+input[data-pc-extend="inputtext"] {
+  padding-inline-end: 2.75rem;
+}
+
+.p-password-toggle-mask,
+div[data-pc-name="password"] > svg[data-pc-section$="icon"] {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.p-message,
+div[data-pc-name="message"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-muted);
+}
+
+.p-message.p-message-error,
+div[data-pc-name="message"][data-p-severity="error"] {
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-danger) 35%,
+    var(--synapse-color-border)
+  );
+  color: var(--synapse-color-danger);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-danger) 9%,
+    var(--synapse-color-surface-raised)
+  );
+}
+
+.p-message.p-message-info,
+div[data-pc-name="message"][data-p-severity="info"] {
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 35%,
+    var(--synapse-color-border)
+  );
+  color: var(--synapse-color-accent-strong);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 9%,
+    var(--synapse-color-surface-raised)
+  );
 }
 
 @media (max-width: 48rem) {
-  .app-shell {
+  .app-shell,
+  .app-shell:has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-assistant-history),
+  .app-shell:has(> .app-shell-relations),
+  .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-relations):has(
+      > .app-shell-assistant-history
+    ):has(> .app-shell-assistant) {
     grid-template-columns: 1fr;
   }
 
   .app-shell > aside {
     border-inline-end: 0;
     border-block-end: 1px solid var(--synapse-color-border);
+  }
+
+  .app-shell > .app-shell-assistant,
+  .app-shell > .app-shell-assistant-history {
+    border-inline-start: 0;
+  }
+
+  .app-shell > main {
+    padding: var(--synapse-space-4);
+  }
+}
+
+@media (min-width: 48.01rem) {
+  .app-shell {
+    overflow-x: auto;
+  }
+
+  .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant) {
+    grid-template-columns: 17rem minmax(30rem, 1fr) 16rem minmax(18rem, 24rem);
+    min-width: 71rem;
+  }
+
+  .app-shell:has(> .app-shell-relations):has(
+      > .app-shell-assistant-history
+    ):has(> .app-shell-assistant) {
+    grid-template-columns: 17rem minmax(30rem, 1fr) 16rem minmax(
+        13rem,
+        16rem
+      ) minmax(18rem, 24rem);
+    min-width: 84rem;
   }
 }

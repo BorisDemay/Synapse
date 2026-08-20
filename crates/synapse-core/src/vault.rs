@@ -2,10 +2,11 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::{ContentHash, VaultPath, fs};
+use crate::{ContentHash, VaultAssetPath, VaultPath, fs};
 
 const MAX_NOTE_BYTES: usize = 10 * 1024 * 1024;
 
+#[derive(Clone)]
 pub struct VaultService {
     root: PathBuf,
 }
@@ -87,6 +88,45 @@ impl VaultService {
     }
 
     pub async fn delete_note(&self, path: &VaultPath) -> VaultResult<()> {
+        fs::move_to_trash(&self.root, path.as_str()).await
+    }
+
+    pub async fn create_attachment(
+        &self,
+        path: &VaultAssetPath,
+        content: &[u8],
+    ) -> VaultResult<()> {
+        if content.len() > MAX_NOTE_BYTES {
+            return Err(VaultError::NoteTooLarge);
+        }
+        fs::write_bytes_atomically(&self.root, path.as_str(), content).await
+    }
+
+    pub async fn read_attachment(&self, path: &VaultAssetPath) -> VaultResult<Vec<u8>> {
+        fs::read_bytes(&self.root, path.as_str()).await
+    }
+
+    pub async fn replace_attachment_if_unchanged(
+        &self,
+        path: &VaultAssetPath,
+        expected_hash: &ContentHash,
+        content: &[u8],
+    ) -> VaultResult<()> {
+        if content.len() > MAX_NOTE_BYTES {
+            return Err(VaultError::NoteTooLarge);
+        }
+        fs::replace_bytes_if_unchanged(&self.root, path.as_str(), expected_hash, content).await
+    }
+
+    pub async fn rename_attachment(
+        &self,
+        source: &VaultAssetPath,
+        destination: &VaultAssetPath,
+    ) -> VaultResult<()> {
+        fs::rename_note(&self.root, source.as_str(), destination.as_str()).await
+    }
+
+    pub async fn delete_attachment(&self, path: &VaultAssetPath) -> VaultResult<()> {
         fs::move_to_trash(&self.root, path.as_str()).await
     }
 }

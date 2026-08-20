@@ -62,4 +62,9 @@ BEGIN
     DELETE FROM notes_fts WHERE note_id = old.note_id;
 END;
 
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY NOT NULL,
+    value BLOB NOT NULL
+);
+
 INSERT OR IGNORE INTO schema_migrations (migration_id) VALUES ('0001_initial');

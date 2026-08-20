@@ -14,9 +14,14 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@noble/ciphers": "2.3.0",
+    "@primeuix/styles": "2.0.3",
+    "@synapse/ui": "workspace:*",
     "@tauri-apps/api": "2.11.1",
     "pinia": "4.0.2",
-    "vue": "3.5.13"
+    "primevue": "^4.5.4",
+    "vue": "3.5.13",
+    "vue-router": "4.5.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4",

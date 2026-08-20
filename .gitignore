@@ -11,6 +11,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+/synapse-blobs/
+/synapse-mail/
 
 # Test and build artifacts
 /coverage/

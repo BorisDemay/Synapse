@@ -11,16 +11,19 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src 'self' https://api.openai.com https://auth.openai.com https://chatgpt.com"
     },
     "windows": [
       {
         "label": "main",
         "title": "Synapse",
-        "width": 1024,
-        "height": 720,
+        "width": 1100,
+        "height": 740,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "decorations": true,
+        "shadow": true,
+        "backgroundColor": "#0f172a"
       }
     ]
   },

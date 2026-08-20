@@ -10,6 +10,21 @@ impl ContentHash {
     pub fn from_bytes(value: &[u8]) -> Self {
         Self(Sha256::digest(value).into())
     }
+
+    pub fn from_hex(value: &str) -> Option<Self> {
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return None;
+        }
+        let mut bytes = [0_u8; 32];
+        for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+            bytes[index] = u8::from_str_radix(std::str::from_utf8(chunk).ok()?, 16).ok()?;
+        }
+        Some(Self(bytes))
+    }
 }
 
 impl fmt::Display for ContentHash {
@@ -35,6 +50,10 @@ macro_rules! uuid_v7_id {
         impl $name {
             pub fn new() -> Self {
                 Self(Uuid::now_v7())
+            }
+
+            pub fn parse(value: &str) -> Result<Self, uuid::Error> {
+                Ok(Self(Uuid::parse_str(value)?))
             }
         }
 

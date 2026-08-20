@@ -58,6 +58,22 @@ describe("VaultTree", () => {
     expect(wrapper.emitted("select")?.[0]).toEqual(["note-2"]);
   });
 
+  it("lie une note à l'assistant avec Control+clic sans changer la sélection", async () => {
+    const wrapper = mount(VaultTree, {
+      props: { attachedIds: ["note-2"], nodes },
+    });
+
+    await wrapper
+      .findAll('[role="treeitem"]')[1]
+      .trigger("click", { ctrlKey: true });
+
+    expect(wrapper.emitted("attach")?.[0]).toEqual(["note-2"]);
+    expect(wrapper.emitted("select")).toBeUndefined();
+    expect(
+      wrapper.findAll('[role="treeitem"]')[1].attributes("data-attached"),
+    ).toBe("true");
+  });
+
   it("expose la note sélectionnée aux technologies d'assistance", async () => {
     const wrapper = mount(VaultTree, { props: { nodes } });
 
@@ -71,8 +87,76 @@ describe("VaultTree", () => {
   it("annonce un coffre vide", () => {
     const wrapper = mount(VaultTree, { props: { nodes: [] } });
 
-    expect(wrapper.get('[role="status"]').text()).toBe(
-      "Aucune note dans ce coffre.",
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "Votre coffre est vide",
     );
+  });
+
+  it("expose une poubelle nommée sur chaque note", () => {
+    const wrapper = mount(VaultTree, { props: { nodes } });
+
+    expect(
+      wrapper
+        .findAll('[role="treeitem"]')
+        .map((item) =>
+          item.get('button[aria-label^="Supprimer"]').attributes("aria-label"),
+        ),
+    ).toEqual(["Supprimer Première note", "Supprimer Deuxième note"]);
+  });
+
+  it("supprime une note au clic sur la poubelle sans changer la sélection", async () => {
+    const wrapper = mount(VaultTree, { props: { nodes } });
+
+    await wrapper
+      .findAll('[role="treeitem"]')[1]
+      .get('button[aria-label="Supprimer Deuxième note"]')
+      .trigger("click");
+
+    expect(wrapper.emitted("delete")?.[0]).toEqual(["note-2"]);
+    expect(wrapper.emitted("select")).toBeUndefined();
+  });
+
+  it("supprime la note focalisée avec la touche Delete", async () => {
+    const wrapper = mount(VaultTree, { props: { nodes } });
+
+    await wrapper
+      .get('[role="treeitem"]')
+      .trigger("keydown", { key: "Delete" });
+
+    expect(wrapper.emitted("delete")?.[0]).toEqual(["note-1"]);
+  });
+
+  it("affiche les dossiers, les pastilles de sync et masque la poubelle des dossiers", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              {
+                id: "projets/roadmap.md",
+                kind: "note",
+                label: "Roadmap",
+                syncStatus: "pending",
+              },
+            ],
+            id: "folder:projets",
+            kind: "folder",
+            label: "projets",
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.get('[data-kind="folder"]').text()).toContain("projets");
+    expect(wrapper.get('[data-status="pending"]').exists()).toBe(true);
+    expect(
+      wrapper
+        .get('[data-kind="folder"]')
+        .find(":scope > .vault-tree-row button[aria-label^='Supprimer']")
+        .exists(),
+    ).toBe(false);
+
+    await wrapper.get('[data-kind="folder"]').trigger("click");
+    expect(wrapper.find('[data-kind="note"]').exists()).toBe(false);
   });
 });

@@ -2,8 +2,9 @@
 import { ref } from "vue";
 
 export interface HistoryPanelEntry {
-  revision: number;
   label: string;
+  recordedAt?: string;
+  revision: number;
 }
 
 const props = defineProps<{
@@ -38,6 +39,7 @@ function confirmRestore() {
       <li v-for="entry in props.entries" :key="entry.revision">
         <button type="button" @click="requestRestore(entry)">
           {{ entry.label }}
+          <small v-if="entry.recordedAt">{{ entry.recordedAt }}</small>
         </button>
       </li>
     </ul>
