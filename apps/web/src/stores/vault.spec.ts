@@ -75,6 +75,7 @@ describe("vault store", () => {
     await vault.savePreferences({
       ...vault.preferences,
       pinnedNoteIds: [noteId],
+      recentNoteIds: [noteId],
       savedSearches: [
         { id: "search-1", label: "Active", query: "property:status=active" },
       ],

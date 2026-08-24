@@ -325,6 +325,7 @@ export const useVaultStore = defineStore("vault", () => {
     preferences.value = {
       ...next,
       pinnedNoteIds: [...next.pinnedNoteIds],
+      recentNoteIds: [...next.recentNoteIds],
       savedSearches: next.savedSearches.map((search) => ({ ...search })),
     };
   }
@@ -355,6 +356,16 @@ export const useVaultStore = defineStore("vault", () => {
       pinnedNoteIds: pinned.includes(id)
         ? pinned.filter((entry) => entry !== id)
         : [...pinned, id],
+    });
+  }
+
+  async function rememberRecentNote(id: string): Promise<void> {
+    await savePreferences({
+      ...preferences.value,
+      recentNoteIds: [
+        id,
+        ...preferences.value.recentNoteIds.filter((entry) => entry !== id),
+      ].slice(0, 20),
     });
   }
 
@@ -1307,6 +1318,7 @@ export const useVaultStore = defineStore("vault", () => {
     persistAssistantConversations,
     pullCursor,
     rememberCurrentDevice,
+    rememberRecentNote,
     renameNote,
     resolveConflict,
     restoreRevision,

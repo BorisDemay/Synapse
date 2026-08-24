@@ -11,6 +11,7 @@ export interface SavedSearch {
 export interface VaultPreferences {
   dailyNotePattern: string;
   pinnedNoteIds: string[];
+  recentNoteIds: string[];
   savedSearches: SavedSearch[];
   templatesPath: string;
 }
@@ -23,6 +24,7 @@ export interface VaultPreferencesEnvelope {
 export const DEFAULT_VAULT_PREFERENCES: VaultPreferences = {
   dailyNotePattern: "Daily/YYYY-MM-DD.md",
   pinnedNoteIds: [],
+  recentNoteIds: [],
   savedSearches: [],
   templatesPath: "Templates",
 };
@@ -47,6 +49,8 @@ function parsePreferences(value: unknown): VaultPreferences {
     typeof record.dailyNotePattern !== "string" ||
     !Array.isArray(record.pinnedNoteIds) ||
     !record.pinnedNoteIds.every((id) => typeof id === "string") ||
+    !Array.isArray(record.recentNoteIds) ||
+    !record.recentNoteIds.every((id) => typeof id === "string") ||
     !Array.isArray(record.savedSearches) ||
     !record.savedSearches.every(
       (search) =>
@@ -62,6 +66,7 @@ function parsePreferences(value: unknown): VaultPreferences {
   return {
     dailyNotePattern: record.dailyNotePattern,
     pinnedNoteIds: [...record.pinnedNoteIds],
+    recentNoteIds: [...record.recentNoteIds],
     savedSearches: (record.savedSearches as SavedSearch[]).map((search) => ({
       ...search,
     })),

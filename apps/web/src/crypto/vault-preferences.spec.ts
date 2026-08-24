@@ -11,6 +11,7 @@ describe("vault preferences envelope", () => {
     const preferences = {
       dailyNotePattern: "Daily/YYYY-MM-DD.md",
       pinnedNoteIds: ["note-1"],
+      recentNoteIds: ["note-1"],
       savedSearches: [
         { id: "search-1", label: "Active", query: "property:status=active" },
       ],

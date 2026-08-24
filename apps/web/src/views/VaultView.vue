@@ -16,6 +16,7 @@ import {
   buildLocalGraph,
   buildVaultTree,
   parseNote,
+  renderTemplate,
   resolveWikilink,
   sanitizeAttachmentFileName,
   searchLocalNotes,
@@ -146,6 +147,7 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "theme", label: "Basculer le thème" },
   { id: "export", label: "Exporter Markdown" },
   { id: "daily-note", label: "Ouvrir la note quotidienne" },
+  { id: "from-template", label: "Créer une note depuis un modèle" },
   { id: "graph", label: "Afficher le graphe local" },
   { id: "import", label: "Importer un dossier ou ZIP Markdown" },
 ]);
@@ -176,6 +178,12 @@ const pinnedNotes = computed(() =>
     .filter((note): note is QueryNote => Boolean(note)),
 );
 
+const recentNotes = computed(() =>
+  vault.preferences.recentNoteIds
+    .map((id) => queryNotes.value.find((note) => note.id === id))
+    .filter((note): note is QueryNote => Boolean(note)),
+);
+
 const currentQueryNote = computed(() =>
   queryNotes.value.find((note) => note.id === noteId.value),
 );
@@ -186,6 +194,11 @@ const currentBacklinks = computed(() => {
 });
 
 const localGraph = computed(() => buildLocalGraph(queryNotes.value));
+
+const templateNotes = computed(() => {
+  const prefix = `${vault.preferences.templatesPath.replace(/\/$/u, "")}/`;
+  return queryNotes.value.filter((note) => note.path.startsWith(prefix));
+});
 
 const historyEntries = computed(() =>
   vault.historyFor(noteId.value).map((entry) => ({
@@ -210,6 +223,7 @@ function selectNote(id: string) {
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
+  void vault.rememberRecentNote(id);
   formError.value = "";
 }
 
@@ -264,6 +278,31 @@ function startNewNote(folder?: string) {
     });
     selectedNoteId.value = noteId.value;
   }
+}
+
+async function startFromTemplate() {
+  if (!templateNotes.value.length) {
+    formError.value =
+      "Créez une note dans le dossier de modèles configuré d’abord.";
+    return;
+  }
+  const choices = templateNotes.value
+    .map((note, index) => `${index + 1}. ${note.label}`)
+    .join("\n");
+  const answer = window.prompt(`Choisir un modèle :\n${choices}`, "1");
+  const index = Number(answer) - 1;
+  const template = templateNotes.value[index];
+  if (!template) return;
+  const id = uuidV7();
+  const title =
+    window.prompt("Titre de la note", template.label) || template.label;
+  const path = `${title.replaceAll("/", "-").trim() || "nouvelle"}.md`;
+  const markdown = renderTemplate(template.content, {
+    date: new Date(),
+    title,
+  });
+  await vault.saveNote({ content: markdown, id, path });
+  selectNote(id);
 }
 
 async function deleteNote(id: string) {
@@ -584,6 +623,8 @@ function runCommand(id: string) {
     void exportNotes();
   } else if (id === "daily-note") {
     void openDailyNote();
+  } else if (id === "from-template") {
+    void startFromTemplate();
   } else if (id === "graph") {
     graphOpen.value = true;
   } else if (id === "import") {
@@ -768,6 +809,14 @@ watch(settingsOpen, (open) => {
         />
         <Button
           class="new-note-button"
+          icon="pi pi-file-edit"
+          label="Depuis un modèle"
+          outlined
+          type="button"
+          @click="startFromTemplate"
+        />
+        <Button
+          class="new-note-button"
           icon="pi pi-upload"
           label="Importer"
           outlined
@@ -831,6 +880,21 @@ watch(settingsOpen, (open) => {
         <div class="sidebar-section-label">ÉPINGLÉES</div>
         <button
           v-for="note in pinnedNotes"
+          :key="note.id"
+          type="button"
+          @click="selectNote(note.id)"
+        >
+          {{ note.label }}
+        </button>
+      </section>
+      <section
+        v-if="recentNotes.length"
+        class="recent-notes"
+        aria-label="Notes récentes"
+      >
+        <div class="sidebar-section-label">RÉCENTES</div>
+        <button
+          v-for="note in recentNotes"
           :key="note.id"
           type="button"
           @click="selectNote(note.id)"
