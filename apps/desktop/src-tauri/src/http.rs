@@ -224,19 +224,28 @@ impl InstanceClient {
         json: bool,
         csrf: bool,
     ) -> Result<reqwest::Response, String> {
-        let mut request = self
-            .client
-            .request(method, self.join(path)?)
-            .headers(self.headers(json, csrf));
-        if let Some(body) = body {
-            request = request.body(body.to_vec());
+        let url = self.join(path)?;
+        let body = body.map(ToOwned::to_owned);
+        for attempt in 0..4 {
+            let mut request = self
+                .client
+                .request(method.clone(), url.clone())
+                .headers(self.headers(json, csrf));
+            if let Some(body) = body.as_deref() {
+                request = request.body(body.to_owned());
+            }
+            match request.send().await {
+                Ok(response) => {
+                    self.capture_session(response.headers());
+                    return Ok(response);
+                }
+                Err(_) if attempt < 3 => {
+                    tokio::time::sleep(Duration::from_millis(150 * (attempt + 1))).await;
+                }
+                Err(_) => return Err("instance is unreachable".to_owned()),
+            }
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|_| "instance is unreachable".to_owned())?;
-        self.capture_session(response.headers());
-        Ok(response)
+        Err("instance is unreachable".to_owned())
     }
 
     async fn send_json<T: Serialize>(
