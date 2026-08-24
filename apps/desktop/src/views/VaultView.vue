@@ -5,6 +5,7 @@ import {
   AppShell,
   BacklinksPanel,
   ConflictResolver,
+  GraphPanel,
   NoteRelationsPanel,
   MarkdownEditor,
   SearchPalette,
@@ -12,6 +13,7 @@ import {
   ThemeToggle,
   VaultTree,
   backlinksFor,
+  buildLocalGraph,
   buildVaultTree,
   parseNote,
   resolveWikilink,
@@ -44,6 +46,7 @@ const formError = ref("");
 const assistantOpen = ref(false);
 const assistantHistoryOpen = ref(true);
 const noteHistoryOpen = ref(true);
+const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
 const tagFilter = ref("");
@@ -121,6 +124,7 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "lock", label: "Verrouiller le coffre" },
   { id: "settings", label: "Paramètres" },
   { id: "theme", label: "Basculer le thème" },
+  { id: "graph", label: "Afficher le graphe local" },
 ]);
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
@@ -133,6 +137,8 @@ const currentBacklinks = computed(() => {
   const current = currentQueryNote.value;
   return current ? backlinksFor(queryNotes.value, current) : [];
 });
+
+const localGraph = computed(() => buildLocalGraph(queryNotes.value));
 
 const historyEntries = computed(() => vault.history);
 
@@ -385,6 +391,8 @@ function runCommand(id: string) {
     settingsOpen.value = true;
   } else if (id === "theme") {
     theme.toggleTheme();
+  } else if (id === "graph") {
+    graphOpen.value = true;
   }
 }
 
@@ -621,6 +629,12 @@ watch(settingsOpen, (open) => {
             type="button"
             @click="assistantOpen = true"
           />
+          <Button
+            label="Graphe"
+            outlined
+            type="button"
+            @click="graphOpen = !graphOpen"
+          />
         </div>
       </header>
       <ConflictResolver
@@ -653,8 +667,16 @@ watch(settingsOpen, (open) => {
         {{ formError || vault.lastError }}
       </p>
     </section>
-    <template #relations v-if="assistantOpen && noteHistoryOpen">
+    <template #relations v-if="graphOpen || (assistantOpen && noteHistoryOpen)">
+      <GraphPanel
+        v-if="graphOpen"
+        :graph="localGraph"
+        :selected-id="noteId"
+        @close="graphOpen = false"
+        @select="selectNote"
+      />
       <NoteRelationsPanel
+        v-else
         :backlinks="currentBacklinks"
         :history="historyEntries"
         @close="noteHistoryOpen = false"
