@@ -152,6 +152,30 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
 
+const propertySummary = computed(() => {
+  const values = new Map<string, Set<string>>();
+  for (const note of queryNotes.value) {
+    for (const [key, value] of Object.entries(
+      parseNote(note.content).properties,
+    )) {
+      const bucket = values.get(key) ?? new Set<string>();
+      for (const entry of Array.isArray(value) ? value : [value]) {
+        if (entry) bucket.add(entry);
+      }
+      values.set(key, bucket);
+    }
+  }
+  return [...values.entries()]
+    .map(([key, values]) => ({ key, values: [...values].sort() }))
+    .sort((left, right) => left.key.localeCompare(right.key, "fr"));
+});
+
+const pinnedNotes = computed(() =>
+  vault.preferences.pinnedNoteIds
+    .map((id) => queryNotes.value.find((note) => note.id === id))
+    .filter((note): note is QueryNote => Boolean(note)),
+);
+
 const currentQueryNote = computed(() =>
   queryNotes.value.find((note) => note.id === noteId.value),
 );
@@ -556,6 +580,28 @@ async function openDailyNote() {
   }
 }
 
+async function saveSearch() {
+  const query = searchQuery.value.trim();
+  if (!query) return;
+  const label = window.prompt("Nom de la recherche", query);
+  if (!label?.trim()) return;
+  await vault.savePreferences({
+    ...vault.preferences,
+    savedSearches: [
+      ...vault.preferences.savedSearches.filter(
+        (search) => search.query !== query,
+      ),
+      { id: uuidV7(), label: label.trim(), query },
+    ],
+  });
+}
+
+async function toggleCurrentPin() {
+  if (vault.notes.has(noteId.value)) {
+    await vault.togglePinnedNote(noteId.value);
+  }
+}
+
 async function openWikilink(target: string) {
   const existing = resolveWikilink(queryNotes.value, target);
   if (existing) {
@@ -742,6 +788,51 @@ watch(settingsOpen, (open) => {
           #{{ tag }}
         </button>
       </div>
+      <section
+        v-if="propertySummary.length"
+        class="property-browser"
+        aria-label="Propriétés"
+      >
+        <div class="sidebar-section-label">PROPRIÉTÉS</div>
+        <button
+          v-for="property in propertySummary"
+          :key="property.key"
+          type="button"
+          @click="searchQuery = `property:${property.key}`"
+        >
+          {{ property.key }} <small>{{ property.values.length }}</small>
+        </button>
+      </section>
+      <section
+        v-if="pinnedNotes.length"
+        class="pinned-notes"
+        aria-label="Notes épinglées"
+      >
+        <div class="sidebar-section-label">ÉPINGLÉES</div>
+        <button
+          v-for="note in pinnedNotes"
+          :key="note.id"
+          type="button"
+          @click="selectNote(note.id)"
+        >
+          {{ note.label }}
+        </button>
+      </section>
+      <section
+        v-if="vault.preferences.savedSearches.length"
+        class="saved-searches"
+        aria-label="Recherches sauvegardées"
+      >
+        <div class="sidebar-section-label">RECHERCHES</div>
+        <button
+          v-for="search in vault.preferences.savedSearches"
+          :key="search.id"
+          type="button"
+          @click="searchQuery = search.query"
+        >
+          {{ search.label }}
+        </button>
+      </section>
       <div class="sidebar-section-label">NOTES</div>
       <VaultTree
         :attached-ids="assistant.attachedNoteIds"
@@ -797,6 +888,16 @@ watch(settingsOpen, (open) => {
             outlined
             type="button"
             @click="graphOpen = !graphOpen"
+          />
+          <Button
+            :label="
+              vault.preferences.pinnedNoteIds.includes(noteId)
+                ? 'Désépingler'
+                : 'Épingler'
+            "
+            outlined
+            type="button"
+            @click="toggleCurrentPin"
           />
         </div>
       </header>
@@ -854,6 +955,14 @@ watch(settingsOpen, (open) => {
       >
         {{ formError || vault.lastError }}
       </p>
+      <div v-if="searchQuery" class="saved-search-action">
+        <Button
+          label="Enregistrer la recherche"
+          outlined
+          type="button"
+          @click="saveSearch"
+        />
+      </div>
     </section>
     <template #relations v-if="graphOpen || (assistantOpen && noteHistoryOpen)">
       <GraphPanel

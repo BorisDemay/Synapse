@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetOfflineDbHandle } from "../offline/cache";
+import { getVaultPreferences } from "../offline/cache";
 import { useAuthStore } from "./auth";
 import { useVaultStore } from "./vault";
 
@@ -65,6 +66,26 @@ describe("vault store", () => {
     );
     expect(vault.syncStatus).toBe("synced");
     expect(vault.headRevision).toBe(1);
+  });
+
+  it("stores saved searches and pins only in an encrypted local preferences envelope", async () => {
+    const vault = useVaultStore();
+    const key = Uint8Array.from({ length: 32 }, (_, index) => index);
+    vault.unlock(key, vaultId, 0);
+    await vault.savePreferences({
+      ...vault.preferences,
+      pinnedNoteIds: [noteId],
+      savedSearches: [
+        { id: "search-1", label: "Active", query: "property:status=active" },
+      ],
+    });
+
+    const record = await getVaultPreferences(userId, vaultId);
+    expect(JSON.stringify(record)).not.toContain("property:status=active");
+    expect(vault.preferences.pinnedNoteIds).toEqual([noteId]);
+    expect(vault.preferences.savedSearches).toEqual([
+      { id: "search-1", label: "Active", query: "property:status=active" },
+    ]);
   });
 
   it("creates a vault envelope then unlocks it in memory", async () => {
