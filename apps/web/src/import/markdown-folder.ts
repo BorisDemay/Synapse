@@ -67,7 +67,7 @@ function contentTypeFor(path: string, explicit?: string): string {
 }
 
 function attachmentPath(source: string): string {
-  return `attachments/${source}`;
+  return source.startsWith("attachments/") ? source : `attachments/${source}`;
 }
 
 function rewriteAttachmentLinks(

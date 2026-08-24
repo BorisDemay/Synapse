@@ -43,7 +43,7 @@ describe("markdown folder importer", () => {
     const plan = planZipImport(zip);
     expect(plan.notes.map((note) => note.path)).toEqual(["Inbox.md"]);
     expect(plan.attachments.map((file) => file.path)).toEqual([
-      "attachments/attachments/file.txt",
+      "attachments/file.txt",
     ]);
     expect(plan.ignored).toEqual([]);
   });
