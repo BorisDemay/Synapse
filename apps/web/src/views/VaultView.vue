@@ -205,6 +205,24 @@ const templateNotes = computed(() => {
   return queryNotes.value.filter((note) => note.path.startsWith(prefix));
 });
 
+const importCollisions = computed(() => {
+  if (!importPlan.value) return [];
+  const notePaths = new Set(
+    Array.from(vault.notes.values()).map((note) => note.path),
+  );
+  const attachmentPaths = new Set(
+    Array.from(vault.attachments.values()).map((attachment) => attachment.path),
+  );
+  return [
+    ...importPlan.value.notes
+      .filter((note) => notePaths.has(note.path))
+      .map((note) => note.path),
+    ...importPlan.value.attachments
+      .filter((attachment) => attachmentPaths.has(attachment.path))
+      .map((attachment) => attachment.path),
+  ];
+});
+
 const historyEntries = computed(() =>
   vault.historyFor(noteId.value).map((entry) => ({
     label: `Révision ${entry.revision}`,
@@ -1053,6 +1071,32 @@ watch(settingsOpen, (open) => {
           {{ importPlan.ignored.length }} éléments ignorés pour sécurité ou
           compatibilité.
         </p>
+        <p v-if="importCollisions.length" class="import-warning" role="status">
+          {{ importCollisions.length }} éléments existants seront remplacés.
+        </p>
+        <details>
+          <summary>Détails de l’import</summary>
+          <ul>
+            <li
+              v-for="note in importPlan.notes.slice(0, 20)"
+              :key="`note-${note.path}`"
+            >
+              Note : {{ note.path }}
+            </li>
+            <li
+              v-for="attachment in importPlan.attachments.slice(0, 20)"
+              :key="`attachment-${attachment.path}`"
+            >
+              Pièce jointe : {{ attachment.path }}
+            </li>
+            <li
+              v-for="ignored in importPlan.ignored.slice(0, 20)"
+              :key="`ignored-${ignored.path}`"
+            >
+              Ignoré : {{ ignored.path }} — {{ ignored.reason }}
+            </li>
+          </ul>
+        </details>
         <div class="import-preview-actions">
           <Button
             label="Annuler"
