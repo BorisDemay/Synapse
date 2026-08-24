@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -15,12 +15,14 @@ const router = useRouter();
 const passphrase = ref("");
 const error = ref("");
 const busy = ref(false);
+const isCreatingVault = computed(() => !vault.vaultName);
 
 async function submit() {
   error.value = "";
+  const creatingVault = isCreatingVault.value;
   try {
     busy.value = true;
-    if (!vault.vaultName) {
+    if (creatingVault) {
       await vault.openOnlineVault();
     }
     await vault.unlock(passphrase.value);
@@ -28,7 +30,9 @@ async function submit() {
     await router.push("/vault");
   } catch {
     passphrase.value = "";
-    error.value = "Impossible de déverrouiller la synchronisation.";
+    error.value = creatingVault
+      ? "Création du coffre impossible."
+      : "Impossible de déverrouiller la synchronisation.";
   } finally {
     busy.value = false;
   }
@@ -43,13 +47,26 @@ async function submit() {
           <span class="brand-symbol" aria-hidden="true">S</span>
           <span>Synapse</span>
         </div>
-        <h1>Déverrouiller la sync.</h1>
+        <h1>
+          {{
+            isCreatingVault
+              ? "Créer votre coffre chiffré."
+              : "Déverrouiller la sync."
+          }}
+        </h1>
         <p>
-          La phrase enveloppe la clé de coffre. Sans dossier ouvert, Synapse
-          crée un coffre local synchronisé pour conserver vos notes en ligne.
+          <template v-if="isCreatingVault">
+            Aucun coffre n’existe encore sur cet appareil. Choisissez une
+            nouvelle phrase pour protéger vos premières notes.
+          </template>
+          <template v-else>
+            La phrase enveloppe la clé de votre coffre synchronisé.
+          </template>
         </p>
       </div>
-      <small>Jamais envoyée au serveur.</small>
+      <small
+        >Jamais envoyée au serveur — elle ne peut pas être récupérée.</small
+      >
     </section>
     <section class="auth-content">
       <div class="auth-card">
@@ -59,14 +76,29 @@ async function submit() {
           >
           <ThemeToggle />
         </div>
-        <h2>Phrase de déchiffrement</h2>
+        <h2>
+          {{
+            isCreatingVault
+              ? "Choisissez une phrase de déchiffrement"
+              : "Phrase de déchiffrement"
+          }}
+        </h2>
         <p class="subtitle">
-          Elle active la file chiffrée vers l’instance. Les notes restent aussi
-          en fichiers Markdown sur cet appareil.
+          {{
+            isCreatingVault
+              ? "Utilisez une phrase longue, unique et mémorable. Elle est distincte du mot de passe de votre compte."
+              : "Elle active la file chiffrée vers l’instance. Les notes restent aussi en fichiers Markdown sur cet appareil."
+          }}
         </p>
         <form class="form-stack" @submit.prevent="submit">
           <div class="form-field">
-            <label for="unlock-passphrase">Phrase du coffre</label>
+            <label for="unlock-passphrase">
+              {{
+                isCreatingVault
+                  ? "Nouvelle phrase de déchiffrement"
+                  : "Phrase du coffre"
+              }}
+            </label>
             <Password
               input-id="unlock-passphrase"
               v-model="passphrase"
@@ -79,7 +111,13 @@ async function submit() {
           </div>
           <Button
             :disabled="busy"
-            :label="busy ? 'Ouverture…' : 'Activer la synchronisation'"
+            :label="
+              busy
+                ? 'Ouverture…'
+                : isCreatingVault
+                  ? 'Créer le coffre chiffré'
+                  : 'Activer la synchronisation'
+            "
             type="submit"
           />
         </form>

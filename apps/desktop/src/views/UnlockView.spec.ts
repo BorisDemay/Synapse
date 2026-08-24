@@ -47,6 +47,11 @@ describe("UnlockView", () => {
       global: { plugins: [pinia, installSynapseUi, router] },
     });
 
+    expect(wrapper.text()).toContain("Créer votre coffre chiffré");
+    expect(wrapper.get('button[type="submit"]').text()).toContain(
+      "Créer le coffre chiffré",
+    );
+
     await wrapper.get("#unlock-passphrase").setValue("phrase secrète");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
