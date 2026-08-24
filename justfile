@@ -54,7 +54,7 @@ desktop: desktop-serve desktop-tauri
 # login window.
 [private]
 desktop-tauri:
-    for attempt in $$(seq 1 60); do \
+    for attempt in {1..60}; do \
       if curl --fail --silent --show-error --max-time 1 \
         "http://${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}/health/ready" >/dev/null; then \
         exec just tauri; \

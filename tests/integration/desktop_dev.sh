@@ -74,6 +74,8 @@ if "db" not in graph:
     fail("just desktop must start PostgreSQL via the db recipe")
 if "/health/ready" not in combined:
     fail("just desktop must wait for the API readiness endpoint before opening Tauri")
+if "$$(" in combined:
+    fail("just desktop readiness loop must not pass an unexpanded command substitution to Bash")
 
 print("just desktop launches postgres, the API, and Tauri")
 PY
