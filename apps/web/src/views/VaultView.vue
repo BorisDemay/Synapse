@@ -35,6 +35,11 @@ import Button from "primevue/button";
 import { isTrustedDeviceSupported } from "../crypto/trusted-device";
 import { uuidV7 } from "../crypto/vault-key";
 import { buildMarkdownZip } from "../export/markdown-zip";
+import {
+  planMarkdownImport,
+  planZipImport,
+  type MarkdownImportPlan,
+} from "../import/markdown-folder";
 import { useAssistantStore } from "../stores/assistant";
 import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
@@ -62,6 +67,9 @@ const settingsError = ref("");
 const settingsStatus = ref("");
 const accountEmail = ref("");
 const sessions = ref<SettingsSession[]>([]);
+const importInput = ref<HTMLInputElement>();
+const importFolderInput = ref<HTMLInputElement>();
+const importPlan = ref<MarkdownImportPlan | null>(null);
 let pendingSave:
   | {
       content: string;
@@ -139,6 +147,7 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "export", label: "Exporter Markdown" },
   { id: "daily-note", label: "Ouvrir la note quotidienne" },
   { id: "graph", label: "Afficher le graphe local" },
+  { id: "import", label: "Importer un dossier ou ZIP Markdown" },
 ]);
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
@@ -412,6 +421,74 @@ async function exportNotes() {
   }
 }
 
+function requestImport() {
+  importInput.value?.click();
+}
+
+function requestFolderImport() {
+  importFolderInput.value?.click();
+}
+
+async function previewImport(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  if (!files.length) {
+    return;
+  }
+  try {
+    if (files.length === 1 && files[0]?.name.toLowerCase().endsWith(".zip")) {
+      importPlan.value = planZipImport(
+        new Uint8Array(await files[0].arrayBuffer()),
+      );
+      return;
+    }
+    importPlan.value = planMarkdownImport(
+      await Promise.all(
+        files.map(async (file) => ({
+          bytes: new Uint8Array(await file.arrayBuffer()),
+          contentType: file.type,
+          path: file.webkitRelativePath || file.name,
+        })),
+      ),
+    );
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Import impossible.";
+  }
+}
+
+async function confirmImport() {
+  const plan = importPlan.value;
+  if (
+    !plan ||
+    !confirm(
+      `Importer ${plan.notes.length} notes et ${plan.attachments.length} pièces jointes ?`,
+    )
+  ) {
+    return;
+  }
+  try {
+    for (const note of plan.notes) {
+      const existing = [...vault.notes.entries()].find(
+        ([, value]) => value.path === note.path,
+      );
+      await vault.saveNote({
+        content: note.content,
+        id: existing?.[0] ?? uuidV7(),
+        path: note.path,
+      });
+    }
+    for (const attachment of plan.attachments) {
+      await vault.saveAttachment(attachment);
+    }
+    importPlan.value = null;
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Import interrompu.";
+  }
+}
+
 async function revokeSession(id: string) {
   settingsError.value = "";
   try {
@@ -465,6 +542,8 @@ function runCommand(id: string) {
     void openDailyNote();
   } else if (id === "graph") {
     graphOpen.value = true;
+  } else if (id === "import") {
+    requestImport();
   }
 }
 
@@ -621,6 +700,36 @@ watch(settingsOpen, (open) => {
           type="button"
           @click="openDailyNote"
         />
+        <Button
+          class="new-note-button"
+          icon="pi pi-upload"
+          label="Importer"
+          outlined
+          type="button"
+          @click="requestImport"
+        />
+        <input
+          ref="importInput"
+          accept=".zip"
+          hidden
+          type="file"
+          @change="previewImport"
+        />
+        <input
+          ref="importFolderInput"
+          hidden
+          multiple
+          type="file"
+          webkitdirectory=""
+          @change="previewImport"
+        />
+        <button
+          class="import-folder-button"
+          type="button"
+          @click="requestFolderImport"
+        >
+          Importer un dossier
+        </button>
       </header>
       <div v-if="allTags.length" class="tag-filter" aria-label="Tags">
         <button
@@ -702,6 +811,31 @@ watch(settingsOpen, (open) => {
         @keep-remote="resolveWith(vault.activeConflict.remote)"
         @edit-manual="resolveWith(vault.activeConflict.manualDraft)"
       />
+      <section
+        v-if="importPlan"
+        class="import-preview"
+        aria-labelledby="import-preview-title"
+      >
+        <h2 id="import-preview-title">Prévisualisation de l’import</h2>
+        <p>
+          {{ importPlan.notes.length }} notes et
+          {{ importPlan.attachments.length }} pièces jointes seront chiffrées
+          localement.
+        </p>
+        <p v-if="importPlan.ignored.length">
+          {{ importPlan.ignored.length }} éléments ignorés pour sécurité ou
+          compatibilité.
+        </p>
+        <div class="import-preview-actions">
+          <Button
+            label="Annuler"
+            outlined
+            type="button"
+            @click="importPlan = null"
+          />
+          <Button label="Importer" type="button" @click="confirmImport" />
+        </div>
+      </section>
       <template v-else>
         <div class="editor-surface">
           <MarkdownEditor

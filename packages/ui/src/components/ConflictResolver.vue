@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { readableLineDiff } from "../markdown/diff";
+import { computed } from "vue";
 const props = defineProps<{
   base: string;
   local: string;
@@ -12,6 +14,9 @@ const emit = defineEmits<{
   "edit-manual": [];
   "update:manualDraft": [value: string];
 }>();
+
+const localDiff = computed(() => readableLineDiff(props.base, props.local));
+const remoteDiff = computed(() => readableLineDiff(props.base, props.remote));
 
 function confirmAction(
   message: string,
@@ -59,6 +64,18 @@ function confirmAction(
       <article>
         <h3>Distante</h3>
         <pre aria-label="Version distante">{{ props.remote }}</pre>
+      </article>
+    </div>
+    <div class="conflict-diffs" aria-label="Diffs lisibles">
+      <article>
+        <h3>Changements locaux</h3>
+        <pre><span v-for="(line, index) in localDiff" :key="`local-${index}`" :data-kind="line.kind">{{ line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " " }} {{ line.text }}
+</span></pre>
+      </article>
+      <article>
+        <h3>Changements distants</h3>
+        <pre><span v-for="(line, index) in remoteDiff" :key="`remote-${index}`" :data-kind="line.kind">{{ line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " " }} {{ line.text }}
+</span></pre>
       </article>
     </div>
 
@@ -175,6 +192,30 @@ function confirmAction(
   gap: 0.75rem;
 }
 
+.conflict-diffs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.conflict-diffs h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+.conflict-diffs pre {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.conflict-diffs [data-kind="added"] {
+  color: #18794e;
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+}
+.conflict-diffs [data-kind="removed"] {
+  color: #b42318;
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+}
+
 .conflict-panes pre {
   margin: 0;
   padding: 0.5rem;
@@ -232,6 +273,9 @@ function confirmAction(
 
 @media (max-width: 900px) {
   .conflict-panes {
+    grid-template-columns: 1fr;
+  }
+  .conflict-diffs {
     grid-template-columns: 1fr;
   }
 }

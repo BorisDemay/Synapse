@@ -26,6 +26,8 @@ export type {
   SearchResult,
 } from "./components/SearchPalette.vue";
 export { parseNote } from "./markdown/parse";
+export { readableLineDiff } from "./markdown/diff";
+export type { LineDiff } from "./markdown/diff";
 export type { ParsedNote } from "./markdown/parse";
 export {
   backlinksFor,
