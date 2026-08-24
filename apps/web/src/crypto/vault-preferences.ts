@@ -49,8 +49,9 @@ function parsePreferences(value: unknown): VaultPreferences {
     typeof record.dailyNotePattern !== "string" ||
     !Array.isArray(record.pinnedNoteIds) ||
     !record.pinnedNoteIds.every((id) => typeof id === "string") ||
-    !Array.isArray(record.recentNoteIds) ||
-    !record.recentNoteIds.every((id) => typeof id === "string") ||
+    (record.recentNoteIds !== undefined &&
+      (!Array.isArray(record.recentNoteIds) ||
+        !record.recentNoteIds.every((id) => typeof id === "string"))) ||
     !Array.isArray(record.savedSearches) ||
     !record.savedSearches.every(
       (search) =>
@@ -66,7 +67,9 @@ function parsePreferences(value: unknown): VaultPreferences {
   return {
     dailyNotePattern: record.dailyNotePattern,
     pinnedNoteIds: [...record.pinnedNoteIds],
-    recentNoteIds: [...record.recentNoteIds],
+    recentNoteIds: Array.isArray(record.recentNoteIds)
+      ? [...record.recentNoteIds]
+      : [],
     savedSearches: (record.savedSearches as SavedSearch[]).map((search) => ({
       ...search,
     })),
