@@ -65,10 +65,15 @@ combined = "\n".join(body_text(recipes[name]) for name in sorted(graph))
 
 if "cargo run -p synapse-server" not in combined:
     fail("just desktop must start the local synapse-server API")
-if "pnpm --filter @synapse/desktop tauri dev" not in combined:
+if (
+    "pnpm --filter @synapse/desktop tauri dev" not in combined
+    and "just tauri" not in combined
+):
     fail("just desktop must start the Tauri desktop client")
 if "db" not in graph:
     fail("just desktop must start PostgreSQL via the db recipe")
+if "/health/ready" not in combined:
+    fail("just desktop must wait for the API readiness endpoint before opening Tauri")
 
 print("just desktop launches postgres, the API, and Tauri")
 PY

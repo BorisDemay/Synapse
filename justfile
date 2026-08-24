@@ -46,7 +46,23 @@ dev: serve web
 
 # Native Tauri client + local API. Ctrl+C stops both.
 [parallel]
-desktop: desktop-serve tauri
+desktop: desktop-serve desktop-tauri
+
+# Wait for migrations and the development fixture before opening the native UI.
+# This remains a parallel dependency of `desktop`, so PostgreSQL/API startup and
+# the readiness wait proceed alongside one another without exposing a half-ready
+# login window.
+[private]
+desktop-tauri:
+    for attempt in $$(seq 1 60); do \
+      if curl --fail --silent --show-error --max-time 1 \
+        "http://${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}/health/ready" >/dev/null; then \
+        exec just tauri; \
+      fi; \
+      sleep 0.25; \
+    done; \
+    echo "Synapse API did not become ready at http://${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}" >&2; \
+    exit 1
 
 # API for the desktop client. CSRF origin matches the instance URL (ADR 0009).
 [private]
