@@ -424,6 +424,26 @@ async function changePassphrase(current: string, next: string) {
   }
 }
 
+async function saveVaultPreferences(
+  templatesPath: string,
+  dailyNotePattern: string,
+) {
+  settingsError.value = "";
+  try {
+    await vault.savePreferences({
+      ...vault.preferences,
+      dailyNotePattern,
+      templatesPath,
+    });
+    settingsStatus.value = "Préférences du coffre enregistrées localement.";
+  } catch (error) {
+    settingsError.value =
+      error instanceof Error
+        ? error.message
+        : "Préférences impossibles à enregistrer.";
+  }
+}
+
 async function exportNotes() {
   settingsError.value = "";
   try {
@@ -1027,11 +1047,13 @@ watch(settingsOpen, (open) => {
     :account-email="accountEmail"
     :device-supported="deviceSupported"
     :device-trusted="deviceTrusted"
+    :daily-note-pattern="vault.preferences.dailyNotePattern"
     :error-message="settingsError"
     :offline="auth.isOfflineSession"
     :open="settingsOpen"
     :sessions="sessions"
     :status-message="settingsStatus"
+    :templates-path="vault.preferences.templatesPath"
     @change-passphrase="changePassphrase"
     @change-password="changePassword"
     @close="settingsOpen = false"
@@ -1042,6 +1064,7 @@ watch(settingsOpen, (open) => {
     @remember-device="rememberDevice"
     @revoke-other-sessions="revokeOtherSessions"
     @revoke-session="revokeSession"
+    @save-vault-preferences="saveVaultPreferences"
   />
   <SearchPalette
     :commands="paletteCommands"

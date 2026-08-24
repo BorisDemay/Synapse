@@ -53,6 +53,27 @@ describe("SettingsPanel", () => {
     expect(wrapper.emitted("lockVault")).toHaveLength(1);
   });
 
+  it("emits local vault template preferences", async () => {
+    const wrapper = mount(SettingsPanel, {
+      props: {
+        dailyNotePattern: "Daily/YYYY-MM-DD.md",
+        deviceSupported: false,
+        deviceTrusted: false,
+        open: true,
+        templatesPath: "Templates",
+      },
+    });
+    await wrapper.get('input[name="templates-path"]').setValue("Models");
+    await wrapper
+      .get('input[name="daily-note-pattern"]')
+      .setValue("Journal/YYYY-MM-DD.md");
+    await wrapper.get('form[data-form="vault-preferences"]').trigger("submit");
+    expect(wrapper.emitted("saveVaultPreferences")?.[0]).toEqual([
+      "Models",
+      "Journal/YYYY-MM-DD.md",
+    ]);
+  });
+
   it("does not render the dialog when closed", () => {
     const wrapper = mount(SettingsPanel, {
       props: {
@@ -108,7 +129,7 @@ describe("SettingsPanel", () => {
       .get('input[name="confirm-password"]')
       .setValue("new password 12");
     const forms = wrapper.findAll("form.settings-form");
-    await forms[1]?.trigger("submit");
+    await forms[2]?.trigger("submit");
     expect(wrapper.emitted("changePassword")?.[0]).toEqual([
       "old password",
       "new password 12",
@@ -121,7 +142,7 @@ describe("SettingsPanel", () => {
     await wrapper
       .get('input[name="confirm-passphrase"]')
       .setValue("new phrase");
-    await forms[0]?.trigger("submit");
+    await forms[1]?.trigger("submit");
     expect(wrapper.emitted("changePassphrase")?.[0]).toEqual([
       "old phrase",
       "new phrase",

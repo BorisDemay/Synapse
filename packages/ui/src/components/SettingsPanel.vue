@@ -14,12 +14,14 @@ const props = withDefaults(
     accountEmail?: string;
     deviceSupported: boolean;
     deviceTrusted: boolean;
+    dailyNotePattern?: string;
     errorMessage?: string;
     exportSupported?: boolean;
     offline?: boolean;
     open: boolean;
     sessions?: SettingsSession[];
     statusMessage?: string;
+    templatesPath?: string;
   }>(),
   {
     accountEmail: "",
@@ -28,6 +30,8 @@ const props = withDefaults(
     offline: false,
     sessions: () => [],
     statusMessage: "",
+    dailyNotePattern: "Daily/YYYY-MM-DD.md",
+    templatesPath: "Templates",
   },
 );
 
@@ -42,6 +46,7 @@ const emit = defineEmits<{
   rememberDevice: [];
   revokeOtherSessions: [];
   revokeSession: [id: string];
+  saveVaultPreferences: [templatesPath: string, dailyNotePattern: string];
 }>();
 
 const currentPassword = ref("");
@@ -53,6 +58,8 @@ const confirmPassphrase = ref("");
 const deletePassword = ref("");
 const deleteConfirmation = ref("");
 const formError = ref("");
+const templatesPath = ref(props.templatesPath);
+const dailyNotePattern = ref(props.dailyNotePattern);
 
 function onBackdrop(event: MouseEvent) {
   if (event.target === event.currentTarget) {
@@ -101,6 +108,20 @@ function submitDelete() {
   emit("deleteAccount", deletePassword.value);
   resetSecrets();
   deleteConfirmation.value = "";
+}
+
+function submitVaultPreferences() {
+  formError.value = "";
+  if (!templatesPath.value.trim() || !dailyNotePattern.value.trim()) {
+    formError.value =
+      "Les chemins de modèles et de note quotidienne sont requis.";
+    return;
+  }
+  emit(
+    "saveVaultPreferences",
+    templatesPath.value.trim(),
+    dailyNotePattern.value.trim(),
+  );
 }
 </script>
 
@@ -203,6 +224,38 @@ function submitDelete() {
             Exporter les notes en Markdown
           </button>
         </template>
+        <form
+          class="settings-form"
+          data-form="vault-preferences"
+          @submit.prevent="submitVaultPreferences"
+        >
+          <h4>Modèles et note quotidienne</h4>
+          <p>
+            Ces préférences sont chiffrées localement avec le coffre et ne sont
+            jamais envoyées au serveur.
+          </p>
+          <label class="settings-field">
+            Dossier des modèles
+            <input
+              v-model="templatesPath"
+              name="templates-path"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <label class="settings-field">
+            Chemin quotidien (`YYYY`, `MM`, `DD`)
+            <input
+              v-model="dailyNotePattern"
+              name="daily-note-pattern"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <button class="settings-action" type="submit">
+            Enregistrer les préférences du coffre
+          </button>
+        </form>
         <form class="settings-form" @submit.prevent="submitPassphrase">
           <p>
             La phrase de déchiffrement n’est jamais envoyée au serveur. Elle est
