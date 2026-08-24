@@ -11,7 +11,9 @@ import {
   type CachedAssistantConversationsRecord,
   type CachedNoteRecord,
   type CachedRevisionRecord,
+  type CachedVaultPreferencesRecord,
   trustedDeviceKey,
+  vaultPreferencesKey,
   type TrustedDeviceRecord,
 } from "./db";
 
@@ -20,6 +22,7 @@ export type {
   CachedAssistantConversationsRecord,
   CachedNoteRecord,
   CachedRevisionRecord,
+  CachedVaultPreferencesRecord,
   TrustedDeviceRecord,
 };
 
@@ -143,6 +146,28 @@ export async function putAssistantConversations(
     "ai_conversations",
     record,
     assistantConversationsKey(record.userId, record.vaultId),
+  );
+}
+
+export async function putVaultPreferences(
+  record: CachedVaultPreferencesRecord,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.put(
+    "vault_preferences",
+    record,
+    vaultPreferencesKey(record.userId, record.vaultId),
+  );
+}
+
+export async function getVaultPreferences(
+  userId: string,
+  vaultId: string,
+): Promise<CachedVaultPreferencesRecord | null> {
+  const db = await openOfflineDb();
+  return (
+    (await db.get("vault_preferences", vaultPreferencesKey(userId, vaultId))) ??
+    null
   );
 }
 
@@ -295,6 +320,7 @@ export async function clearUserOfflineData(userId: string): Promise<void> {
     "trusted_devices",
     "ai_credentials",
     "ai_conversations",
+    "vault_preferences",
     "note_revisions",
   ] as const) {
     const keys = await db.getAllKeys(store);

@@ -65,9 +65,18 @@ import {
   putCachedNote,
   putNoteRevision,
   putTrustedDevice,
+  getVaultPreferences,
+  putVaultPreferences,
   setCachedHeadRevision,
   setCachedPullCursor,
 } from "../offline/cache";
+import {
+  DEFAULT_VAULT_PREFERENCES,
+  unwrapVaultPreferences,
+  wrapVaultPreferences,
+  type VaultPreferences,
+} from "../crypto/vault-preferences";
+import { dailyNotePath, renderTemplate } from "@synapse/ui";
 import {
   enqueueOperation,
   listPendingOperations,
@@ -249,6 +258,7 @@ export const useVaultStore = defineStore("vault", () => {
   const pullCursor = ref<string | null>(null);
   const lastError = ref<string | null>(null);
   const activeConflict = ref<ActiveConflict | null>(null);
+  const preferences = ref<VaultPreferences>({ ...DEFAULT_VAULT_PREFERENCES });
   const skipTrustedUnlock = ref(sessionSkipTrustedUnlock());
 
   function unlock(key: Uint8Array, vaultId: string, revision = 0) {
@@ -290,6 +300,62 @@ export const useVaultStore = defineStore("vault", () => {
       throw new Error("Vault is locked");
     }
     return { key: vaultKey, vaultId: currentVaultId.value };
+  }
+
+  async function loadPreferences(
+    userId: string,
+    vaultId: string,
+  ): Promise<void> {
+    if (!vaultKey) {
+      return;
+    }
+    const record = await getVaultPreferences(userId, vaultId);
+    if (!record) {
+      preferences.value = { ...DEFAULT_VAULT_PREFERENCES };
+      return;
+    }
+    preferences.value = unwrapVaultPreferences(vaultKey, vaultId, record);
+  }
+
+  async function savePreferences(next: VaultPreferences): Promise<void> {
+    const { key, vaultId } = requireUnlockedVault();
+    const userId = requireUserId();
+    const envelope = wrapVaultPreferences(key, vaultId, next);
+    await putVaultPreferences({ ...envelope, userId, vaultId });
+    preferences.value = {
+      ...next,
+      pinnedNoteIds: [...next.pinnedNoteIds],
+      savedSearches: next.savedSearches.map((search) => ({ ...search })),
+    };
+  }
+
+  async function createDailyNote(templateId?: string): Promise<string> {
+    const path = dailyNotePath(new Date(), preferences.value.dailyNotePattern);
+    const existing = [...notes.entries()].find(
+      ([, note]) => note.path === path,
+    );
+    if (existing) {
+      return existing[0];
+    }
+    const template = templateId ? notes.get(templateId) : undefined;
+    const title = path.split("/").pop()?.replace(/\.md$/iu, "") ?? "Daily";
+    const content = renderTemplate(template?.content ?? `# ${title}\n\n`, {
+      date: new Date(),
+      title,
+    });
+    const id = uuidV7();
+    await saveNote({ content, id, path });
+    return id;
+  }
+
+  async function togglePinnedNote(id: string): Promise<void> {
+    const pinned = preferences.value.pinnedNoteIds;
+    await savePreferences({
+      ...preferences.value,
+      pinnedNoteIds: pinned.includes(id)
+        ? pinned.filter((entry) => entry !== id)
+        : [...pinned, id],
+    });
   }
 
   async function persistAssistantCredential(
@@ -489,6 +555,7 @@ export const useVaultStore = defineStore("vault", () => {
     headRevision.value = await getCachedHeadRevision(userId, vaultId);
     syncStatus.value = "offline";
     await hydrateHistory(userId, vaultId);
+    await loadPreferences(userId, vaultId);
     await refreshPending();
   }
 
@@ -760,6 +827,7 @@ export const useVaultStore = defineStore("vault", () => {
         await setCachedHeadRevision(userId, vaultId, headRevision.value);
         syncStatus.value = "synced";
         await hydrateHistory(userId, vaultId);
+        await loadPreferences(userId, vaultId);
         await refreshPending();
         return;
       }
@@ -1234,6 +1302,7 @@ export const useVaultStore = defineStore("vault", () => {
     noteSyncStatus,
     notes,
     pendingNoteIds,
+    preferences,
     persistAssistantCredential,
     persistAssistantConversations,
     pullCursor,
@@ -1242,6 +1311,7 @@ export const useVaultStore = defineStore("vault", () => {
     resolveConflict,
     restoreRevision,
     saveAttachment,
+    savePreferences,
     saveNote,
     searchNotes,
     setHasEncryptedVault,
@@ -1249,6 +1319,8 @@ export const useVaultStore = defineStore("vault", () => {
     shouldSkipTrustedUnlock,
     syncStatus,
     tryUnlockFromTrustedDevice,
+    createDailyNote,
+    togglePinnedNote,
     unlock,
     unlockWithTrustedDevice,
   };

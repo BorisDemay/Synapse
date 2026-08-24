@@ -4,6 +4,7 @@ export { default as AppShell } from "./components/AppShell.vue";
 export { default as BacklinksPanel } from "./components/BacklinksPanel.vue";
 export { default as ConflictResolver } from "./components/ConflictResolver.vue";
 export { default as HistoryPanel } from "./components/HistoryPanel.vue";
+export { default as GraphPanel } from "./components/GraphPanel.vue";
 export { default as MarkdownEditor } from "./components/MarkdownEditor.vue";
 export { default as MarkdownPreview } from "./components/MarkdownPreview.vue";
 export { default as NoteRelationsPanel } from "./components/NoteRelationsPanel.vue";
@@ -28,15 +29,19 @@ export { parseNote } from "./markdown/parse";
 export type { ParsedNote } from "./markdown/parse";
 export {
   backlinksFor,
+  buildLocalGraph,
   noteStem,
+  outlineFor,
   resolveWikilink,
   sanitizeAttachmentFileName,
   searchLocalNotes,
   uniqueTags,
   wikilinkPath,
 } from "./vault/query";
-export type { QueryNote } from "./vault/query";
+export type { LocalGraph, OutlineEntry, QueryNote } from "./vault/query";
 export { buildVaultTree } from "./vault/tree";
+export { dailyNotePath, renderTemplate } from "./vault/templates";
+export type { TemplateContext } from "./vault/templates";
 export type { SettingsSession } from "./components/SettingsPanel.vue";
 export type { VaultTreeNode } from "./components/VaultTree.vue";
 export { installSynapseUi } from "./plugin";

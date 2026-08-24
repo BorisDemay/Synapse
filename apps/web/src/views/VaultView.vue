@@ -5,6 +5,7 @@ import {
   AppShell,
   BacklinksPanel,
   ConflictResolver,
+  GraphPanel,
   NoteRelationsPanel,
   MarkdownEditor,
   SearchPalette,
@@ -12,6 +13,7 @@ import {
   ThemeToggle,
   VaultTree,
   backlinksFor,
+  buildLocalGraph,
   buildVaultTree,
   parseNote,
   resolveWikilink,
@@ -48,6 +50,7 @@ const formError = ref("");
 const assistantOpen = ref(false);
 const assistantHistoryOpen = ref(true);
 const noteHistoryOpen = ref(true);
+const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
 const tagFilter = ref("");
@@ -134,6 +137,8 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "settings", label: "Paramètres" },
   { id: "theme", label: "Basculer le thème" },
   { id: "export", label: "Exporter Markdown" },
+  { id: "daily-note", label: "Ouvrir la note quotidienne" },
+  { id: "graph", label: "Afficher le graphe local" },
 ]);
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
@@ -146,6 +151,8 @@ const currentBacklinks = computed(() => {
   const current = currentQueryNote.value;
   return current ? backlinksFor(queryNotes.value, current) : [];
 });
+
+const localGraph = computed(() => buildLocalGraph(queryNotes.value));
 
 const historyEntries = computed(() =>
   vault.historyFor(noteId.value).map((entry) => ({
@@ -454,6 +461,19 @@ function runCommand(id: string) {
     theme.toggleTheme();
   } else if (id === "export") {
     void exportNotes();
+  } else if (id === "daily-note") {
+    void openDailyNote();
+  } else if (id === "graph") {
+    graphOpen.value = true;
+  }
+}
+
+async function openDailyNote() {
+  try {
+    selectNote(await vault.createDailyNote());
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Note quotidienne impossible.";
   }
 }
 
@@ -593,6 +613,14 @@ watch(settingsOpen, (open) => {
           type="button"
           @click="startNewNote()"
         />
+        <Button
+          class="new-note-button"
+          icon="pi pi-calendar"
+          label="Aujourd’hui"
+          outlined
+          type="button"
+          @click="openDailyNote"
+        />
       </header>
       <div v-if="allTags.length" class="tag-filter" aria-label="Tags">
         <button
@@ -655,6 +683,12 @@ watch(settingsOpen, (open) => {
             type="button"
             @click="assistantOpen = true"
           />
+          <Button
+            label="Graphe"
+            outlined
+            type="button"
+            @click="graphOpen = !graphOpen"
+          />
         </div>
       </header>
       <ConflictResolver
@@ -687,8 +721,16 @@ watch(settingsOpen, (open) => {
         {{ formError || vault.lastError }}
       </p>
     </section>
-    <template #relations v-if="assistantOpen && noteHistoryOpen">
+    <template #relations v-if="graphOpen || (assistantOpen && noteHistoryOpen)">
+      <GraphPanel
+        v-if="graphOpen"
+        :graph="localGraph"
+        :selected-id="noteId"
+        @close="graphOpen = false"
+        @select="selectNote"
+      />
       <NoteRelationsPanel
+        v-else
         :backlinks="currentBacklinks"
         :history="historyEntries"
         @close="noteHistoryOpen = false"

@@ -25,8 +25,29 @@ export function searchLocalNotes(
     const tag = tagMatch[1].toLowerCase();
     return notes
       .filter((note) =>
-        parseNote(note.content).tags.some((value) => value.toLowerCase() === tag),
+        parseNote(note.content).tags.some(
+          (value) => value.toLowerCase() === tag,
+        ),
       )
+      .map((note) => ({ hint: note.path, id: note.id, label: note.label }));
+  }
+  const propertyMatch = /^property:([A-Za-z0-9_-]+)(?:=(.+))?$/iu.exec(trimmed);
+  if (propertyMatch?.[1]) {
+    const key = propertyMatch[1].toLowerCase();
+    const expected = propertyMatch[2]?.trim().toLowerCase();
+    return notes
+      .filter((note) => {
+        const value = parseNote(note.content).properties[key];
+        if (value === undefined) {
+          return false;
+        }
+        if (!expected) {
+          return true;
+        }
+        return (Array.isArray(value) ? value : [value]).some(
+          (entry) => entry.toLowerCase() === expected,
+        );
+      })
       .map((note) => ({ hint: note.path, id: note.id, label: note.label }));
   }
   const needle = trimmed.toLowerCase();
@@ -38,6 +59,70 @@ export function searchLocalNotes(
         note.content.toLowerCase().includes(needle),
     )
     .map((note) => ({ hint: note.path, id: note.id, label: note.label }));
+}
+
+export interface OutlineEntry {
+  level: number;
+  text: string;
+}
+
+export function outlineFor(markdown: string): OutlineEntry[] {
+  const entries: OutlineEntry[] = [];
+  let fence: { character: string; length: number } | undefined;
+  for (const line of markdown.split("\n")) {
+    const trimmed = line.trimStart();
+    if (fence) {
+      const closing = new RegExp(
+        `^${fence.character}{${fence.length},}\\s*$`,
+      ).test(trimmed);
+      if (closing) {
+        fence = undefined;
+      }
+      continue;
+    }
+    const opening = /^(?<character>`|~){3,}/u.exec(trimmed);
+    if (opening?.groups?.character) {
+      fence = {
+        character: opening.groups.character,
+        length: opening[0].length,
+      };
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/u.exec(trimmed);
+    if (heading?.[1] && heading[2]) {
+      entries.push({ level: heading[1].length, text: heading[2].trim() });
+    }
+  }
+  return entries;
+}
+
+export interface LocalGraph {
+  edges: { source: string; target: string }[];
+  nodes: { id: string; label: string }[];
+}
+
+/** Builds an in-memory graph from plaintext already held by an unlocked client. */
+export function buildLocalGraph(notes: readonly QueryNote[]): LocalGraph {
+  const edges: LocalGraph["edges"] = [];
+  for (const note of notes) {
+    for (const link of parseNote(note.content).wikilinks) {
+      const target = resolveWikilink(notes, link.target);
+      if (target && target.id !== note.id) {
+        edges.push({ source: note.id, target: target.id });
+      }
+    }
+  }
+  return {
+    edges: edges.filter(
+      (edge, index) =>
+        edges.findIndex(
+          (candidate) =>
+            candidate.source === edge.source &&
+            candidate.target === edge.target,
+        ) === index,
+    ),
+    nodes: notes.map((note) => ({ id: note.id, label: note.label })),
+  };
 }
 
 export function uniqueTags(notes: readonly QueryNote[]): string[] {

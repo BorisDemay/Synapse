@@ -41,6 +41,13 @@ export interface CachedAssistantConversationsRecord {
   vaultId: string;
 }
 
+export interface CachedVaultPreferencesRecord {
+  ciphertext: number[];
+  nonce: number[];
+  userId: string;
+  vaultId: string;
+}
+
 export type QueuedOperationRecord = EncryptedPushOperation & {
   userId: string;
 };
@@ -89,10 +96,14 @@ interface SynapseOfflineSchema extends DBSchema {
     key: string;
     value: CachedAssistantConversationsRecord;
   };
+  vault_preferences: {
+    key: string;
+    value: CachedVaultPreferencesRecord;
+  };
 }
 
 const DB_NAME = "synapse-offline-v1";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 let dbPromise: Promise<IDBPDatabase<SynapseOfflineSchema>> | undefined;
 
@@ -124,6 +135,10 @@ export function assistantConversationsKey(
   vaultId: string,
 ): string {
   return `${userId}:${vaultId}:codex-conversations`;
+}
+
+export function vaultPreferencesKey(userId: string, vaultId: string): string {
+  return `${userId}:${vaultId}:preferences`;
 }
 
 export function revisionKey(
@@ -161,6 +176,7 @@ export function openOfflineDb(): Promise<IDBPDatabase<SynapseOfflineSchema>> {
           "trusted_devices",
           "ai_credentials",
           "ai_conversations",
+          "vault_preferences",
           "note_revisions",
         ] as const) {
           if (!db.objectStoreNames.contains(store)) {

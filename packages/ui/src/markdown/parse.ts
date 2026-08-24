@@ -1,4 +1,5 @@
 export interface ParsedNote {
+  properties: Record<string, string | string[]>;
   tags: string[];
   title: string | null;
   wikilinks: { alias: string | null; target: string }[];
@@ -28,10 +29,55 @@ export function parseNote(source: string): ParsedNote {
     extractWikilinks(line, wikilinks);
   }
 
-  return { tags: extractTags(frontMatter), title, wikilinks };
+  return {
+    properties: extractProperties(frontMatter),
+    tags: extractTags(frontMatter),
+    title,
+    wikilinks,
+  };
 }
 
-function splitFrontMatter(source: string): { body: string; frontMatter: string } {
+function extractProperties(
+  frontMatter: string,
+): Record<string, string | string[]> {
+  const properties: Record<string, string | string[]> = {};
+  let listKey: string | undefined;
+  for (const line of frontMatter.split("\n")) {
+    const listItem = /^\s+-\s+(.+)$/u.exec(line);
+    if (listKey && listItem?.[1]) {
+      const existing = properties[listKey];
+      properties[listKey] = Array.isArray(existing)
+        ? [...existing, listItem[1].trim()]
+        : [listItem[1].trim()];
+      continue;
+    }
+    listKey = undefined;
+    const pair = /^([A-Za-z0-9_-]+):(?:\s*(.*))?$/u.exec(line);
+    if (!pair?.[1]) {
+      continue;
+    }
+    const key = pair[1].toLowerCase();
+    const value = pair[2]?.trim() ?? "";
+    if (!value) {
+      properties[key] = [];
+      listKey = key;
+    } else if (value.startsWith("[") && value.endsWith("]")) {
+      properties[key] = value
+        .slice(1, -1)
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    } else {
+      properties[key] = value.replace(/^['"]|['"]$/gu, "");
+    }
+  }
+  return properties;
+}
+
+function splitFrontMatter(source: string): {
+  body: string;
+  frontMatter: string;
+} {
   if (!source.startsWith("---\n")) {
     return { body: source, frontMatter: "" };
   }
@@ -50,9 +96,10 @@ function extractTags(frontMatter: string): string[] {
   const tags: string[] = [];
   let reading = false;
   for (const line of frontMatter.split("\n")) {
-    const inline = line.startsWith("tags: [") && line.endsWith("]")
-      ? line.slice(7, -1)
-      : null;
+    const inline =
+      line.startsWith("tags: [") && line.endsWith("]")
+        ? line.slice(7, -1)
+        : null;
     if (inline !== null) {
       for (const tag of inline.split(",").map((value) => value.trim())) {
         if (tag) {
@@ -77,10 +124,7 @@ function extractTags(frontMatter: string): string[] {
   return tags;
 }
 
-function extractWikilinks(
-  source: string,
-  wikilinks: ParsedNote["wikilinks"],
-) {
+function extractWikilinks(source: string, wikilinks: ParsedNote["wikilinks"]) {
   let remainder = source;
   while (remainder.includes("[[")) {
     const start = remainder.indexOf("[[");
@@ -114,7 +158,11 @@ function openingFence(line: string) {
   return length >= 3 ? { character, length } : undefined;
 }
 
-function isClosingFence(line: string, character: string, openingLength: number) {
+function isClosingFence(
+  line: string,
+  character: string,
+  openingLength: number,
+) {
   const trimmed = line.trimStart();
   let length = 0;
   while (trimmed[length] === character) {
