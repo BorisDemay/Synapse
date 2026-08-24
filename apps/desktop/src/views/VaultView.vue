@@ -16,6 +16,7 @@ import {
   buildLocalGraph,
   buildVaultTree,
   parseNote,
+  renderTemplate,
   resolveWikilink,
   sanitizeAttachmentFileName,
   searchLocalNotes,
@@ -130,6 +131,8 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "settings", label: "Paramètres" },
   { id: "theme", label: "Basculer le thème" },
   { id: "graph", label: "Afficher le graphe local" },
+  { id: "daily-note", label: "Ouvrir la note quotidienne" },
+  { id: "from-template", label: "Créer une note depuis un modèle" },
 ]);
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
@@ -142,6 +145,10 @@ const currentBacklinks = computed(() => {
   const current = currentQueryNote.value;
   return current ? backlinksFor(queryNotes.value, current) : [];
 });
+
+const templateNotes = computed(() =>
+  queryNotes.value.filter((note) => note.path.startsWith("Templates/")),
+);
 
 const localGraph = computed(() => buildLocalGraph(queryNotes.value));
 
@@ -209,6 +216,50 @@ function startNewNote(folder?: string) {
   selectedNoteId.value = null;
   content.value = draft;
   formError.value = "";
+}
+
+function localDatePath(date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `Daily/${date.getFullYear()}-${month}-${day}.md`;
+}
+
+async function openDailyNote() {
+  const path = localDatePath();
+  if (vault.notes.has(path)) {
+    selectNote(path);
+    return;
+  }
+  const title = path.split("/").pop()?.replace(/\.md$/u, "") ?? "Daily";
+  const template =
+    vault.notes.get("Templates/Daily.md")?.content ?? `# ${title}\n\n`;
+  await vault.saveNote({
+    content: renderTemplate(template, { date: new Date(), title }),
+    id: path,
+  });
+  selectNote(path);
+}
+
+async function startFromTemplate() {
+  if (!templateNotes.value.length) {
+    formError.value = "Ajoutez un modèle Markdown sous Templates/ d’abord.";
+    return;
+  }
+  const choices = templateNotes.value
+    .map((note, index) => `${index + 1}. ${note.label}`)
+    .join("\n");
+  const index =
+    Number(window.prompt(`Choisir un modèle :\n${choices}`, "1")) - 1;
+  const template = templateNotes.value[index];
+  if (!template) return;
+  const title =
+    window.prompt("Titre de la note", template.label) || template.label;
+  const path = `${title.replaceAll("/", "-").trim() || "nouvelle"}.md`;
+  await vault.saveNote({
+    content: renderTemplate(template.content, { date: new Date(), title }),
+    id: path,
+  });
+  selectNote(path);
 }
 
 async function deleteNote(id: string) {
@@ -398,6 +449,10 @@ function runCommand(id: string) {
     theme.toggleTheme();
   } else if (id === "graph") {
     graphOpen.value = true;
+  } else if (id === "daily-note") {
+    void openDailyNote();
+  } else if (id === "from-template") {
+    void startFromTemplate();
   }
 }
 
@@ -593,6 +648,22 @@ watch(settingsOpen, (open) => {
           outlined
           type="button"
           @click="startNewNote()"
+        />
+        <Button
+          class="new-note-button"
+          icon="pi pi-calendar"
+          label="Aujourd’hui"
+          outlined
+          type="button"
+          @click="openDailyNote"
+        />
+        <Button
+          class="new-note-button"
+          icon="pi pi-file-edit"
+          label="Depuis un modèle"
+          outlined
+          type="button"
+          @click="startFromTemplate"
         />
       </header>
       <div v-if="allTags.length" class="tag-filter" aria-label="Tags">
