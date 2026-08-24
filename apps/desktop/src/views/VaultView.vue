@@ -51,6 +51,11 @@ const settingsOpen = ref(false);
 const searchQuery = ref("");
 const tagFilter = ref("");
 const blobUrls = ref<Record<string, string>>({});
+const attachmentPreview = ref<{
+  contentType: string;
+  name: string;
+  url: string;
+} | null>(null);
 const theme = useTheme();
 const settingsError = ref("");
 const settingsStatus = ref("");
@@ -436,11 +441,7 @@ async function refreshBlobUrl(path: string) {
     if (previous) {
       URL.revokeObjectURL(previous);
     }
-    const type = path.endsWith(".png")
-      ? "image/png"
-      : path.endsWith(".pdf")
-        ? "application/pdf"
-        : "application/octet-stream";
+    const type = contentTypeForAttachment(path);
     blobUrls.value = {
       ...blobUrls.value,
       [path]: URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type })),
@@ -456,10 +457,39 @@ async function openAttachment(path: string) {
   if (!url) {
     return;
   }
+  const contentType = contentTypeForAttachment(path);
+  const name = path.split("/").pop() ?? "fichier";
+  if (isSafePreviewType(contentType)) {
+    attachmentPreview.value = { contentType, name, url };
+    return;
+  }
   const link = document.createElement("a");
   link.href = url;
-  link.download = path.split("/").pop() ?? "fichier";
+  link.download = name;
   link.click();
+}
+
+function contentTypeForAttachment(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase();
+  return (
+    {
+      gif: "image/gif",
+      jpeg: "image/jpeg",
+      jpg: "image/jpeg",
+      mp3: "audio/mpeg",
+      ogg: "audio/ogg",
+      pdf: "application/pdf",
+      png: "image/png",
+      wav: "audio/wav",
+      webm: "video/webm",
+      webp: "image/webp",
+      mp4: "video/mp4",
+    }[extension ?? ""] ?? "application/octet-stream"
+  );
+}
+
+function isSafePreviewType(contentType: string): boolean {
+  return contentType !== "application/octet-stream";
 }
 
 async function restoreHistory(revision: number) {
@@ -753,12 +783,103 @@ watch(settingsOpen, (open) => {
     @select="selectNote"
     @update:query="searchQuery = $event"
   />
+  <div
+    v-if="attachmentPreview"
+    class="attachment-preview-backdrop"
+    role="presentation"
+    @click.self="attachmentPreview = null"
+  >
+    <section
+      :aria-label="`Aperçu ${attachmentPreview.name}`"
+      aria-modal="true"
+      class="attachment-preview"
+      role="dialog"
+    >
+      <header>
+        <strong>{{ attachmentPreview.name }}</strong>
+        <button
+          type="button"
+          aria-label="Fermer l’aperçu"
+          @click="attachmentPreview = null"
+        >
+          ×
+        </button>
+      </header>
+      <img
+        v-if="attachmentPreview.contentType.startsWith('image/')"
+        :src="attachmentPreview.url"
+        :alt="attachmentPreview.name"
+      />
+      <audio
+        v-else-if="attachmentPreview.contentType.startsWith('audio/')"
+        controls
+        :src="attachmentPreview.url"
+      />
+      <video
+        v-else-if="attachmentPreview.contentType.startsWith('video/')"
+        controls
+        :src="attachmentPreview.url"
+      />
+      <iframe
+        v-else
+        title="Aperçu PDF"
+        :src="attachmentPreview.url"
+        sandbox="allow-same-origin"
+      />
+    </section>
+  </div>
 </template>
 
 <style scoped>
 .vault-page {
   height: 100%;
   min-height: 0;
+}
+
+.attachment-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 55%);
+}
+.attachment-preview {
+  display: grid;
+  gap: 0.75rem;
+  width: min(64rem, 100%);
+  max-height: calc(100vh - 2rem);
+  padding: 1rem;
+  overflow: auto;
+  border-radius: var(--synapse-radius-md);
+  background: var(--synapse-color-surface-raised);
+}
+.attachment-preview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.attachment-preview header button {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: transparent;
+  cursor: pointer;
+}
+.attachment-preview img,
+.attachment-preview video,
+.attachment-preview iframe {
+  width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  border: 0;
+}
+.attachment-preview audio {
+  width: 100%;
 }
 
 .vault-page :deep(.app-shell) {
