@@ -71,9 +71,9 @@ watch(items, () => {
   activeIndex.value = 0;
 });
 
-async function openPalette() {
+async function openPalette(query = "") {
   isOpen.value = true;
-  emit("update:query", "");
+  emit("update:query", query);
   await nextTick();
   input.value?.focus();
 }

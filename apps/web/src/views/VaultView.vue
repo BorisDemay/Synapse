@@ -60,6 +60,7 @@ const noteHistoryOpen = ref(true);
 const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
+const searchPalette = ref<InstanceType<typeof SearchPalette>>();
 const tagFilter = ref("");
 const blobUrls = ref<Record<string, string>>({});
 const theme = useTheme();
@@ -715,6 +716,10 @@ function runCommand(id: string) {
   }
 }
 
+function openLocalSearch(query: string) {
+  void searchPalette.value?.openPalette(query);
+}
+
 async function saveSearch() {
   const query = searchQuery.value.trim();
   if (!query) return;
@@ -944,7 +949,7 @@ watch(settingsOpen, (open) => {
           v-for="property in propertySummary"
           :key="property.key"
           type="button"
-          @click="searchQuery = `property:${property.key}`"
+          @click="openLocalSearch(`property:${property.key}`)"
         >
           {{ property.key }} <small>{{ property.values.length }}</small>
         </button>
@@ -989,7 +994,7 @@ watch(settingsOpen, (open) => {
           v-for="search in vault.preferences.savedSearches"
           :key="search.id"
           type="button"
-          @click="searchQuery = search.query"
+          @click="openLocalSearch(search.query)"
         >
           {{ search.label }}
         </button>
@@ -1245,6 +1250,7 @@ watch(settingsOpen, (open) => {
     @save-vault-preferences="saveVaultPreferences"
   />
   <SearchPalette
+    ref="searchPalette"
     :commands="paletteCommands"
     :query="searchQuery"
     :results="searchResults"
