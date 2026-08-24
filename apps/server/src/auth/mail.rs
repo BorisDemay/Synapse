@@ -147,17 +147,16 @@ fn dump_path(directory: &Path, email: &str) -> PathBuf {
 pub fn mailer_from_env() -> std::sync::Arc<dyn Mailer> {
     let from =
         std::env::var("SYNAPSE_MAIL_FROM").unwrap_or_else(|_| "synapse@localhost".to_owned());
-    if let Ok(url) = std::env::var("SYNAPSE_SMTP_URL") {
-        if !url.is_empty() {
-            if let Some(mailer) = SmtpMailer::from_env(&url, &from) {
-                return std::sync::Arc::new(mailer);
-            }
-        }
+    if let Ok(url) = std::env::var("SYNAPSE_SMTP_URL")
+        && !url.is_empty()
+        && let Some(mailer) = SmtpMailer::from_env(&url, &from)
+    {
+        return std::sync::Arc::new(mailer);
     }
-    if let Ok(directory) = std::env::var("SYNAPSE_MAIL_DIRECTORY") {
-        if !directory.is_empty() {
-            return std::sync::Arc::new(DirectoryMailer::new(directory));
-        }
+    if let Ok(directory) = std::env::var("SYNAPSE_MAIL_DIRECTORY")
+        && !directory.is_empty()
+    {
+        return std::sync::Arc::new(DirectoryMailer::new(directory));
     }
     if crate::http::security::is_production() {
         std::sync::Arc::new(UnavailableMailer)
