@@ -7,6 +7,9 @@ yanked = "warn"
 [licenses]
 confidence-threshold = 0.8
 allow = [
+    # `quoted_printable`, transitive dependency of the self-hosted SMTP client
+    # (`lettre`); 0BSD is permissive and AGPLv3-compatible.
+    "0BSD",
     "AGPL-3.0-or-later",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",

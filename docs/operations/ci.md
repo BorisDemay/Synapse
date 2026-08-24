@@ -78,4 +78,6 @@ sont des artefacts de release uniquement (répertoire `target/` ignoré par Git)
 
 - Aucun secret de production dans les workflows.
 - Les contrôles de licence/advisories Rust passent par `deny.toml`.
+- La licence permissive `0BSD` est autorisée uniquement comme dépendance
+  transitive de `quoted_printable`, utilisée par le client SMTP `lettre`.
 - L’audit npm ne couvre que les dépendances de production (`pnpm audit --prod`).
