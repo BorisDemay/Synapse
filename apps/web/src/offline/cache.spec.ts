@@ -32,7 +32,8 @@ const offlineDbName = "synapse-offline-v1";
 function deleteOfflineDb(): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(offlineDbName);
-    request.onblocked = () => reject(new Error("offline database is still open"));
+    request.onblocked = () =>
+      reject(new Error("offline database is still open"));
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
   });
@@ -140,9 +141,7 @@ describe("offline cache", () => {
           "vault_preferences",
         ]),
       );
-      expect(JSON.stringify(await db.getAll("notes"))).not.toContain(
-        plaintext,
-      );
+      expect(JSON.stringify(await db.getAll("notes"))).not.toContain(plaintext);
     },
   );
 

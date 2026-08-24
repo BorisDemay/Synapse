@@ -20,12 +20,14 @@ export type VaultItem =
       path: string;
     };
 
-export type DecodedVaultItem =
-  | { kind: "legacy"; markdown: string }
-  | VaultItem;
+export type DecodedVaultItem = { kind: "legacy"; markdown: string } | VaultItem;
 
 export function encodeVaultItem(item: VaultItem): Uint8Array {
-  const headerLines = [`${ITEM_MAGIC}`, `kind: ${item.kind}`, `path: ${item.path}`];
+  const headerLines = [
+    `${ITEM_MAGIC}`,
+    `kind: ${item.kind}`,
+    `path: ${item.path}`,
+  ];
   let body: Uint8Array;
   if (item.kind === "note") {
     body = new TextEncoder().encode(item.markdown);
@@ -43,7 +45,10 @@ export function encodeVaultItem(item: VaultItem): Uint8Array {
   return encoded;
 }
 
-export function encodeNotePlaintext(path: string, markdown: string): Uint8Array {
+export function encodeNotePlaintext(
+  path: string,
+  markdown: string,
+): Uint8Array {
   return encodeVaultItem({ kind: "note", markdown, path });
 }
 

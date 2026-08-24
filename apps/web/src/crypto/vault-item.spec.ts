@@ -22,7 +22,9 @@ describe("vault item envelope", () => {
   });
 
   it("decodes legacy markdown without a header", () => {
-    expect(decodeVaultItem(new TextEncoder().encode("# Ancienne note\n"))).toEqual({
+    expect(
+      decodeVaultItem(new TextEncoder().encode("# Ancienne note\n")),
+    ).toEqual({
       kind: "legacy",
       markdown: "# Ancienne note\n",
     });

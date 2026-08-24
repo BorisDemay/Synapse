@@ -351,10 +351,9 @@ div[data-pc-name="message"][data-p-severity="info"] {
   .app-shell:has(> .app-shell-relations):has(
       > .app-shell-assistant-history
     ):has(> .app-shell-assistant) {
-    grid-template-columns: 17rem minmax(30rem, 1fr) 16rem minmax(
-        13rem,
-        16rem
-      ) minmax(18rem, 24rem);
+    grid-template-columns:
+      17rem minmax(30rem, 1fr) 16rem minmax(13rem, 16rem)
+      minmax(18rem, 24rem);
     min-width: 84rem;
   }
 }
