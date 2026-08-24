@@ -133,23 +133,37 @@ export const useAuthStore = defineStore("auth", {
       if (!response.ok) throw new Error("unable to list sessions");
       const body = (await response.json()) as {
         email?: unknown;
-        sessions?: Array<{ created_at?: unknown; current?: unknown; id?: unknown }>;
+        sessions?: Array<{
+          created_at?: unknown;
+          current?: unknown;
+          id?: unknown;
+        }>;
       };
       const email = typeof body.email === "string" ? body.email : "";
       this.email = email || null;
       return {
         email,
         sessions: (body.sessions ?? []).flatMap((session) =>
-          typeof session.id === "string" && typeof session.created_at === "string"
-            ? [{ createdAt: session.created_at, current: session.current === true, id: session.id }]
+          typeof session.id === "string" &&
+          typeof session.created_at === "string"
+            ? [
+                {
+                  createdAt: session.created_at,
+                  current: session.current === true,
+                  id: session.id,
+                },
+              ]
             : [],
         ),
       };
     },
     async revokeSession(sessionId: string) {
-      const response = await this.request(`/auth/sessions/${sessionId}/revoke`, {
-        method: "POST",
-      });
+      const response = await this.request(
+        `/auth/sessions/${sessionId}/revoke`,
+        {
+          method: "POST",
+        },
+      );
       if (!response.ok) throw new Error("unable to revoke session");
     },
     async revokeOtherSessions() {

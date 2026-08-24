@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 
@@ -9,13 +10,16 @@ import Password from "primevue/password";
 
 import { ThemeToggle } from "@synapse/ui";
 
-import { useAuthStore } from "../stores/auth";
+import { useAuthStore } from "../../../web/src/stores/auth";
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const email = ref("");
 const password = ref("");
+const instanceUrl = ref(
+  localStorage.getItem("synapse-instance-url") ?? "http://127.0.0.1:3000",
+);
 const invitationToken = ref(
   typeof route.query.invitation === "string" ? route.query.invitation : "",
 );
@@ -28,14 +32,21 @@ const showForm = computed(
 );
 
 onMounted(async () => {
+  await configureInstance().catch(() => undefined);
   publicSignup.value = await auth.fetchPublicSignup();
   statusLoaded.value = true;
 });
 
+async function configureInstance() {
+  const url = instanceUrl.value.trim();
+  await invoke("set_instance_url", { url });
+  localStorage.setItem("synapse-instance-url", url);
+}
+
 async function submit() {
   error.value = "";
   try {
-    await auth.configureInstance(auth.instanceUrl);
+    await configureInstance();
     await auth.register({
       email: email.value,
       invitationToken: invitationToken.value.trim() || undefined,
@@ -84,7 +95,7 @@ async function submit() {
               <label for="register-instance">URL de l’instance</label>
               <InputText
                 id="register-instance"
-                v-model="auth.instanceUrl"
+                v-model="instanceUrl"
                 autocomplete="url"
                 fluid
                 required

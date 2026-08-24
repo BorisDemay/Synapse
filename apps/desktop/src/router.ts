@@ -1,21 +1,49 @@
-import { createRouter, createWebHistory } from "vue-router";
+import {
+  createMemoryHistory,
+  createRouter,
+  createWebHistory,
+  type Router,
+} from "vue-router";
 
 import LoginView from "./views/LoginView.vue";
 import RegisterView from "./views/RegisterView.vue";
-import UnlockView from "./views/UnlockView.vue";
-import VaultView from "./views/VaultView.vue";
-import WelcomeView from "./views/WelcomeView.vue";
+import UnlockVaultView from "../../web/src/views/UnlockVaultView.vue";
+import VaultView from "../../web/src/views/VaultView.vue";
 
-export function createAppRouter() {
-  return createRouter({
-    history: createWebHistory(),
+export interface AuthenticationState {
+  isAuthenticated: boolean;
+}
+
+export interface VaultAccessState {
+  isUnlocked: boolean;
+}
+
+export function createAppRouter(
+  auth: AuthenticationState,
+  vault: VaultAccessState,
+  options: { memory?: boolean } = {},
+): Router {
+  const router = createRouter({
+    history: options.memory ? createMemoryHistory() : createWebHistory(),
     routes: [
-      { component: WelcomeView, path: "/" },
-      { component: VaultView, path: "/vault" },
       { component: LoginView, path: "/login" },
       { component: RegisterView, path: "/register" },
-      { component: UnlockView, path: "/unlock" },
-      { path: "/:pathMatch(.*)*", redirect: "/" },
+      { component: UnlockVaultView, path: "/unlock" },
+      { component: VaultView, path: "/vault" },
+      { path: "/:pathMatch(.*)*", redirect: "/vault" },
     ],
   });
+  router.beforeEach((to) => {
+    if (to.path === "/login" || to.path === "/register") {
+      return true;
+    }
+    if (!auth.isAuthenticated) {
+      return "/login";
+    }
+    if (to.path !== "/unlock" && !vault.isUnlocked) {
+      return "/unlock";
+    }
+    return true;
+  });
+  return router;
 }

@@ -5,9 +5,14 @@ import { describe, expect, it } from "vitest";
 const mainSource = readFileSync("src/main.ts", "utf8");
 
 describe("desktop bootstrap", () => {
-  it("uses the desktop shell and router so the instance URL can be configured", () => {
+  it("uses the canonical encrypted web stores behind the native shell", () => {
     expect(mainSource).toContain('import App from "./App.vue";');
     expect(mainSource).toContain('import { createAppRouter } from "./router";');
-    expect(mainSource).not.toContain('from "../../web/src/router"');
+    expect(mainSource).toContain(
+      'import { useAuthStore } from "../../web/src/stores/auth";',
+    );
+    expect(mainSource).toContain(
+      'import { useVaultStore } from "../../web/src/stores/vault";',
+    );
   });
 });

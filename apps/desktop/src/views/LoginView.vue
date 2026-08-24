@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from "@tauri-apps/api/core";
 import { onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 
@@ -9,25 +10,41 @@ import Password from "primevue/password";
 
 import { ThemeToggle } from "@synapse/ui";
 
-import { useAuthStore } from "../stores/auth";
+import { useAuthStore } from "../../../web/src/stores/auth";
+import { useVaultStore } from "../../../web/src/stores/vault";
 
 const auth = useAuthStore();
+const vault = useVaultStore();
 const router = useRouter();
+const instanceUrl = ref(
+  localStorage.getItem("synapse-instance-url") ?? "http://127.0.0.1:3000",
+);
 const email = ref("");
 const password = ref("");
 const error = ref("");
 const publicSignup = ref(false);
 
 onMounted(async () => {
+  await configureInstance().catch(() => undefined);
   publicSignup.value = await auth.fetchPublicSignup();
 });
+
+async function configureInstance() {
+  const url = instanceUrl.value.trim();
+  await invoke("set_instance_url", { url });
+  localStorage.setItem("synapse-instance-url", url);
+}
 
 async function submit() {
   error.value = "";
   try {
-    await auth.configureInstance(auth.instanceUrl);
+    await configureInstance();
     await auth.login(email.value, password.value);
     password.value = "";
+    if (await vault.tryUnlockFromTrustedDevice()) {
+      await router.push("/vault");
+      return;
+    }
     await router.push("/unlock");
   } catch {
     password.value = "";
@@ -72,7 +89,7 @@ async function submit() {
             <label for="login-instance">URL de l’instance</label>
             <InputText
               id="login-instance"
-              v-model="auth.instanceUrl"
+              v-model="instanceUrl"
               autocomplete="url"
               fluid
               required
