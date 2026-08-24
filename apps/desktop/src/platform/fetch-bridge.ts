@@ -27,11 +27,14 @@ const nativeFetch = globalThis.fetch.bind(globalThis);
 const INSTANCE_URL_KEY = "synapse-instance-url";
 let installed = false;
 let instanceReady: Promise<void> | undefined;
+let configuredInstanceUrl: string | undefined;
 
 function ensureInstance(): Promise<void> {
   if (!instanceReady) {
     const url =
-      localStorage.getItem(INSTANCE_URL_KEY) ?? "http://127.0.0.1:3000";
+      configuredInstanceUrl ??
+      localStorage.getItem(INSTANCE_URL_KEY) ??
+      "http://127.0.0.1:3000";
     instanceReady = invoke("set_instance_url", { url }).then(
       () => undefined,
       (error) => {
@@ -146,9 +149,12 @@ function responseFrom(result: SynapseResponse): Response {
   });
 }
 
-export function installDesktopFetchBridge(): void {
+export function installDesktopFetchBridge(
+  options: { instanceUrl?: string } = {},
+): void {
   if (installed) return;
   installed = true;
+  configuredInstanceUrl = options.instanceUrl;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = await mapRequest(input, init);
     if (!request) {
@@ -166,4 +172,5 @@ export function resetDesktopFetchBridgeForTests(): void {
   globalThis.fetch = nativeFetch;
   installed = false;
   instanceReady = undefined;
+  configuredInstanceUrl = undefined;
 }

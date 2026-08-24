@@ -12,6 +12,7 @@ import {
 describe("desktop Synapse fetch bridge", () => {
   beforeEach(() => {
     invoke.mockReset();
+    localStorage.clear();
     resetDesktopFetchBridgeForTests();
     installDesktopFetchBridge();
   });
@@ -29,6 +30,19 @@ describe("desktop Synapse fetch bridge", () => {
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ user_id: "user-1" });
+  });
+
+  it("uses the development instance instead of a stale remembered URL", async () => {
+    localStorage.setItem("synapse-instance-url", "https://old.example.test");
+    invoke.mockResolvedValue({ body: { user_id: "user-1" }, status: 200 });
+    resetDesktopFetchBridgeForTests();
+    installDesktopFetchBridge({ instanceUrl: "http://127.0.0.1:3000" });
+
+    await fetch("/v1/session");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "set_instance_url", {
+      url: "http://127.0.0.1:3000",
+    });
   });
 
   it("does not intercept third-party requests", async () => {

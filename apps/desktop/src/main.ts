@@ -18,7 +18,9 @@ async function bootstrap() {
   initializeTheme();
   document.documentElement.lang = "fr";
 
-  installDesktopFetchBridge();
+  installDesktopFetchBridge({
+    instanceUrl: import.meta.env.DEV ? "http://127.0.0.1:3000" : undefined,
+  });
   const auth = useAuthStore(pinia);
   const vault = useVaultStore(pinia);
   await auth.restoreSession().catch(() => false);
