@@ -17,6 +17,7 @@ function rememberedInstanceUrl(): string {
 
 export const useAuthStore = defineStore("auth", {
   state: () => ({
+    configuredInstanceUrl: null as string | null,
     email: null as string | null,
     instanceUrl: rememberedInstanceUrl(),
     isAuthenticated: false,
@@ -27,6 +28,7 @@ export const useAuthStore = defineStore("auth", {
     async configureInstance(url: string) {
       const origin = await invoke<string>("set_instance_url", { url });
       this.instanceUrl = url;
+      this.configuredInstanceUrl = url;
       localStorage.setItem(INSTANCE_URL_KEY, url);
       return origin;
     },
@@ -34,18 +36,26 @@ export const useAuthStore = defineStore("auth", {
       if (!this.instanceUrl.trim()) {
         throw new Error("Instance URL missing");
       }
-      await this.configureInstance(this.instanceUrl.trim());
+      const url = this.instanceUrl.trim();
+      if (this.configuredInstanceUrl !== url) {
+        await this.configureInstance(url);
+      }
+    },
+    async request(path: string, init?: RequestInit) {
+      await this.ensureInstance();
+      return fetch(path, { credentials: "include", ...init });
     },
     async restoreSession() {
       try {
-        await this.ensureInstance();
-        const session = await invoke<{ user_id: string } | null>(
-          "auth_session",
-        );
-        if (!session) {
+        const response = await this.request("/v1/session");
+        if (!response.ok) {
           this.isAuthenticated = false;
           this.userId = null;
           return false;
+        }
+        const session = (await response.json()) as { user_id?: unknown };
+        if (typeof session.user_id !== "string") {
+          throw new Error("instance returned an invalid session");
         }
         this.isAuthenticated = true;
         this.isOfflineSession = false;
@@ -59,41 +69,48 @@ export const useAuthStore = defineStore("auth", {
     },
     async fetchPublicSignup() {
       try {
-        await this.ensureInstance();
-        return await invoke<boolean>("auth_public_signup");
+        const response = await this.request("/auth/signup");
+        if (!response.ok) return false;
+        const body = (await response.json()) as { public_signup?: unknown };
+        return body.public_signup === true;
       } catch {
         return false;
       }
     },
     async login(email: string, password: string) {
-      await this.ensureInstance();
-      const session = await invoke<{ user_id: string }>("auth_login", {
-        email,
-        password,
+      const response = await this.request("/auth/login", {
+        body: JSON.stringify({ email, password }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
       });
-      this.isAuthenticated = true;
-      this.isOfflineSession = false;
-      this.userId = session.user_id;
+      if (!response.ok) throw new Error("authentication failed");
+      if (!(await this.restoreSession())) {
+        throw new Error("session unavailable");
+      }
     },
     async register(input: {
       email: string;
       invitationToken?: string;
       password: string;
     }) {
-      await this.ensureInstance();
-      const session = await invoke<{ user_id: string }>("auth_register", {
-        email: input.email,
-        invitationToken: input.invitationToken ?? null,
-        password: input.password,
+      const response = await this.request("/auth/signup", {
+        body: JSON.stringify({
+          email: input.email,
+          invitation_token: input.invitationToken,
+          password: input.password,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
       });
-      this.isAuthenticated = true;
-      this.userId = session.user_id;
+      if (!response.ok) throw new Error("registration failed");
+      await this.login(input.email, input.password);
     },
     async logout() {
       const vault = useVaultStore();
       await vault.lock();
       try {
-        await invoke("auth_logout");
+        const response = await this.request("/auth/logout", { method: "POST" });
+        if (!response.ok) throw new Error("logout failed");
       } finally {
         this.isAuthenticated = false;
         this.userId = null;
@@ -101,34 +118,53 @@ export const useAuthStore = defineStore("auth", {
       }
     },
     async changePassword(currentPassword: string, newPassword: string) {
-      await invoke("auth_change_password", {
-        currentPassword,
-        newPassword,
+      const response = await this.request("/auth/password", {
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
       });
+      if (!response.ok) throw new Error("password change failed");
     },
     async listSessions(): Promise<{ email: string; sessions: AuthSession[] }> {
-      const body = await invoke<{
-        email: string;
-        sessions: Array<{ created_at: string; current: boolean; id: string }>;
-      }>("auth_sessions");
-      this.email = body.email || null;
+      const response = await this.request("/auth/sessions");
+      if (!response.ok) throw new Error("unable to list sessions");
+      const body = (await response.json()) as {
+        email?: unknown;
+        sessions?: Array<{ created_at?: unknown; current?: unknown; id?: unknown }>;
+      };
+      const email = typeof body.email === "string" ? body.email : "";
+      this.email = email || null;
       return {
-        email: body.email,
-        sessions: body.sessions.map((session) => ({
-          createdAt: session.created_at,
-          current: session.current,
-          id: session.id,
-        })),
+        email,
+        sessions: (body.sessions ?? []).flatMap((session) =>
+          typeof session.id === "string" && typeof session.created_at === "string"
+            ? [{ createdAt: session.created_at, current: session.current === true, id: session.id }]
+            : [],
+        ),
       };
     },
     async revokeSession(sessionId: string) {
-      await invoke("auth_revoke_session", { sessionId });
+      const response = await this.request(`/auth/sessions/${sessionId}/revoke`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("unable to revoke session");
     },
     async revokeOtherSessions() {
-      await invoke("auth_revoke_other_sessions");
+      const response = await this.request("/auth/sessions/revoke-others", {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("unable to revoke sessions");
     },
     async deleteAccount(password: string) {
-      await invoke("auth_delete_account", { password });
+      const response = await this.request("/auth/account/delete", {
+        body: JSON.stringify({ password }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("account deletion failed");
       const vault = useVaultStore();
       await vault.lock();
       this.isAuthenticated = false;

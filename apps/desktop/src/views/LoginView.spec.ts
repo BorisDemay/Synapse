@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
 import { installSynapseUi } from "@synapse/ui";
@@ -8,24 +8,28 @@ import { installSynapseUi } from "@synapse/ui";
 import LoginView from "./LoginView.vue";
 
 const invoke = vi.hoisted(() => vi.fn());
+const nativeFetch = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 describe("LoginView", () => {
   beforeEach(() => {
     invoke.mockReset();
+    nativeFetch.mockReset();
+    vi.spyOn(globalThis, "fetch").mockImplementation(nativeFetch);
+    nativeFetch.mockResolvedValue(
+      new Response(JSON.stringify({ public_signup: true }), { status: 200 }),
+    );
     invoke.mockImplementation(async (command: string) => {
       if (command === "set_instance_url") {
         return "http://127.0.0.1:3000";
       }
-      if (command === "auth_public_signup") {
-        return true;
-      }
-      if (command === "auth_login") {
-        return { user_id: "user-1" };
-      }
       return undefined;
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("shows the register link when public signup is open", async () => {

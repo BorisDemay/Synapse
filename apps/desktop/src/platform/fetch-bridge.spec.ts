@@ -45,6 +45,24 @@ describe("desktop Synapse fetch bridge", () => {
     });
   });
 
+  it("reconfigures the native client after the user changes instance URL", async () => {
+    localStorage.setItem("synapse-instance-url", "https://old.example.test");
+    invoke.mockResolvedValue({ body: { public_signup: false }, status: 200 });
+    resetDesktopFetchBridgeForTests();
+    installDesktopFetchBridge();
+
+    await fetch("/auth/signup");
+    localStorage.setItem("synapse-instance-url", "https://new.example.test");
+    await fetch("/auth/signup");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "set_instance_url", {
+      url: "https://old.example.test",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "set_instance_url", {
+      url: "https://new.example.test",
+    });
+  });
+
   it("does not intercept third-party requests", async () => {
     const nativeFetch = globalThis.fetch;
     const external = vi.fn().mockResolvedValue(new Response("ok"));
