@@ -9,6 +9,13 @@ const vditorMock = vi.hoisted(() => {
     cache?: { enable?: boolean };
     cdn?: string;
     image?: { isPreview?: boolean };
+    hint?: {
+      emojiPath?: string;
+      extend?: Array<{
+        hint?: (value: string) => Array<{ html: string; value: string }>;
+        key: string;
+      }>;
+    };
     input?: (value: string) => void;
     link?: { isOpen?: boolean };
     mode?: string;
@@ -105,6 +112,41 @@ describe("MarkdownEditor", () => {
       ?.querySelector('[contenteditable="true"]');
     expect(editable?.getAttribute("aria-label")).toBe("Éditeur Markdown");
     expect(editable?.getAttribute("lang")).toBe("fr");
+  });
+
+  it("offers escaped, local-only completions for wikilinks", () => {
+    mount(MarkdownEditor, {
+      props: {
+        modelValue: "",
+        wikilinkSuggestions: [
+          { label: "Feuille de route", path: "projets/roadmap.md" },
+          { label: "<script>", path: "notes/sure.md" },
+        ],
+      },
+    });
+
+    const completion = vditorMock
+      .options()
+      ?.hint?.extend?.find((item) => item.key === "[[")
+      ?.hint?.("route");
+
+    expect(completion).toEqual([
+      {
+        html: "Feuille de route <small>projets/roadmap.md</small>",
+        value: "[[projets/roadmap]]",
+      },
+    ]);
+    expect(
+      vditorMock
+        .options()
+        ?.hint?.extend?.find((item) => item.key === "[[")
+        ?.hint?.("sure"),
+    ).toEqual([
+      {
+        html: "&lt;script&gt; <small>notes/sure.md</small>",
+        value: "[[notes/sure]]",
+      },
+    ]);
   });
 
   it("shows explicit French labels in the formatting toolbar", () => {

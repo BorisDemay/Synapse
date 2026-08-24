@@ -94,6 +94,12 @@ const queryNotes = computed(() =>
   })),
 );
 
+const wikilinkSuggestions = computed(() =>
+  queryNotes.value
+    .filter((note) => note.id !== noteId.value)
+    .map(({ label, path }) => ({ label, path })),
+);
+
 const treeNodes = computed<VaultTreeNode[]>(() => {
   const sources = queryNotes.value
     .filter((note) => {
@@ -754,6 +760,7 @@ watch(settingsOpen, (open) => {
           <MarkdownEditor
             v-model="content"
             :attachment-urls="blobUrls"
+            :wikilink-suggestions="wikilinkSuggestions"
             @attach-files="attachFiles"
             @open-wikilink="openWikilink"
             @save="save"

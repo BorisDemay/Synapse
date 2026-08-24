@@ -9,9 +9,11 @@ const props = withDefaults(
   defineProps<{
     attachmentUrls?: Record<string, string>;
     modelValue: string;
+    wikilinkSuggestions?: readonly { label: string; path: string }[];
   }>(),
   {
     attachmentUrls: () => ({}),
+    wikilinkSuggestions: () => [],
   },
 );
 
@@ -79,6 +81,37 @@ function localAssetBase(): string {
   return new URL("vendor/vditor", document.baseURI)
     .toString()
     .replace(/\/$/, "");
+}
+
+function escapeHintHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function wikilinkTarget(path: string): string {
+  return path.replace(/\.md$/iu, "");
+}
+
+function wikilinkHints(query: string) {
+  const needle = query.toLocaleLowerCase();
+  return props.wikilinkSuggestions
+    .filter(({ label, path }) => {
+      const target = wikilinkTarget(path);
+      return (
+        label.toLocaleLowerCase().includes(needle) ||
+        path.toLocaleLowerCase().includes(needle) ||
+        target.toLocaleLowerCase().includes(needle)
+      );
+    })
+    .slice(0, 8)
+    .map(({ label, path }) => ({
+      html: `${escapeHintHtml(label)} <small>${escapeHintHtml(path)}</small>`,
+      value: `[[${wikilinkTarget(path)}]]`,
+    }));
 }
 
 function scheduleSave(value: string) {
@@ -485,6 +518,7 @@ onMounted(() => {
     height: "100%",
     hint: {
       emojiPath: `${cdn}/dist/images/emoji`,
+      extend: [{ hint: wikilinkHints, key: "[[" }],
     },
     image: { isPreview: false },
     lang: "fr_FR",
