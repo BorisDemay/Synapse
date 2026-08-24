@@ -2,17 +2,22 @@
 import { ref } from "vue";
 
 import BacklinksPanel, { type Backlink } from "./BacklinksPanel.vue";
-import HistoryPanel, { type HistoryPanelEntry } from "./HistoryPanel.vue";
+import HistoryPanel, {
+  type HistoryPanelEntry,
+  type HistoryRestorePoint,
+} from "./HistoryPanel.vue";
 
 defineProps<{
   backlinks: Backlink[];
   history: HistoryPanelEntry[];
+  restorePoints?: HistoryRestorePoint[];
 }>();
 
 const emit = defineEmits<{
   close: [];
   select: [id: string];
   restore: [revision: number];
+  createRestorePoint: [];
 }>();
 
 const activeTab = ref<"backlinks" | "history">("backlinks");
@@ -74,7 +79,12 @@ const activeTab = ref<"backlinks" | "history">("backlinks");
       role="tabpanel"
       tabindex="0"
     >
-      <HistoryPanel :entries="history" @restore="emit('restore', $event)" />
+      <HistoryPanel
+        :entries="history"
+        :restore-points="restorePoints"
+        @create-restore-point="emit('createRestorePoint')"
+        @restore="emit('restore', $event)"
+      />
     </div>
   </div>
 </template>

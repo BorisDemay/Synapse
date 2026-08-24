@@ -12,6 +12,7 @@ describe("vault preferences envelope", () => {
       dailyNotePattern: "Daily/YYYY-MM-DD.md",
       pinnedNoteIds: ["note-1"],
       recentNoteIds: ["note-1"],
+      restorePoints: [],
       savedSearches: [
         { id: "search-1", label: "Active", query: "property:status=active" },
       ],
@@ -39,6 +40,7 @@ describe("vault preferences envelope", () => {
     expect(unwrapVaultPreferences(key, "vault-1", envelope)).toEqual({
       ...legacy,
       recentNoteIds: [],
+      restorePoints: [],
     });
   });
 });

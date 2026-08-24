@@ -213,6 +213,8 @@ const historyEntries = computed(() =>
   })),
 );
 
+const restorePoints = computed(() => vault.restorePointsFor(noteId.value));
+
 function selectNote(id: string) {
   const attached = vault.attachments.get(id);
   if (attached) {
@@ -742,6 +744,17 @@ async function restoreHistory(revision: number) {
   }
 }
 
+async function createRestorePoint() {
+  const label = window.prompt("Nom du restore point");
+  if (!label?.trim()) return;
+  try {
+    await vault.createRestorePoint(noteId.value, label);
+  } catch (error) {
+    formError.value =
+      error instanceof Error ? error.message : "Restore point impossible.";
+  }
+}
+
 function refreshBlobUrls() {
   for (const url of Object.values(blobUrls.value)) {
     URL.revokeObjectURL(url);
@@ -1089,7 +1102,9 @@ watch(settingsOpen, (open) => {
         v-else
         :backlinks="currentBacklinks"
         :history="historyEntries"
+        :restore-points="restorePoints"
         @close="noteHistoryOpen = false"
+        @create-restore-point="createRestorePoint"
         @restore="restoreHistory"
         @select="selectNote"
       />

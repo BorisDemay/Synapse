@@ -21,6 +21,7 @@ export type {
 export type { AiConversationPanelItem } from "./components/AiConversationPanel.vue";
 export type { Backlink } from "./components/BacklinksPanel.vue";
 export type { HistoryPanelEntry } from "./components/HistoryPanel.vue";
+export type { HistoryRestorePoint } from "./components/HistoryPanel.vue";
 export type {
   PaletteCommand,
   SearchResult,

@@ -89,6 +89,28 @@ describe("vault store", () => {
     ]);
   });
 
+  it("keeps a named restore point in encrypted local preferences", async () => {
+    const vault = useVaultStore();
+    vault.unlock(
+      Uint8Array.from({ length: 32 }, (_, index) => index),
+      vaultId,
+      3,
+    );
+    vault.notes.set(noteId, {
+      content: "# snapshot",
+      path: "snapshot.md",
+      revision: 3,
+    });
+
+    await vault.createRestorePoint(noteId, "Avant refonte");
+
+    expect(vault.restorePointsFor(noteId)).toEqual([
+      expect.objectContaining({ label: "Avant refonte", noteId, revision: 3 }),
+    ]);
+    const record = await getVaultPreferences(userId, vaultId);
+    expect(JSON.stringify(record)).not.toContain("Avant refonte");
+  });
+
   it("creates a vault envelope then unlocks it in memory", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(

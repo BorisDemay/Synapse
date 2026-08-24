@@ -8,10 +8,19 @@ export interface SavedSearch {
   query: string;
 }
 
+export interface RestorePoint {
+  id: string;
+  label: string;
+  noteId: string;
+  recordedAt: string;
+  revision: number;
+}
+
 export interface VaultPreferences {
   dailyNotePattern: string;
   pinnedNoteIds: string[];
   recentNoteIds: string[];
+  restorePoints: RestorePoint[];
   savedSearches: SavedSearch[];
   templatesPath: string;
 }
@@ -25,6 +34,7 @@ export const DEFAULT_VAULT_PREFERENCES: VaultPreferences = {
   dailyNotePattern: "Daily/YYYY-MM-DD.md",
   pinnedNoteIds: [],
   recentNoteIds: [],
+  restorePoints: [],
   savedSearches: [],
   templatesPath: "Templates",
 };
@@ -52,6 +62,18 @@ function parsePreferences(value: unknown): VaultPreferences {
     (record.recentNoteIds !== undefined &&
       (!Array.isArray(record.recentNoteIds) ||
         !record.recentNoteIds.every((id) => typeof id === "string"))) ||
+    (record.restorePoints !== undefined &&
+      (!Array.isArray(record.restorePoints) ||
+        !record.restorePoints.every(
+          (point) =>
+            Boolean(point) &&
+            typeof point === "object" &&
+            typeof (point as Record<string, unknown>).id === "string" &&
+            typeof (point as Record<string, unknown>).label === "string" &&
+            typeof (point as Record<string, unknown>).noteId === "string" &&
+            typeof (point as Record<string, unknown>).recordedAt === "string" &&
+            typeof (point as Record<string, unknown>).revision === "number",
+        ))) ||
     !Array.isArray(record.savedSearches) ||
     !record.savedSearches.every(
       (search) =>
@@ -69,6 +91,9 @@ function parsePreferences(value: unknown): VaultPreferences {
     pinnedNoteIds: [...record.pinnedNoteIds],
     recentNoteIds: Array.isArray(record.recentNoteIds)
       ? [...record.recentNoteIds]
+      : [],
+    restorePoints: Array.isArray(record.restorePoints)
+      ? (record.restorePoints as RestorePoint[]).map((point) => ({ ...point }))
       : [],
     savedSearches: (record.savedSearches as SavedSearch[]).map((search) => ({
       ...search,

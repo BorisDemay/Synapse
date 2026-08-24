@@ -326,6 +326,7 @@ export const useVaultStore = defineStore("vault", () => {
       ...next,
       pinnedNoteIds: [...next.pinnedNoteIds],
       recentNoteIds: [...next.recentNoteIds],
+      restorePoints: next.restorePoints.map((point) => ({ ...point })),
       savedSearches: next.savedSearches.map((search) => ({ ...search })),
     };
   }
@@ -367,6 +368,38 @@ export const useVaultStore = defineStore("vault", () => {
         ...preferences.value.recentNoteIds.filter((entry) => entry !== id),
       ].slice(0, 20),
     });
+  }
+
+  async function createRestorePoint(
+    noteId: string,
+    label: string,
+  ): Promise<void> {
+    const revision =
+      historyFor(noteId)[0]?.revision ?? notes.get(noteId)?.revision;
+    if (!revision || !label.trim()) {
+      throw new Error("Unable to create restore point");
+    }
+    await savePreferences({
+      ...preferences.value,
+      restorePoints: [
+        {
+          id: uuidV7(),
+          label: label.trim(),
+          noteId,
+          recordedAt: new Date().toISOString(),
+          revision,
+        },
+        ...preferences.value.restorePoints.filter(
+          (point) => !(point.noteId === noteId && point.label === label.trim()),
+        ),
+      ].slice(0, 50),
+    });
+  }
+
+  function restorePointsFor(noteId: string) {
+    return preferences.value.restorePoints.filter(
+      (point) => point.noteId === noteId,
+    );
   }
 
   async function persistAssistantCredential(
@@ -1287,6 +1320,7 @@ export const useVaultStore = defineStore("vault", () => {
     changePassphrase,
     clearDeviceData,
     createAndUnlockVault,
+    createRestorePoint,
     currentVaultId,
     deleteNote,
     fetchEnvelopeBytes,
@@ -1322,6 +1356,7 @@ export const useVaultStore = defineStore("vault", () => {
     renameNote,
     resolveConflict,
     restoreRevision,
+    restorePointsFor,
     saveAttachment,
     savePreferences,
     saveNote,

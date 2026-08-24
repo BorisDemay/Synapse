@@ -7,12 +7,20 @@ export interface HistoryPanelEntry {
   revision: number;
 }
 
+export interface HistoryRestorePoint {
+  label: string;
+  recordedAt: string;
+  revision: number;
+}
+
 const props = defineProps<{
   entries: HistoryPanelEntry[];
+  restorePoints?: HistoryRestorePoint[];
 }>();
 
 const emit = defineEmits<{
   restore: [revision: number];
+  createRestorePoint: [];
 }>();
 
 const pendingRestore = ref<HistoryPanelEntry>();
@@ -43,6 +51,26 @@ function confirmRestore() {
         </button>
       </li>
     </ul>
+    <button
+      data-action="create-restore-point"
+      type="button"
+      @click="emit('createRestorePoint')"
+    >
+      Créer un restore point
+    </button>
+    <section v-if="props.restorePoints?.length" aria-label="Restore points">
+      <h3>Restore points</h3>
+      <ul>
+        <li
+          v-for="point in props.restorePoints"
+          :key="`${point.revision}-${point.label}`"
+        >
+          <button type="button" @click="requestRestore(point)">
+            {{ point.label }} <small>{{ point.recordedAt }}</small>
+          </button>
+        </li>
+      </ul>
+    </section>
     <div
       v-if="pendingRestore"
       aria-labelledby="restore-title"
