@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 import type { LocalGraph } from "../vault/query";
 
 const props = defineProps<{
@@ -10,6 +12,23 @@ const emit = defineEmits<{
   close: [];
   select: [id: string];
 }>();
+
+const layout = computed(() => {
+  const count = props.graph.nodes.length;
+  const radius = count <= 1 ? 0 : 76;
+  return props.graph.nodes.map((node, index) => {
+    const angle = count ? (Math.PI * 2 * index) / count - Math.PI / 2 : 0;
+    return {
+      ...node,
+      x: 100 + Math.cos(angle) * radius,
+      y: 100 + Math.sin(angle) * radius,
+    };
+  });
+});
+
+const byId = computed(
+  () => new Map(layout.value.map((node) => [node.id, node])),
+);
 
 function degree(id: string): number {
   return props.graph.edges.filter(
@@ -39,6 +58,34 @@ function degree(id: string): number {
     <p class="graph-privacy" role="status">
       Calculé uniquement dans ce coffre déverrouillé.
     </p>
+    <svg
+      v-if="layout.length"
+      aria-label="Visualisation du graphe local"
+      class="graph-canvas"
+      role="img"
+      viewBox="0 0 200 200"
+    >
+      <line
+        v-for="(edge, index) in props.graph.edges"
+        :key="`${edge.source}-${edge.target}-${index}`"
+        :x1="byId.get(edge.source)?.x"
+        :x2="byId.get(edge.target)?.x"
+        :y1="byId.get(edge.source)?.y"
+        :y2="byId.get(edge.target)?.y"
+      />
+      <g
+        v-for="node in layout"
+        :key="node.id"
+        class="graph-node"
+        :data-selected="node.id === props.selectedId ? 'true' : undefined"
+        tabindex="0"
+        @click="emit('select', node.id)"
+        @keydown.enter.prevent="emit('select', node.id)"
+      >
+        <circle :cx="node.x" :cy="node.y" r="8" />
+        <title>{{ node.label }}</title>
+      </g>
+    </svg>
     <ul aria-label="Notes du graphe">
       <li v-for="node in props.graph.nodes" :key="node.id">
         <button
@@ -73,6 +120,31 @@ function degree(id: string): number {
 .graph-panel p,
 .graph-panel small {
   color: var(--synapse-color-text-muted);
+}
+.graph-canvas {
+  width: 100%;
+  max-height: 18rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  background: var(--synapse-color-surface-muted);
+}
+.graph-canvas line {
+  stroke: var(--synapse-color-border);
+  stroke-width: 1;
+}
+.graph-node {
+  cursor: pointer;
+  outline: none;
+}
+.graph-node circle {
+  fill: var(--synapse-color-accent);
+  stroke: var(--synapse-color-surface-raised);
+  stroke-width: 2;
+}
+.graph-node[data-selected="true"] circle,
+.graph-node:focus circle {
+  fill: var(--synapse-color-warning);
+  stroke-width: 3;
 }
 .graph-panel header > button,
 .graph-panel li button {

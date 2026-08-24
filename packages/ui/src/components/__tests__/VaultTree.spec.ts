@@ -148,13 +148,12 @@ describe("VaultTree", () => {
     });
 
     expect(wrapper.get('[data-kind="folder"]').text()).toContain("projets");
-    expect(wrapper.get('[data-status="pending"]').exists()).toBe(true);
+    expect(wrapper.find('[data-status="pending"]').exists()).toBe(true);
     expect(
-      wrapper
-        .get('[data-kind="folder"]')
-        .find(":scope > .vault-tree-row button[aria-label^='Supprimer']")
-        .exists(),
-    ).toBe(false);
+      wrapper.findAll(
+        '[data-kind="folder"] > .vault-tree-row button[aria-label^="Supprimer"]',
+      ),
+    ).toHaveLength(0);
 
     await wrapper.get('[data-kind="folder"]').trigger("click");
     expect(wrapper.find('[data-kind="note"]').exists()).toBe(false);
