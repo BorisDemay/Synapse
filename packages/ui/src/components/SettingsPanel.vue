@@ -14,7 +14,6 @@ const props = withDefaults(
     accountEmail?: string;
     deviceSupported: boolean;
     deviceTrusted: boolean;
-    dailyNotePattern?: string;
     errorMessage?: string;
     exportSupported?: boolean;
     offline?: boolean;
@@ -30,7 +29,6 @@ const props = withDefaults(
     offline: false,
     sessions: () => [],
     statusMessage: "",
-    dailyNotePattern: "Daily/YYYY-MM-DD.md",
     templatesPath: "Templates",
   },
 );
@@ -46,7 +44,7 @@ const emit = defineEmits<{
   rememberDevice: [];
   revokeOtherSessions: [];
   revokeSession: [id: string];
-  saveVaultPreferences: [templatesPath: string, dailyNotePattern: string];
+  saveVaultPreferences: [templatesPath: string];
 }>();
 
 const currentPassword = ref("");
@@ -59,7 +57,6 @@ const deletePassword = ref("");
 const deleteConfirmation = ref("");
 const formError = ref("");
 const templatesPath = ref(props.templatesPath);
-const dailyNotePattern = ref(props.dailyNotePattern);
 
 function onBackdrop(event: MouseEvent) {
   if (event.target === event.currentTarget) {
@@ -112,16 +109,11 @@ function submitDelete() {
 
 function submitVaultPreferences() {
   formError.value = "";
-  if (!templatesPath.value.trim() || !dailyNotePattern.value.trim()) {
-    formError.value =
-      "Les chemins de modèles et de note quotidienne sont requis.";
+  if (!templatesPath.value.trim()) {
+    formError.value = "Le dossier des modèles est requis.";
     return;
   }
-  emit(
-    "saveVaultPreferences",
-    templatesPath.value.trim(),
-    dailyNotePattern.value.trim(),
-  );
+  emit("saveVaultPreferences", templatesPath.value.trim());
 }
 </script>
 
@@ -229,7 +221,7 @@ function submitVaultPreferences() {
           data-form="vault-preferences"
           @submit.prevent="submitVaultPreferences"
         >
-          <h4>Modèles et note quotidienne</h4>
+          <h4>Modèles</h4>
           <p>
             Ces préférences sont chiffrées localement avec le coffre et ne sont
             jamais envoyées au serveur.
@@ -239,15 +231,6 @@ function submitVaultPreferences() {
             <input
               v-model="templatesPath"
               name="templates-path"
-              autocomplete="off"
-              required
-            />
-          </label>
-          <label class="settings-field">
-            Chemin quotidien (`YYYY`, `MM`, `DD`)
-            <input
-              v-model="dailyNotePattern"
-              name="daily-note-pattern"
               autocomplete="off"
               required
             />

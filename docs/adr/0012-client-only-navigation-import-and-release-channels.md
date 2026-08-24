@@ -5,7 +5,7 @@
 
 ## Contexte
 
-Les modèles, notes quotidiennes, propriétés, recherches, graphe, import de
+Les modèles, propriétés, recherches, graphe, import de
 coffres Markdown et aperçu de pièces jointes ajoutent des chemins, relations et
 contenus qui ne doivent jamais devenir des métadonnées du serveur E2EE.
 L'application doit aussi distribuer des artefacts Windows et Linux vérifiables
@@ -13,12 +13,11 @@ sans introduire de service tiers obligatoire.
 
 ## Décision
 
-- Les préférences par coffre (modèles, note quotidienne, épingles et recherches
+- Les préférences par coffre (modèles, épingles et recherches
   sauvegardées) sont chiffrées avec la clé de coffre avant IndexedDB. Elles ne
   sont ni synchronisées ni journalisées.
-- Les modèles restent des notes Markdown ordinaires. La création quotidienne est
-  idempotente par chemin et remplace seulement `{{date}}`, `{{time}}` et
-  `{{title}}` localement.
+- Les modèles restent des notes Markdown ordinaires. Seule leur insertion
+  remplace `{{date}}`, `{{time}}` et `{{title}}` localement.
 - L'import examine un dossier choisi explicitement ou un ZIP avant toute écriture.
   Il refuse traversal, configuration `.obsidian`, types exécutables, plus de
   10 000 entrées et plus de 250 MiB décompressés. Les pièces jointes importées

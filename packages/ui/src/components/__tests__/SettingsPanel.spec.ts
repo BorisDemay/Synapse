@@ -53,10 +53,9 @@ describe("SettingsPanel", () => {
     expect(wrapper.emitted("lockVault")).toHaveLength(1);
   });
 
-  it("emits local vault template preferences", async () => {
+  it("emits the local templates preference", async () => {
     const wrapper = mount(SettingsPanel, {
       props: {
-        dailyNotePattern: "Daily/YYYY-MM-DD.md",
         deviceSupported: false,
         deviceTrusted: false,
         open: true,
@@ -64,14 +63,8 @@ describe("SettingsPanel", () => {
       },
     });
     await wrapper.get('input[name="templates-path"]').setValue("Models");
-    await wrapper
-      .get('input[name="daily-note-pattern"]')
-      .setValue("Journal/YYYY-MM-DD.md");
     await wrapper.get('form[data-form="vault-preferences"]').trigger("submit");
-    expect(wrapper.emitted("saveVaultPreferences")?.[0]).toEqual([
-      "Models",
-      "Journal/YYYY-MM-DD.md",
-    ]);
+    expect(wrapper.emitted("saveVaultPreferences")?.[0]).toEqual(["Models"]);
   });
 
   it("does not render the dialog when closed", () => {

@@ -25,21 +25,3 @@ export function renderTemplate(
     .replaceAll("{{time}}", localTime(context.date))
     .replaceAll("{{title}}", context.title);
 }
-
-export function dailyNotePath(date: Date, pattern: string): string {
-  const path = pattern
-    .replaceAll("YYYY", String(date.getFullYear()))
-    .replaceAll("MM", twoDigits(date.getMonth() + 1))
-    .replaceAll("DD", twoDigits(date.getDate()))
-    .replaceAll("\\", "/");
-  if (
-    !path ||
-    path.startsWith("/") ||
-    path.includes("..") ||
-    path.includes("\0") ||
-    !path.toLowerCase().endsWith(".md")
-  ) {
-    throw new Error("Invalid daily note path");
-  }
-  return path;
-}

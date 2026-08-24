@@ -137,7 +137,6 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "settings", label: "Paramètres" },
   { id: "theme", label: "Basculer le thème" },
   { id: "graph", label: "Afficher le graphe local" },
-  { id: "daily-note", label: "Ouvrir la note quotidienne" },
   { id: "from-template", label: "Créer une note depuis un modèle" },
 ]);
 
@@ -222,28 +221,6 @@ function startNewNote(folder?: string) {
   selectedNoteId.value = null;
   content.value = draft;
   formError.value = "";
-}
-
-function localDatePath(date = new Date()): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `Daily/${date.getFullYear()}-${month}-${day}.md`;
-}
-
-async function openDailyNote() {
-  const path = localDatePath();
-  if (vault.notes.has(path)) {
-    selectNote(path);
-    return;
-  }
-  const title = path.split("/").pop()?.replace(/\.md$/u, "") ?? "Daily";
-  const template =
-    vault.notes.get("Templates/Daily.md")?.content ?? `# ${title}\n\n`;
-  await vault.saveNote({
-    content: renderTemplate(template, { date: new Date(), title }),
-    id: path,
-  });
-  selectNote(path);
 }
 
 async function startFromTemplate() {
@@ -455,8 +432,6 @@ function runCommand(id: string) {
     theme.toggleTheme();
   } else if (id === "graph") {
     graphOpen.value = true;
-  } else if (id === "daily-note") {
-    void openDailyNote();
   } else if (id === "from-template") {
     void startFromTemplate();
   }
@@ -654,14 +629,6 @@ watch(settingsOpen, (open) => {
           outlined
           type="button"
           @click="startNewNote()"
-        />
-        <Button
-          class="new-note-button"
-          icon="pi pi-calendar"
-          label="Aujourd’hui"
-          outlined
-          type="button"
-          @click="openDailyNote"
         />
         <Button
           class="new-note-button"

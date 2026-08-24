@@ -6,10 +6,9 @@ import {
 } from "./vault-preferences";
 
 describe("vault preferences envelope", () => {
-  it("encrypts paths and saved searches with the vault key", () => {
+  it("encrypts template paths and saved searches with the vault key", () => {
     const key = new Uint8Array(32).fill(9);
     const preferences = {
-      dailyNotePattern: "Daily/YYYY-MM-DD.md",
       pinnedNoteIds: ["note-1"],
       recentNoteIds: ["note-1"],
       restorePoints: [],
@@ -19,7 +18,7 @@ describe("vault preferences envelope", () => {
       templatesPath: "Templates",
     };
     const envelope = wrapVaultPreferences(key, "vault-1", preferences);
-    expect(JSON.stringify(envelope)).not.toContain("Daily/");
+    expect(JSON.stringify(envelope)).not.toContain("Templates");
     expect(unwrapVaultPreferences(key, "vault-1", envelope)).toEqual(
       preferences,
     );
@@ -28,10 +27,9 @@ describe("vault preferences envelope", () => {
     );
   });
 
-  it("reads a preferences envelope created before recent notes existed", () => {
+  it("reads older preferences after daily-note removal", () => {
     const key = new Uint8Array(32).fill(4);
     const legacy = {
-      dailyNotePattern: "Daily/YYYY-MM-DD.md",
       pinnedNoteIds: [],
       savedSearches: [],
       templatesPath: "Templates",

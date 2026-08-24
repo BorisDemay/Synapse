@@ -157,7 +157,6 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "settings", label: "Paramètres" },
   { id: "theme", label: "Basculer le thème" },
   { id: "export", label: "Exporter Markdown" },
-  { id: "daily-note", label: "Ouvrir la note quotidienne" },
   { id: "from-template", label: "Créer une note depuis un modèle" },
   { id: "graph", label: "Afficher le graphe local" },
   { id: "import", label: "Importer un dossier ou ZIP Markdown" },
@@ -518,15 +517,11 @@ async function changePassphrase(current: string, next: string) {
   }
 }
 
-async function saveVaultPreferences(
-  templatesPath: string,
-  dailyNotePattern: string,
-) {
+async function saveVaultPreferences(templatesPath: string) {
   settingsError.value = "";
   try {
     await vault.savePreferences({
       ...vault.preferences,
-      dailyNotePattern,
       templatesPath,
     });
     settingsStatus.value = "Préférences du coffre enregistrées localement.";
@@ -676,23 +671,12 @@ function runCommand(id: string) {
     theme.toggleTheme();
   } else if (id === "export") {
     void exportNotes();
-  } else if (id === "daily-note") {
-    void openDailyNote();
   } else if (id === "from-template") {
     void startFromTemplate();
   } else if (id === "graph") {
     graphOpen.value = true;
   } else if (id === "import") {
     requestImport();
-  }
-}
-
-async function openDailyNote() {
-  try {
-    selectNote(await vault.createDailyNote());
-  } catch (error) {
-    formError.value =
-      error instanceof Error ? error.message : "Note quotidienne impossible.";
   }
 }
 
@@ -864,14 +848,6 @@ watch(settingsOpen, (open) => {
           outlined
           type="button"
           @click="startNewNote()"
-        />
-        <Button
-          class="new-note-button"
-          icon="pi pi-calendar"
-          label="Aujourd’hui"
-          outlined
-          type="button"
-          @click="openDailyNote"
         />
         <Button
           class="new-note-button"
@@ -1206,7 +1182,6 @@ watch(settingsOpen, (open) => {
     :account-email="accountEmail"
     :device-supported="deviceSupported"
     :device-trusted="deviceTrusted"
-    :daily-note-pattern="vault.preferences.dailyNotePattern"
     :error-message="settingsError"
     :offline="auth.isOfflineSession"
     :open="settingsOpen"

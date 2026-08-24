@@ -17,7 +17,6 @@ export interface RestorePoint {
 }
 
 export interface VaultPreferences {
-  dailyNotePattern: string;
   pinnedNoteIds: string[];
   recentNoteIds: string[];
   restorePoints: RestorePoint[];
@@ -31,7 +30,6 @@ export interface VaultPreferencesEnvelope {
 }
 
 export const DEFAULT_VAULT_PREFERENCES: VaultPreferences = {
-  dailyNotePattern: "Daily/YYYY-MM-DD.md",
   pinnedNoteIds: [],
   recentNoteIds: [],
   restorePoints: [],
@@ -56,7 +54,6 @@ function parsePreferences(value: unknown): VaultPreferences {
   const record = value as Record<string, unknown>;
   if (
     typeof record.templatesPath !== "string" ||
-    typeof record.dailyNotePattern !== "string" ||
     !Array.isArray(record.pinnedNoteIds) ||
     !record.pinnedNoteIds.every((id) => typeof id === "string") ||
     (record.recentNoteIds !== undefined &&
@@ -87,7 +84,6 @@ function parsePreferences(value: unknown): VaultPreferences {
     throw new Error("invalid");
   }
   return {
-    dailyNotePattern: record.dailyNotePattern,
     pinnedNoteIds: [...record.pinnedNoteIds],
     recentNoteIds: Array.isArray(record.recentNoteIds)
       ? [...record.recentNoteIds]

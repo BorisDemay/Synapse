@@ -43,7 +43,7 @@ export {
 } from "./vault/query";
 export type { LocalGraph, OutlineEntry, QueryNote } from "./vault/query";
 export { buildVaultTree } from "./vault/tree";
-export { dailyNotePath, renderTemplate } from "./vault/templates";
+export { renderTemplate } from "./vault/templates";
 export type { TemplateContext } from "./vault/templates";
 export type { SettingsSession } from "./components/SettingsPanel.vue";
 export type { VaultTreeNode } from "./components/VaultTree.vue";

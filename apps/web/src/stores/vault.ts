@@ -76,7 +76,6 @@ import {
   wrapVaultPreferences,
   type VaultPreferences,
 } from "../crypto/vault-preferences";
-import { dailyNotePath, renderTemplate } from "@synapse/ui";
 import {
   enqueueOperation,
   listPendingOperations,
@@ -329,25 +328,6 @@ export const useVaultStore = defineStore("vault", () => {
       restorePoints: next.restorePoints.map((point) => ({ ...point })),
       savedSearches: next.savedSearches.map((search) => ({ ...search })),
     };
-  }
-
-  async function createDailyNote(templateId?: string): Promise<string> {
-    const path = dailyNotePath(new Date(), preferences.value.dailyNotePattern);
-    const existing = [...notes.entries()].find(
-      ([, note]) => note.path === path,
-    );
-    if (existing) {
-      return existing[0];
-    }
-    const template = templateId ? notes.get(templateId) : undefined;
-    const title = path.split("/").pop()?.replace(/\.md$/iu, "") ?? "Daily";
-    const content = renderTemplate(template?.content ?? `# ${title}\n\n`, {
-      date: new Date(),
-      title,
-    });
-    const id = uuidV7();
-    await saveNote({ content, id, path });
-    return id;
   }
 
   async function togglePinnedNote(id: string): Promise<void> {
@@ -1366,7 +1346,6 @@ export const useVaultStore = defineStore("vault", () => {
     shouldSkipTrustedUnlock,
     syncStatus,
     tryUnlockFromTrustedDevice,
-    createDailyNote,
     togglePinnedNote,
     unlock,
     unlockWithTrustedDevice,

@@ -14,6 +14,10 @@
 > dossiers ne sont jamais supprimés implicitement et relèvent d'une migration
 > explicite.
 
+> Amendement du 2026-08-24 — les notes quotidiennes sont retirées du périmètre
+> produit. Les modèles Markdown ordinaires restent pris en charge, sans
+> préférence ni commande de création quotidienne.
+
 ---
 
 ## 1. Périmètre, hypothèses et critères de sortie
