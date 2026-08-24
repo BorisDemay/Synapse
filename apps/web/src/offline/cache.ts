@@ -1,6 +1,7 @@
 import {
   assistantConversationsKey,
   assistantCredentialKey,
+  closeOfflineDb,
   envelopeKey,
   metaKey,
   noteKey,
@@ -26,7 +27,7 @@ export type {
   TrustedDeviceRecord,
 };
 
-export { openOfflineDb, resetOfflineDbHandle };
+export { closeOfflineDb, openOfflineDb, resetOfflineDbHandle };
 
 export async function putCachedNote(
   userId: string,

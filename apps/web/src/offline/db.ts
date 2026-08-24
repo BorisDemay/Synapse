@@ -193,3 +193,10 @@ export function openOfflineDb(): Promise<IDBPDatabase<SynapseOfflineSchema>> {
 export function resetOfflineDbHandle(): void {
   dbPromise = undefined;
 }
+
+/** Test helper: close the shared connection before deleting or downgrading it. */
+export async function closeOfflineDb(): Promise<void> {
+  const db = await dbPromise;
+  db?.close();
+  dbPromise = undefined;
+}

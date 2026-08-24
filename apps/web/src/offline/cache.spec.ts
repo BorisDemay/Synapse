@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   clearUserOfflineData,
+  closeOfflineDb,
   deleteAssistantCredential,
   getAssistantCredential,
   getAssistantConversations,
@@ -26,13 +27,54 @@ const userId = "0198e5de-user-7000-8000-000000000001";
 const vaultId = "0198e5de-1111-7222-8333-444455556666";
 const noteId = "0198e5de-7777-7888-8999-aaaabbbbcccc";
 const plaintext = "# Secret offline note";
+const offlineDbName = "synapse-offline-v1";
+
+function deleteOfflineDb(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(offlineDbName);
+    request.onblocked = () => reject(new Error("offline database is still open"));
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
+function createLegacyEncryptedCache(
+  version: number,
+  ciphertext: number[],
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(offlineDbName, version);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      for (const store of ["notes", "envelopes", "meta", "queue"]) {
+        if (!db.objectStoreNames.contains(store)) db.createObjectStore(store);
+      }
+      request.transaction?.objectStore("notes").put(
+        {
+          ciphertext,
+          ciphertextHash: "ab".repeat(32),
+          nonce: Array.from({ length: 24 }, (_, index) => index),
+          noteId,
+          revision: 1,
+          userId,
+          vaultId,
+        },
+        `${userId}:${vaultId}:${noteId}`,
+      );
+    };
+    request.onsuccess = () => {
+      request.result.close();
+      resolve();
+    };
+  });
+}
 
 describe("offline cache", () => {
   beforeEach(async () => {
+    await closeOfflineDb();
+    await deleteOfflineDb();
     resetOfflineDbHandle();
-    indexedDB.deleteDatabase("synapse-offline-v1");
-    resetOfflineDbHandle();
-    await clearUserOfflineData(userId);
   });
 
   it("persists only ciphertexts, envelopes, cursor and never plaintext Markdown", async () => {
@@ -66,6 +108,43 @@ describe("offline cache", () => {
     expect(dumped).not.toContain("Secret offline");
     expect(dumped).not.toContain("# ");
   });
+
+  it.each([1, 2, 3, 4, 5, 6])(
+    "migrates encrypted notes from schema version %i without exposing plaintext",
+    async (version) => {
+      await closeOfflineDb();
+      await deleteOfflineDb();
+      const ciphertext = Array.from(
+        { length: 24 },
+        (_, index) => (version * 37 + index * 19) % 256,
+      );
+      await createLegacyEncryptedCache(version, ciphertext);
+      resetOfflineDbHandle();
+
+      const notes = await listCachedNotes(userId, vaultId);
+      const db = await openOfflineDb();
+
+      expect(notes).toEqual([
+        expect.objectContaining({ ciphertext, noteId, revision: 1 }),
+      ]);
+      expect(Array.from(db.objectStoreNames)).toEqual(
+        expect.arrayContaining([
+          "ai_conversations",
+          "ai_credentials",
+          "envelopes",
+          "meta",
+          "note_revisions",
+          "notes",
+          "queue",
+          "trusted_devices",
+          "vault_preferences",
+        ]),
+      );
+      expect(JSON.stringify(await db.getAll("notes"))).not.toContain(
+        plaintext,
+      );
+    },
+  );
 
   it("keeps ciphertexts after clear of another user partition", async () => {
     await putCachedNote(userId, {
