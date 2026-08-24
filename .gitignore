@@ -37,3 +37,11 @@ Thumbs.db
 # Accidental local CycloneDX outputs next to crates
 **/rust.json
 **/synapse-rust.json
+# Tauri derives platform icon binaries from the versioned SVG source.
+apps/desktop/src-tauri/icons/*.ico
+apps/desktop/src-tauri/icons/*.icns
+apps/desktop/src-tauri/icons/[0-9]*.png
+apps/desktop/src-tauri/icons/Square*Logo.png
+apps/desktop/src-tauri/icons/StoreLogo.png
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/
