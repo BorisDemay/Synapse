@@ -71,6 +71,11 @@ const sessions = ref<SettingsSession[]>([]);
 const importInput = ref<HTMLInputElement>();
 const importFolderInput = ref<HTMLInputElement>();
 const importPlan = ref<MarkdownImportPlan | null>(null);
+const attachmentPreview = ref<{
+  contentType: string;
+  name: string;
+  url: string;
+} | null>(null);
 let pendingSave:
   | {
       content: string;
@@ -213,9 +218,18 @@ function selectNote(id: string) {
   if (attached) {
     const url = blobUrls.value[attached.path];
     if (url) {
+      const name = attached.path.split("/").pop() ?? "fichier";
+      if (isSafePreviewType(attached.contentType)) {
+        attachmentPreview.value = {
+          contentType: attached.contentType,
+          name,
+          url,
+        };
+        return;
+      }
       const link = document.createElement("a");
       link.href = url;
-      link.download = attached.path.split("/").pop() ?? "fichier";
+      link.download = name;
       link.click();
     }
     return;
@@ -225,6 +239,21 @@ function selectNote(id: string) {
   content.value = vault.notes.get(id)?.content ?? "";
   void vault.rememberRecentNote(id);
   formError.value = "";
+}
+
+function isSafePreviewType(contentType: string): boolean {
+  return [
+    "application/pdf",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "video/mp4",
+    "video/webm",
+  ].includes(contentType.toLowerCase());
 }
 
 function attachNote(id: string) {
@@ -1138,11 +1167,102 @@ watch(settingsOpen, (open) => {
     @select="selectNote"
     @update:query="searchQuery = $event"
   />
+  <div
+    v-if="attachmentPreview"
+    class="attachment-preview-backdrop"
+    role="presentation"
+    @click.self="attachmentPreview = null"
+  >
+    <section
+      class="attachment-preview"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="`Aperçu ${attachmentPreview.name}`"
+    >
+      <header>
+        <strong>{{ attachmentPreview.name }}</strong>
+        <button
+          type="button"
+          aria-label="Fermer l’aperçu"
+          @click="attachmentPreview = null"
+        >
+          ×
+        </button>
+      </header>
+      <img
+        v-if="attachmentPreview.contentType.startsWith('image/')"
+        :src="attachmentPreview.url"
+        :alt="attachmentPreview.name"
+      />
+      <audio
+        v-else-if="attachmentPreview.contentType.startsWith('audio/')"
+        controls
+        :src="attachmentPreview.url"
+      />
+      <video
+        v-else-if="attachmentPreview.contentType.startsWith('video/')"
+        controls
+        :src="attachmentPreview.url"
+      />
+      <iframe
+        v-else
+        title="Aperçu PDF"
+        :src="attachmentPreview.url"
+        sandbox="allow-same-origin"
+      />
+    </section>
+  </div>
 </template>
 
 <style scoped>
 .vault-page {
   min-height: 100vh;
+}
+
+.attachment-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 55%);
+}
+.attachment-preview {
+  display: grid;
+  gap: 0.75rem;
+  width: min(64rem, 100%);
+  max-height: calc(100vh - 2rem);
+  padding: 1rem;
+  overflow: auto;
+  border-radius: var(--synapse-radius-md);
+  background: var(--synapse-color-surface-raised);
+}
+.attachment-preview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.attachment-preview header button {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: transparent;
+  cursor: pointer;
+}
+.attachment-preview img,
+.attachment-preview video,
+.attachment-preview iframe {
+  width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  border: 0;
+}
+.attachment-preview audio {
+  width: 100%;
 }
 
 .vault-page > :deep(.app-shell-sidebar) {
