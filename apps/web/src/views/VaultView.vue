@@ -36,6 +36,7 @@ import Button from "primevue/button";
 import { isTrustedDeviceSupported } from "../crypto/trusted-device";
 import { uuidV7 } from "../crypto/vault-key";
 import { buildMarkdownZip } from "../export/markdown-zip";
+import { applyMarkdownImport, type ImportProgress } from "../import/apply";
 import {
   planMarkdownImport,
   planZipImport,
@@ -71,6 +72,8 @@ const sessions = ref<SettingsSession[]>([]);
 const importInput = ref<HTMLInputElement>();
 const importFolderInput = ref<HTMLInputElement>();
 const importPlan = ref<MarkdownImportPlan | null>(null);
+const importProgress = ref<ImportProgress | null>(null);
+const importCancelled = ref(false);
 const attachmentPreview = ref<{
   contentType: string;
   name: string;
@@ -601,25 +604,57 @@ async function confirmImport() {
   ) {
     return;
   }
+  formError.value = "";
+  importCancelled.value = false;
+  importProgress.value = {
+    completed: 0,
+    total: plan.notes.length + plan.attachments.length,
+  };
   try {
-    for (const note of plan.notes) {
-      const existing = [...vault.notes.entries()].find(
-        ([, value]) => value.path === note.path,
-      );
-      await vault.saveNote({
-        content: note.content,
-        id: existing?.[0] ?? uuidV7(),
-        path: note.path,
-      });
+    const result = await applyMarkdownImport(
+      plan,
+      {
+        findNoteId: (path) =>
+          [...vault.notes.entries()].find(
+            ([, note]) => note.path === path,
+          )?.[0],
+        saveAttachment: async (attachment) => {
+          await vault.saveAttachment(attachment);
+        },
+        saveNote: async (note, existingId) => {
+          await vault.saveNote({
+            content: note.content,
+            id: existingId ?? uuidV7(),
+            path: note.path,
+          });
+        },
+      },
+      {
+        isCancelled: () => importCancelled.value,
+        onProgress: (progress) => {
+          importProgress.value = progress;
+        },
+      },
+    );
+    if (result.cancelled) {
+      formError.value = `Import interrompu après ${result.completed} élément${result.completed === 1 ? "" : "s"}.`;
+    } else {
+      importPlan.value = null;
     }
-    for (const attachment of plan.attachments) {
-      await vault.saveAttachment(attachment);
-    }
-    importPlan.value = null;
   } catch (error) {
     formError.value =
       error instanceof Error ? error.message : "Import interrompu.";
+  } finally {
+    importProgress.value = null;
   }
+}
+
+function cancelImport() {
+  if (importProgress.value) {
+    importCancelled.value = true;
+    return;
+  }
+  importPlan.value = null;
 }
 
 async function revokeSession(id: string) {
@@ -1056,6 +1091,10 @@ watch(settingsOpen, (open) => {
         <p v-if="importCollisions.length" class="import-warning" role="status">
           {{ importCollisions.length }} éléments existants seront remplacés.
         </p>
+        <p v-if="importProgress" role="status">
+          Importation : {{ importProgress.completed }} /
+          {{ importProgress.total }} éléments chiffrés localement.
+        </p>
         <details>
           <summary>Détails de l’import</summary>
           <ul>
@@ -1084,9 +1123,14 @@ watch(settingsOpen, (open) => {
             label="Annuler"
             outlined
             type="button"
-            @click="importPlan = null"
+            @click="cancelImport"
           />
-          <Button label="Importer" type="button" @click="confirmImport" />
+          <Button
+            :disabled="Boolean(importProgress)"
+            label="Importer"
+            type="button"
+            @click="confirmImport"
+          />
         </div>
       </section>
       <template v-else>
