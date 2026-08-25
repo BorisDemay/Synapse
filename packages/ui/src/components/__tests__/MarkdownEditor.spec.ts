@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetEditorModeState } from "../../editor-mode";
 import MarkdownEditor from "../MarkdownEditor.vue";
 
 const vditorMock = vi.hoisted(() => {
@@ -32,6 +33,7 @@ const vditorMock = vi.hoisted(() => {
   let root: HTMLElement | undefined;
   const instance = {
     destroy: vi.fn(),
+    getCurrentMode: vi.fn(() => options?.mode ?? "ir"),
     getValue: vi.fn(() => options?.value ?? ""),
     setTheme: vi.fn(),
     setValue: vi.fn(),
@@ -46,11 +48,29 @@ const vditorMock = vi.hoisted(() => {
     nextRoot.innerHTML = `
       <div class="vditor-toolbar">
         <div class="vditor-toolbar__item">
+          <button data-type="emoji" aria-label="Émojis"></button>
+        </div>
+        <div class="vditor-toolbar__item">
+          <button data-type="headings" aria-label="Titres"></button>
+          <button data-tag="h1" data-value="# ">Titre 1</button>
+          <button data-tag="h2" data-value="## ">Titre 2</button>
+        </div>
+        <div class="vditor-toolbar__item">
           <button data-type="bold" aria-label="Gras"></button>
         </div>
+        <div class="vditor-toolbar__item">
+          <button data-type="table" aria-label="Tableau"></button>
+        </div>
+        <div class="vditor-toolbar__item synapse-edit-mode-host">
+          <button data-type="edit-mode" aria-label="Mode"></button>
+          <button data-mode="ir">Markdown</button>
+          <button data-mode="sv">Texte brut</button>
+        </div>
       </div>
-      <div class="vditor-ir">
-        <div contenteditable="true"></div>
+      <div class="vditor-content">
+        <div class="vditor-ir">
+          <div contenteditable="true"></div>
+        </div>
       </div>
     `;
     nextOptions.after?.();
@@ -73,14 +93,27 @@ const vditorMock = vi.hoisted(() => {
 
 vi.mock("vditor", () => ({ default: vditorMock.Constructor }));
 
+function menuNode() {
+  return document.body.querySelector<HTMLElement>('[role="menu"]');
+}
+
+function menuItems() {
+  return [
+    ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ];
+}
+
 describe("MarkdownEditor", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    window.localStorage.clear();
+    resetEditorModeState();
     vditorMock.reset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    document.body.innerHTML = "";
   });
 
   it("uses complete instant rendering without persistent or remote content", () => {
@@ -172,7 +205,7 @@ describe("MarkdownEditor", () => {
     expect(toolbar.attributes("role")).toBe("toolbar");
   });
 
-  it("keeps table actions in the context menu without hover buttons", () => {
+  it("keeps table actions out of the formatting toolbar", () => {
     const wrapper = mount(MarkdownEditor, {
       props: { modelValue: "" },
     });
@@ -190,9 +223,7 @@ describe("MarkdownEditor", () => {
       ]),
     );
     expect(wrapper.find(".synapse-table-controls").exists()).toBe(false);
-    expect(wrapper.get(".synapse-table-context-menu").attributes("role")).toBe(
-      "menu",
-    );
+    expect(names).toContain("edit-mode");
   });
 
   it("emits each Markdown update and saves once after a typing burst", async () => {
@@ -268,5 +299,129 @@ describe("MarkdownEditor", () => {
 
     expect(vditorMock.instance.destroy).toHaveBeenCalledOnce();
     expect(wrapper.emitted("save")).toBeUndefined();
+  });
+
+  it("opens a context menu of editor tools on right-click in the writing area", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+
+    await wrapper
+      .get('[contenteditable="true"]')
+      .trigger("contextmenu", { clientX: 32, clientY: 64 });
+    await wrapper.vm.$nextTick();
+
+    const labels = menuItems().map((item) => item.textContent?.trim());
+    expect(menuNode()?.getAttribute("aria-label")).toBe("Outils Markdown");
+    expect(labels).toEqual(
+      expect.arrayContaining(["Gras", "Titre 1", "Tableau", "Émojis"]),
+    );
+    wrapper.unmount();
+  });
+
+  it("applies toolbar commands from the context menu", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const bold = wrapper.get('.vditor-toolbar button[data-type="bold"]')
+      .element as HTMLButtonElement;
+    const click = vi.spyOn(bold, "click");
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    menuItems()
+      .find((item) => item.textContent?.trim() === "Gras")
+      ?.click();
+    await wrapper.vm.$nextTick();
+
+    expect(click).toHaveBeenCalledOnce();
+    expect(menuNode()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("closes the context menu with Escape", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    expect(menuNode()).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+
+    expect(menuNode()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("closes the context menu on a click outside", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+
+    expect(menuNode()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("exposes a visible Markdown / raw toggle that uses Vditor source mode", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const source = wrapper.get('.vditor-toolbar button[data-mode="sv"]')
+      .element as HTMLButtonElement;
+    const click = vi.spyOn(source, "click");
+    const group = wrapper.get('[aria-label="Mode d\'édition"]');
+
+    expect(group.get("button[aria-pressed='true']").text()).toBe("Markdown");
+
+    await group.get("button").trigger("click"); // first is Markdown, already pressed
+    await group.findAll("button")[1]?.trigger("click");
+
+    expect(click).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem("synapse-ui-editor-mode")).toBe("sv");
+    expect(group.get("button[aria-pressed='true']").text()).toBe("Texte brut");
+  });
+
+  it("starts Vditor in source mode when that preference is saved", () => {
+    window.localStorage.setItem("synapse-ui-editor-mode", "sv");
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+
+    expect(vditorMock.options()?.mode).toBe("sv");
+    expect(
+      wrapper
+        .get('[aria-label="Mode d\'édition"]')
+        .get("button[aria-pressed='true']")
+        .text(),
+    ).toBe("Texte brut");
+  });
+
+  it("includes table actions in the context menu when the caret is in a cell", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const cell = document.createElement("td");
+    vditorMock.root()?.querySelector(".vditor-ir")?.append(cell);
+
+    await wrapper.get("td").trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+
+    expect(menuItems().map((item) => item.textContent?.trim())).toEqual(
+      expect.arrayContaining(["Gras", "Insérer une ligne en dessous"]),
+    );
+    wrapper.unmount();
   });
 });

@@ -126,7 +126,31 @@ describe("VaultTree", () => {
     expect(wrapper.emitted("delete")?.[0]).toEqual(["note-1"]);
   });
 
-  it("affiche les dossiers, les pastilles de sync et masque la poubelle des dossiers", async () => {
+  it("n'affiche ni icône ni pastille de sync sur les lignes", () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            id: "note-1",
+            kind: "note",
+            label: "Première note",
+            syncStatus: "synced",
+          },
+          {
+            id: "att-1",
+            kind: "attachment",
+            label: "image.png",
+            syncStatus: "pending",
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.find(".vault-tree-icon").exists()).toBe(false);
+    expect(wrapper.find(".vault-tree-sync").exists()).toBe(false);
+  });
+
+  it("affiche les dossiers et masque la poubelle des dossiers", async () => {
     const wrapper = mount(VaultTree, {
       props: {
         nodes: [
@@ -148,7 +172,7 @@ describe("VaultTree", () => {
     });
 
     expect(wrapper.get('[data-kind="folder"]').text()).toContain("projets");
-    expect(wrapper.find('[data-status="pending"]').exists()).toBe(true);
+    expect(wrapper.find(".vault-tree-sync").exists()).toBe(false);
     expect(
       wrapper.findAll(
         '[data-kind="folder"] > .vault-tree-row button[aria-label^="Supprimer"]',

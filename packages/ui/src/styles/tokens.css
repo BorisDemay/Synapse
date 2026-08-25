@@ -1,3 +1,9 @@
+@property --app-shell-sidebar-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 17rem;
+}
+
 :root {
   --synapse-color-surface: #f8fafc;
   --synapse-color-surface-raised: #ffffff;
@@ -26,6 +32,11 @@
   --synapse-radius-lg: 1.2rem;
   --synapse-font-sans: "Inter", "Avenir Next", "Segoe UI", sans-serif;
   --synapse-font-mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  --app-shell-sidebar-width-expanded: 17rem;
+  --app-shell-sidebar-width-collapsed: 3rem;
+  --app-shell-relations-width: 16rem;
+  --app-shell-assistant-history-width: 16rem;
+  --app-shell-assistant-width: 24rem;
 }
 
 .synapse-dark {
@@ -53,8 +64,9 @@ button {
 }
 
 .app-shell {
+  --app-shell-sidebar-width: var(--app-shell-sidebar-width-expanded);
   display: grid;
-  grid-template-columns: 17rem minmax(0, 1fr);
+  grid-template-columns: var(--app-shell-sidebar-width) minmax(0, 1fr);
   min-height: 100%;
   color: var(--synapse-color-text);
   background:
@@ -64,41 +76,71 @@ button {
       transparent 28rem
     ),
     var(--synapse-color-surface);
+  transition: --app-shell-sidebar-width 240ms ease;
+}
+
+.app-shell--resizing {
+  transition: none;
+  user-select: none;
+}
+
+.app-shell--sidebar-collapsed {
+  --app-shell-sidebar-width: var(--app-shell-sidebar-width-collapsed);
+}
+
+.app-shell > .app-shell-sidebar {
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    padding 240ms ease,
+    border-color 240ms ease;
+}
+
+.app-shell.app-shell--sidebar-collapsed > .app-shell-sidebar {
+  padding: var(--synapse-space-2) var(--synapse-space-1);
 }
 
 .app-shell:has(> .app-shell-relations) {
-  grid-template-columns: 17rem minmax(0, 1fr) 16rem;
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-relations-width);
 }
 
 .app-shell:has(> .app-shell-assistant) {
-  grid-template-columns: 17rem minmax(0, 1fr) minmax(18rem, 24rem);
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-assistant-width);
 }
 
 .app-shell:has(> .app-shell-assistant-history) {
-  grid-template-columns: 17rem minmax(0, 1fr) minmax(13rem, 16rem);
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-assistant-history-width);
 }
 
 .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant) {
-  grid-template-columns: 17rem minmax(0, 1fr) 16rem minmax(18rem, 24rem);
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-relations-width) var(--app-shell-assistant-width);
 }
 
 .app-shell:has(> .app-shell-assistant-history):has(> .app-shell-assistant) {
-  grid-template-columns: 17rem minmax(0, 1fr) minmax(13rem, 16rem) minmax(
-      18rem,
-      24rem
-    );
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-assistant-history-width) var(--app-shell-assistant-width);
 }
 
 .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant-history):has(
     > .app-shell-assistant
   ) {
-  grid-template-columns: 17rem minmax(0, 1fr) 16rem minmax(13rem, 16rem) minmax(
-      18rem,
-      24rem
-    );
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-relations-width) var(--app-shell-assistant-history-width)
+    var(--app-shell-assistant-width);
 }
 
 .app-shell > aside {
+  position: relative;
   padding: var(--synapse-space-5);
   background: color-mix(
     in srgb,
@@ -109,6 +151,7 @@ button {
 }
 
 .app-shell > main {
+  position: relative;
   min-width: 0;
   padding: var(--synapse-space-6);
 }
@@ -135,6 +178,34 @@ button {
 
 .app-shell > .app-shell-assistant-history {
   overflow: auto;
+}
+
+.app-shell-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  width: 8px;
+  z-index: 4;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.app-shell-resize-handle[data-edge="end"] {
+  inset-inline-end: 0;
+}
+
+.app-shell-resize-handle[data-edge="start"] {
+  inset-inline-start: 0;
+}
+
+.app-shell-resize-handle:hover,
+.app-shell-resize-handle:focus-visible,
+.app-shell-resize-handle[data-active] {
+  background: color-mix(in srgb, var(--synapse-color-accent) 55%, transparent);
+  outline: none;
 }
 
 .theme-toggle {
@@ -320,6 +391,44 @@ div[data-pc-name="message"][data-p-severity="info"] {
   );
 }
 
+@media (max-width: 75rem) {
+  .app-shell:has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-assistant-history),
+  .app-shell:has(> .app-shell-relations),
+  .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-assistant-history):has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-relations):has(
+      > .app-shell-assistant-history
+    ):has(> .app-shell-assistant) {
+    min-width: 0;
+    grid-template-columns: var(--app-shell-sidebar-width) minmax(0, 1fr) minmax(
+        0,
+        1fr
+      );
+  }
+
+  .app-shell > .app-shell-relations,
+  .app-shell > .app-shell-assistant-history {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 20;
+    box-shadow: var(--synapse-shadow-md);
+  }
+
+  .app-shell > .app-shell-relations {
+    width: min(var(--app-shell-relations-width), 100%);
+  }
+
+  .app-shell > .app-shell-assistant-history {
+    width: min(var(--app-shell-assistant-history-width), 100%);
+  }
+
+  .app-shell > .app-shell-assistant {
+    min-width: 0;
+  }
+}
+
 @media (max-width: 48rem) {
   .app-shell,
   .app-shell:has(> .app-shell-assistant),
@@ -338,12 +447,20 @@ div[data-pc-name="message"][data-p-severity="info"] {
   }
 
   .app-shell > .app-shell-assistant,
-  .app-shell > .app-shell-assistant-history {
+  .app-shell > .app-shell-assistant-history,
+  .app-shell > .app-shell-relations {
+    position: static;
+    width: auto;
+    box-shadow: none;
     border-inline-start: 0;
   }
 
   .app-shell > main {
     padding: var(--synapse-space-4);
+  }
+
+  .app-shell-resize-handle {
+    display: none;
   }
 }
 
@@ -351,9 +468,13 @@ div[data-pc-name="message"][data-p-severity="info"] {
   .app-shell {
     overflow-x: auto;
   }
+}
 
+@media (min-width: 75.01rem) {
   .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant) {
-    grid-template-columns: 17rem minmax(30rem, 1fr) 16rem minmax(18rem, 24rem);
+    grid-template-columns:
+      var(--app-shell-sidebar-width) minmax(30rem, 1fr)
+      var(--app-shell-relations-width) var(--app-shell-assistant-width);
     min-width: 71rem;
   }
 
@@ -361,8 +482,9 @@ div[data-pc-name="message"][data-p-severity="info"] {
       > .app-shell-assistant-history
     ):has(> .app-shell-assistant) {
     grid-template-columns:
-      17rem minmax(30rem, 1fr) 16rem minmax(13rem, 16rem)
-      minmax(18rem, 24rem);
+      var(--app-shell-sidebar-width) minmax(30rem, 1fr)
+      var(--app-shell-relations-width) var(--app-shell-assistant-history-width)
+      var(--app-shell-assistant-width);
     min-width: 84rem;
   }
 }

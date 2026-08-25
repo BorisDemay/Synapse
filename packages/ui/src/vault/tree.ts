@@ -7,6 +7,8 @@ export interface TreeSource {
   kind?: "note" | "attachment";
   syncStatus?: VaultTreeNode["syncStatus"];
   tags?: string[];
+  /** Millisecond timestamp used for default newest-first ordering. */
+  updatedAt?: number;
 }
 
 export function buildVaultTree(sources: TreeSource[]): VaultTreeNode[] {
@@ -28,6 +30,7 @@ export function buildVaultTree(sources: TreeSource[]): VaultTreeNode[] {
           path: source.path,
           syncStatus: source.syncStatus,
           tags: source.tags,
+          updatedAt: source.updatedAt,
         });
         break;
       }
@@ -52,10 +55,24 @@ export function buildVaultTree(sources: TreeSource[]): VaultTreeNode[] {
   return root;
 }
 
+function nodeUpdatedAt(node: VaultTreeNode): number {
+  if (node.updatedAt !== undefined) {
+    return node.updatedAt;
+  }
+  if (node.children?.length) {
+    return Math.max(...node.children.map(nodeUpdatedAt));
+  }
+  return 0;
+}
+
 function sortTree(nodes: VaultTreeNode[]) {
   nodes.sort((left, right) => {
     if ((left.kind === "folder") !== (right.kind === "folder")) {
       return left.kind === "folder" ? -1 : 1;
+    }
+    const byDate = nodeUpdatedAt(right) - nodeUpdatedAt(left);
+    if (byDate !== 0) {
+      return byDate;
     }
     return left.label.localeCompare(right.label, "fr");
   });

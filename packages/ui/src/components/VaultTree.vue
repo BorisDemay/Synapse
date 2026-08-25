@@ -9,6 +9,7 @@ export interface VaultTreeNode {
   path?: string;
   syncStatus?: "conflict" | "error" | "offline" | "pending" | "synced";
   tags?: string[];
+  updatedAt?: number;
 }
 
 const props = defineProps<{
@@ -132,14 +133,6 @@ async function selectNext(index: number) {
       @keydown.enter.meta.prevent="attach(index)"
     >
       <div class="vault-tree-row">
-        <span
-          class="vault-tree-sync"
-          :data-status="node.syncStatus || 'synced'"
-          aria-hidden="true"
-        />
-        <span class="vault-tree-icon" aria-hidden="true">{{
-          node.kind === "folder" ? "▸" : node.kind === "attachment" ? "▣" : "▱"
-        }}</span>
         <span class="vault-tree-label">{{ node.label }}</span>
         <button
           v-if="node.kind !== 'folder'"
@@ -218,30 +211,8 @@ async function selectNext(index: number) {
   font-weight: 650;
 }
 
-.vault-tree-sync {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 999px;
-  background: var(--synapse-color-success);
-}
-.vault-tree-sync[data-status="pending"] {
-  background: var(--synapse-color-warning);
-}
-.vault-tree-sync[data-status="conflict"],
-.vault-tree-sync[data-status="error"] {
-  background: var(--synapse-color-danger);
-}
-.vault-tree-sync[data-status="offline"] {
-  background: var(--synapse-color-text-muted);
-}
-
 .vault-tree-item[data-attached="true"] {
   box-shadow: inset 3px 0 0 var(--synapse-color-accent);
-}
-
-.vault-tree-icon {
-  color: var(--synapse-color-accent);
-  font-size: 1.1rem;
 }
 
 .vault-tree-label {

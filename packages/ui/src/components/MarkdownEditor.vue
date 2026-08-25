@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import Vditor from "vditor";
 import "vditor/dist/index.css";
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import { useEditorMode } from "../editor-mode";
+import {
+  markdownContextMenuGroups,
+  TOOLBAR_LABELS,
+} from "../markdown/editor-tools";
 import { useTheme } from "../theme";
+import MarkdownContextMenu from "./MarkdownContextMenu.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -23,27 +29,6 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   save: [value: string];
 }>();
-
-const TOOLBAR_LABELS: Readonly<Record<string, string>> = {
-  emoji: "Émojis",
-  headings: "Titres",
-  bold: "Gras",
-  italic: "Italique",
-  strike: "Barré",
-  link: "Lien",
-  list: "Puces",
-  "ordered-list": "Numéros",
-  check: "Tâches",
-  outdent: "Réduire",
-  indent: "Indenter",
-  quote: "Citation",
-  line: "Séparateur",
-  code: "Bloc code",
-  "inline-code": "Code",
-  table: "Tableau",
-  undo: "Annuler",
-  redo: "Rétablir",
-};
 
 type TableAction =
   | "row-add"
@@ -67,6 +52,19 @@ const TABLE_ACTION_SHORTCUTS: Readonly<
 
 const editorRoot = ref<HTMLElement>();
 const { mode: themeMode } = useTheme();
+const { mode: viewMode, setMode: persistViewMode } = useEditorMode();
+
+const contextMenuOpen = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuInTable = ref(false);
+
+const contextMenuGroups = computed(() =>
+  markdownContextMenuGroups({
+    inTable: contextMenuInTable.value,
+    viewMode: viewMode.value,
+  }),
+);
 
 let editor: Vditor | undefined;
 let editorReady = false;
@@ -74,7 +72,6 @@ let currentValue = props.modelValue;
 let pendingExternalValue: string | undefined;
 let pendingListConversion = false;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-let tableContextMenu: HTMLElement | undefined;
 let activeTableCell: HTMLTableCellElement | undefined;
 
 function localAssetBase(): string {
@@ -190,7 +187,7 @@ function applyAccessibility() {
   }
 
   const editable = root.querySelector<HTMLElement>(
-    '.vditor-ir [contenteditable="true"]',
+    '.vditor-ir [contenteditable="true"], .vditor-sv[contenteditable="true"]',
   );
   if (!editable) {
     root.setAttribute("aria-label", "Éditeur Markdown");
@@ -270,10 +267,27 @@ function activeOrSelectedTableCell(): HTMLTableCellElement | undefined {
   return selectedTableCell();
 }
 
-function hideTableContextMenu() {
-  if (tableContextMenu) {
-    tableContextMenu.hidden = true;
+function closeContextMenu() {
+  contextMenuOpen.value = false;
+}
+
+function isEditorWritingArea(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : null;
+  if (!element || !editorRoot.value?.contains(element)) {
+    return false;
   }
+  if (element.closest(".vditor-toolbar, .synapse-edit-mode-host")) {
+    return false;
+  }
+  return Boolean(
+    element.closest(
+      '.vditor-ir, .vditor-sv, .vditor-content, [contenteditable="true"]',
+    ),
+  );
+}
+
+function clickToolbarButton(selector: string) {
+  editorRoot.value?.querySelector<HTMLButtonElement>(selector)?.click();
 }
 
 function runTableAction(
@@ -281,7 +295,7 @@ function runTableAction(
   targetCell = activeOrSelectedTableCell(),
 ) {
   const cell = targetCell;
-  const editable = editor?.vditor.ir?.element;
+  const editable = editor?.vditor.ir?.element ?? editor?.vditor.sv?.element;
   if (!cell || !editable) {
     return;
   }
@@ -305,65 +319,47 @@ function runTableAction(
   activeTableCell = cell;
 }
 
-function createTableButton(
-  action: TableAction,
-  label: string,
-  className = "",
-): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = className;
-  button.dataset.synapseTableAction = action;
-  button.setAttribute("aria-label", label);
-  button.title = label;
-  button.textContent = "+";
-  button.addEventListener("click", () => {
-    runTableAction(action);
-    hideTableContextMenu();
-  });
-  return button;
-}
-
-function createContextMenuItem(
-  action: TableAction,
-  label: string,
-  destructive = false,
-): HTMLButtonElement {
-  const button = createTableButton(action, label, "synapse-table-context-item");
-  button.setAttribute("role", "menuitem");
-  button.textContent = label;
-  button.classList.toggle(
-    "synapse-table-context-item--destructive",
-    destructive,
-  );
-  return button;
-}
-
-function showTableContextMenu(event: MouseEvent, cell: HTMLTableCellElement) {
-  const root = editorRoot.value;
-  if (!root || !tableContextMenu) {
+function applyViewMode(mode: "ir" | "sv") {
+  persistViewMode(mode);
+  if (!editorReady) {
     return;
   }
+  if (editor?.getCurrentMode() === mode) {
+    return;
+  }
+  clickToolbarButton(`.vditor-toolbar button[data-mode="${mode}"]`);
+  applyAccessibility();
+}
 
-  activeTableCell = cell;
-  const rootBounds = root.getBoundingClientRect();
-  const cellBounds = cell.getBoundingClientRect();
-  tableContextMenu.hidden = false;
-  const menuWidth = tableContextMenu.offsetWidth;
-  const menuHeight = tableContextMenu.offsetHeight;
-  const left = event.clientX || cellBounds.left + cellBounds.width / 2;
-  const top = event.clientY || cellBounds.bottom;
-  const margin = 8;
-
-  tableContextMenu.style.left = `${Math.max(
-    margin,
-    Math.min(left - rootBounds.left, rootBounds.width - menuWidth - margin),
-  )}px`;
-  tableContextMenu.style.top = `${Math.max(
-    margin,
-    Math.min(top - rootBounds.top, rootBounds.height - menuHeight - margin),
-  )}px`;
-  tableContextMenu.querySelector<HTMLButtonElement>("button")?.focus();
+function runEditorCommand(id: string) {
+  if (id === "markdown") {
+    applyViewMode("ir");
+    return;
+  }
+  if (id === "source") {
+    applyViewMode("sv");
+    return;
+  }
+  if (id === "copy" || id === "cut" || id === "paste") {
+    document.execCommand(id);
+    return;
+  }
+  if (
+    id === "row-add" ||
+    id === "row-add-above" ||
+    id === "row-delete" ||
+    id === "column-add" ||
+    id === "column-add-before" ||
+    id === "column-delete"
+  ) {
+    runTableAction(id);
+    return;
+  }
+  if (/^h[1-6]$/u.test(id)) {
+    clickToolbarButton(`.vditor-toolbar button[data-tag="${id}"]`);
+    return;
+  }
+  clickToolbarButton(`.vditor-toolbar button[data-type="${id}"]`);
 }
 
 function handleTableFocus(event: FocusEvent) {
@@ -373,69 +369,28 @@ function handleTableFocus(event: FocusEvent) {
   }
 }
 
-function handleTableContextMenu(event: MouseEvent) {
-  const cell = tableCellFromTarget(event.target);
-  if (!cell) {
+function onEditorContextMenu(event: MouseEvent) {
+  if (!isEditorWritingArea(event.target)) {
     return;
   }
 
   event.preventDefault();
-  showTableContextMenu(event, cell);
-}
-
-function handleDocumentPointerDown(event: PointerEvent) {
-  if (!tableContextMenu?.contains(event.target as Node)) {
-    hideTableContextMenu();
+  const cell = tableCellFromTarget(event.target);
+  if (cell) {
+    activeTableCell = cell;
   }
-}
-
-function handleDocumentKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
-    hideTableContextMenu();
-  }
+  contextMenuInTable.value = Boolean(cell);
+  contextMenuX.value = event.clientX;
+  contextMenuY.value = event.clientY;
+  contextMenuOpen.value = true;
 }
 
 function setupTableInteractions() {
-  const root = editorRoot.value;
-  if (!root || tableContextMenu) {
-    return;
-  }
-
-  tableContextMenu = document.createElement("div");
-  tableContextMenu.className = "synapse-table-context-menu";
-  tableContextMenu.hidden = true;
-  tableContextMenu.setAttribute("role", "menu");
-  tableContextMenu.setAttribute("aria-label", "Actions du tableau");
-  tableContextMenu.append(
-    createContextMenuItem("row-add-above", "Insérer une ligne au-dessus"),
-    createContextMenuItem("row-add", "Insérer une ligne en dessous"),
-    createContextMenuItem("column-add-before", "Insérer une colonne à gauche"),
-    createContextMenuItem("column-add", "Insérer une colonne à droite"),
-  );
-  const separator = document.createElement("div");
-  separator.className = "synapse-table-context-separator";
-  separator.setAttribute("role", "separator");
-  tableContextMenu.append(
-    separator,
-    createContextMenuItem("row-delete", "Supprimer la ligne", true),
-    createContextMenuItem("column-delete", "Supprimer la colonne", true),
-  );
-
-  root.append(tableContextMenu);
-  root.addEventListener("focusin", handleTableFocus);
-  root.addEventListener("contextmenu", handleTableContextMenu);
-  document.addEventListener("pointerdown", handleDocumentPointerDown);
-  document.addEventListener("keydown", handleDocumentKeydown);
+  editorRoot.value?.addEventListener("focusin", handleTableFocus);
 }
 
 function teardownTableInteractions() {
-  const root = editorRoot.value;
-  root?.removeEventListener("focusin", handleTableFocus);
-  root?.removeEventListener("contextmenu", handleTableContextMenu);
-  document.removeEventListener("pointerdown", handleDocumentPointerDown);
-  document.removeEventListener("keydown", handleDocumentKeydown);
-  tableContextMenu?.remove();
-  tableContextMenu = undefined;
+  editorRoot.value?.removeEventListener("focusin", handleTableFocus);
   activeTableCell = undefined;
 }
 
@@ -524,7 +479,7 @@ onMounted(() => {
     lang: "fr_FR",
     link: { isOpen: false },
     minHeight: 320,
-    mode: "ir",
+    mode: viewMode.value,
     placeholder: "Écrivez en Markdown…",
     toolbarConfig: { pin: true },
     undoDelay: 80,
@@ -585,6 +540,7 @@ onMounted(() => {
       "|",
       "undo",
       "redo",
+      { className: "synapse-edit-mode-host", name: "edit-mode" },
     ],
     value: props.modelValue,
     width: "100%",
@@ -594,9 +550,6 @@ onMounted(() => {
       applyAccessibility();
       applyToolbarLabels();
       setupTableInteractions();
-      editorRoot.value?.addEventListener("click", onEditorClick);
-      editorRoot.value?.addEventListener("paste", onEditorPaste);
-      editorRoot.value?.addEventListener("drop", onEditorDrop);
       rewriteAttachmentUrls();
 
       if (pendingExternalValue !== undefined) {
@@ -654,31 +607,112 @@ onBeforeUnmount(() => {
   if (saveTimer) {
     clearTimeout(saveTimer);
   }
-  editorRoot.value?.removeEventListener("click", onEditorClick);
-  editorRoot.value?.removeEventListener("paste", onEditorPaste);
-  editorRoot.value?.removeEventListener("drop", onEditorDrop);
   teardownTableInteractions();
   editor?.destroy();
 });
 </script>
 
 <template>
-  <div ref="editorRoot" class="markdown-editor" data-editor-engine="vditor" />
+  <div
+    class="markdown-editor"
+    @click="onEditorClick"
+    @contextmenu="onEditorContextMenu"
+    @drop="onEditorDrop"
+    @paste="onEditorPaste"
+  >
+    <div aria-label="Mode d'édition" class="markdown-editor-mode" role="group">
+      <button
+        :aria-pressed="viewMode === 'ir'"
+        type="button"
+        @click="applyViewMode('ir')"
+      >
+        Markdown
+      </button>
+      <button
+        :aria-pressed="viewMode === 'sv'"
+        type="button"
+        @click="applyViewMode('sv')"
+      >
+        Texte brut
+      </button>
+    </div>
+    <div
+      ref="editorRoot"
+      class="markdown-editor-host"
+      data-editor-engine="vditor"
+    />
+    <MarkdownContextMenu
+      :groups="contextMenuGroups"
+      :open="contextMenuOpen"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      @close="closeContextMenu"
+      @select="runEditorCommand"
+    />
+  </div>
 </template>
 
 <style scoped>
 .markdown-editor {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  height: 100%;
   min-height: inherit;
   color: var(--synapse-color-text);
   background: var(--synapse-color-surface-raised);
 }
 
+.markdown-editor-mode {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  padding: 0.35rem 0.75rem 0;
+  background: var(--synapse-color-surface-muted);
+}
+
+.markdown-editor-mode button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: 0.4rem;
+  color: var(--synapse-color-text-muted);
+  background: var(--synapse-color-surface-raised);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.markdown-editor-mode button[aria-pressed="true"] {
+  color: var(--synapse-color-accent-strong);
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 35%,
+    var(--synapse-color-border)
+  );
+  background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
+}
+
+.markdown-editor-mode button:hover,
+.markdown-editor-mode button:focus-visible {
+  color: var(--synapse-color-text);
+  outline: none;
+}
+
+.markdown-editor-host {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .markdown-editor.vditor,
-.markdown-editor :deep(.vditor) {
+.markdown-editor :deep(.vditor),
+.markdown-editor-host.vditor {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -766,58 +800,27 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.markdown-editor :deep(.synapse-table-context-menu) {
+.markdown-editor :deep(.synapse-edit-mode-host) {
   position: absolute;
-  z-index: 4;
-  display: grid;
-  min-width: 15rem;
-  padding: 0.3rem;
-  border: 1px solid var(--synapse-color-border);
-  border-radius: 0.5rem;
-  background: var(--synapse-color-surface-raised);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
-}
-
-.markdown-editor :deep(.synapse-table-context-menu[hidden]) {
-  display: none;
-}
-
-.markdown-editor :deep(.synapse-table-context-item) {
-  width: 100%;
-  padding: 0.5rem 0.65rem;
-  border: 0;
-  border-radius: 0.3rem;
-  color: var(--synapse-color-text);
-  background: transparent;
-  font: inherit;
-  font-size: 0.82rem;
-  text-align: start;
-  cursor: pointer;
-}
-
-.markdown-editor :deep(.synapse-table-context-item:hover),
-.markdown-editor :deep(.synapse-table-context-item:focus-visible) {
-  background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
-  outline: none;
-}
-
-.markdown-editor :deep(.synapse-table-context-item--destructive) {
-  color: var(--synapse-color-danger, #b42318);
-}
-
-.markdown-editor :deep(.synapse-table-context-separator) {
+  width: 1px;
   height: 1px;
-  margin: 0.25rem;
-  background: var(--synapse-color-border);
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .markdown-editor :deep(.vditor-content),
-.markdown-editor :deep(.vditor-ir) {
+.markdown-editor :deep(.vditor-ir),
+.markdown-editor :deep(.vditor-sv) {
   min-width: 0;
   background: var(--synapse-color-surface-raised);
 }
 
-.markdown-editor :deep(.vditor-ir) {
+.markdown-editor :deep(.vditor-ir),
+.markdown-editor :deep(.vditor-sv) {
   color: var(--synapse-color-text);
   font-family: var(--synapse-font-sans);
   font-size: 1rem;
@@ -825,7 +828,8 @@ onBeforeUnmount(() => {
   caret-color: var(--synapse-color-accent);
 }
 
-.markdown-editor :deep(.vditor-ir > .vditor-reset) {
+.markdown-editor :deep(.vditor-ir > .vditor-reset),
+.markdown-editor :deep(.vditor-sv) {
   display: block;
   box-sizing: border-box;
   width: 100% !important;
@@ -835,7 +839,8 @@ onBeforeUnmount(() => {
   padding: 1.5rem clamp(2rem, 8vw, 8rem) !important;
 }
 
-.markdown-editor :deep(.vditor-ir:focus) {
+.markdown-editor :deep(.vditor-ir:focus),
+.markdown-editor :deep(.vditor-sv:focus) {
   outline: none;
 }
 

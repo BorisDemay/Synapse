@@ -11,10 +11,18 @@ import {
   SearchPalette,
   SettingsPanel,
   ThemeToggle,
+  VaultExplorerToolbar,
+  VaultNotesSectionHeader,
+  IconActionButton,
   VaultTree,
+  useSidebarLayout,
+  defaultAssistantSidePanelsOpen,
+  useCompactAssistantLayout,
   backlinksFor,
   buildLocalGraph,
   buildVaultTree,
+  isNewNoteDraft,
+  noteUpdatedAt,
   parseNote,
   renderTemplate,
   resolveWikilink,
@@ -44,9 +52,15 @@ const content = ref("# Nouvelle note\n\n");
 const noteId = ref("nouvelle.md");
 const selectedNoteId = ref<string | null>(null);
 const formError = ref("");
+const assistantDefaults = defaultAssistantSidePanelsOpen();
 const assistantOpen = ref(false);
-const assistantHistoryOpen = ref(true);
-const noteHistoryOpen = ref(true);
+const assistantHistoryOpen = ref(assistantDefaults.history);
+const noteHistoryOpen = ref(assistantDefaults.relations);
+const compactAssistant = useCompactAssistantLayout();
+compactAssistant.bindSidePanels({
+  historyOpen: assistantHistoryOpen,
+  relationsOpen: noteHistoryOpen,
+});
 const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
@@ -58,6 +72,7 @@ const attachmentPreview = ref<{
   url: string;
 } | null>(null);
 const theme = useTheme();
+const sidebar = useSidebarLayout();
 const settingsError = ref("");
 const settingsStatus = ref("");
 const accountEmail = ref("");
@@ -115,6 +130,7 @@ const treeNodes = computed<VaultTreeNode[]>(() => {
       path: note.path,
       syncStatus: vault.noteSyncStatus(note.id),
       tags: parseNote(note.content).tags,
+      updatedAt: noteUpdatedAt(note.id, note.content),
     }));
   const attached = vault.attachments.map((file) => ({
     id: file.id,
@@ -122,6 +138,7 @@ const treeNodes = computed<VaultTreeNode[]>(() => {
     label: file.label,
     path: file.id,
     syncStatus: vault.noteSyncStatus(file.id),
+    updatedAt: noteUpdatedAt(file.id, ""),
   }));
   return buildVaultTree([...sources, ...attached]);
 });
@@ -138,6 +155,8 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "theme", label: "Basculer le thème" },
   { id: "graph", label: "Afficher le graphe local" },
   { id: "from-template", label: "Créer une note depuis un modèle" },
+  { id: "toggle-sidebar", label: "Afficher ou masquer la barre latérale" },
+  { id: "toggle-compact", label: "Afficher ou masquer les titres de section" },
 ]);
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
@@ -263,6 +282,9 @@ async function deleteNote(id: string) {
 }
 
 async function save(nextContent = content.value) {
+  if (!vault.notes.has(noteId.value) && isNewNoteDraft(nextContent)) {
+    return;
+  }
   content.value = nextContent;
   pendingSave = { content: nextContent, noteId: noteId.value };
   if (saveInFlight) {
@@ -434,6 +456,10 @@ function runCommand(id: string) {
     graphOpen.value = true;
   } else if (id === "from-template") {
     void startFromTemplate();
+  } else if (id === "toggle-sidebar") {
+    sidebar.toggleCollapsed();
+  } else if (id === "toggle-compact") {
+    sidebar.toggleCompact();
   }
 }
 
@@ -580,17 +606,21 @@ watch(settingsOpen, (open) => {
 </script>
 
 <template>
-  <AppShell class="vault-page">
+  <AppShell
+    class="vault-page"
+    :class="{ 'vault-page--compact': sidebar.compact.value }"
+    :sidebar-collapsed="sidebar.collapsed.value"
+  >
     <template #navigation>
       <header class="vault-nav-header">
-        <div class="vault-brand-row">
+        <div v-if="!sidebar.collapsed.value" class="vault-brand-row">
           <div class="brand-mark">
             <span class="brand-symbol" aria-hidden="true">S</span>
-            <span>Synapse</span>
+            <span class="brand-name">Synapse</span>
           </div>
           <ThemeToggle />
         </div>
-        <div class="vault-heading">
+        <div v-if="!sidebar.collapsed.value && !sidebar.compact.value" class="vault-heading">
           <div>
             <span class="eyebrow">ESPACE PRIVÉ</span>
             <h1>{{ vault.vaultName || "Coffre local" }}</h1>
@@ -600,46 +630,45 @@ watch(settingsOpen, (open) => {
             {{ vault.syncStatus }}
           </span>
         </div>
-        <Button
-          icon="pi pi-folder-open"
-          label="Ouvrir un coffre"
-          outlined
-          type="button"
-          aria-label="Ouvrir un coffre"
-          @click="vault.openVault()"
-        />
-        <Button
-          v-if="!vault.isUnlocked"
-          class="online-vault-button"
-          icon="pi pi-cloud"
-          :label="
-            auth.isAuthenticated
-              ? 'Activer la sync'
-              : 'Se connecter à une vault distante'
-          "
-          outlined
-          type="button"
-          aria-label="Conserver les notes en ligne"
-          @click="goOnline"
-        />
-        <Button
-          class="new-note-button"
-          icon="pi pi-plus"
-          label="Nouvelle note"
-          outlined
-          type="button"
-          @click="startNewNote()"
-        />
-        <Button
-          class="new-note-button"
-          icon="pi pi-file-edit"
-          label="Depuis un modèle"
-          outlined
-          type="button"
-          @click="startFromTemplate"
-        />
+        <div class="vault-toolbar-row">
+          <IconActionButton
+            label="Ouvrir un coffre"
+            @click="vault.openVault()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2Z"
+              />
+            </svg>
+          </IconActionButton>
+          <IconActionButton
+            v-if="!vault.isUnlocked"
+            :label="
+              auth.isAuthenticated
+                ? 'Activer la sync'
+                : 'Se connecter à une vault distante'
+            "
+            @click="goOnline"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96Z"
+              />
+            </svg>
+          </IconActionButton>
+          <VaultExplorerToolbar
+            show-template
+            :compact="sidebar.compact.value"
+            :sidebar-collapsed="sidebar.collapsed.value"
+            @from-template="startFromTemplate"
+            @toggle-compact="sidebar.toggleCompact()"
+            @toggle-sidebar="sidebar.toggleCollapsed()"
+          />
+        </div>
       </header>
-      <div v-if="allTags.length" class="tag-filter" aria-label="Tags">
+      <div v-if="!sidebar.collapsed.value && allTags.length" class="tag-filter" aria-label="Tags">
         <button
           v-for="tag in allTags"
           :key="tag"
@@ -650,8 +679,13 @@ watch(settingsOpen, (open) => {
           #{{ tag }}
         </button>
       </div>
-      <div class="sidebar-section-label">NOTES</div>
+      <VaultNotesSectionHeader
+        :compact="sidebar.compact.value"
+        :collapsed="sidebar.collapsed.value"
+        @new-note="startNewNote()"
+      />
       <VaultTree
+        v-if="!sidebar.collapsed.value"
         :attached-ids="assistant.attachedNoteIds"
         :nodes="treeNodes"
         @attach="attachNote"
@@ -663,7 +697,9 @@ watch(settingsOpen, (open) => {
           class="settings-button"
           type="button"
           aria-haspopup="dialog"
+          :aria-expanded="settingsOpen"
           aria-label="Ouvrir les paramètres"
+          title="Paramètres"
           @click="settingsOpen = true"
         >
           <span class="settings-icon" aria-hidden="true">
@@ -674,11 +710,19 @@ watch(settingsOpen, (open) => {
               />
             </svg>
           </span>
-          Paramètres
+          <span class="settings-label">Paramètres</span>
         </button>
-        <button class="logout-button" type="button" @click="logout">
+        <button
+          class="logout-button"
+          type="button"
+          :aria-label="auth.isAuthenticated ? 'Se déconnecter' : 'Compte'"
+          :title="auth.isAuthenticated ? 'Se déconnecter' : 'Compte'"
+          @click="logout"
+        >
           <span aria-hidden="true">↪</span>
-          {{ auth.isAuthenticated ? "Se déconnecter" : "Compte" }}
+          <span class="logout-label">{{
+            auth.isAuthenticated ? "Se déconnecter" : "Compte"
+          }}</span>
         </button>
       </div>
     </template>
@@ -686,7 +730,7 @@ watch(settingsOpen, (open) => {
     <section class="vault-workspace" aria-label="Édition de note">
       <header class="workspace-header">
         <div>
-          <span class="eyebrow">ÉDITION MARKDOWN</span>
+          <span v-if="!sidebar.compact.value" class="eyebrow">ÉDITION MARKDOWN</span>
         </div>
         <div class="workspace-meta">
           <span v-if="vault.isUnlocked" class="online-label"
@@ -945,6 +989,87 @@ watch(settingsOpen, (open) => {
   backdrop-filter: blur(6px);
 }
 
+.vault-page.app-shell--sidebar-collapsed > :deep(.app-shell-sidebar) {
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.25rem;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-brand-row,
+.vault-page.app-shell--sidebar-collapsed .vault-heading,
+.vault-page.app-shell--sidebar-collapsed .tag-filter,
+.vault-page.app-shell--sidebar-collapsed :deep(.vault-tree),
+.vault-page.app-shell--sidebar-collapsed :deep(.vault-tree-empty) {
+  display: none;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-nav-header {
+  display: contents;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-toolbar-row {
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  order: 2;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-notes-section-header {
+  order: 1;
+}
+
+.vault-page.app-shell--sidebar-collapsed .sidebar-footer {
+  order: 3;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 0;
+}
+
+.vault-page.app-shell--sidebar-collapsed .settings-label,
+.vault-page.app-shell--sidebar-collapsed .logout-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.vault-page.app-shell--sidebar-collapsed .settings-button,
+.vault-page.app-shell--sidebar-collapsed .logout-button {
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: var(--synapse-color-surface-raised);
+}
+
+.vault-page.app-shell--sidebar-collapsed .settings-button:hover,
+.vault-page.app-shell--sidebar-collapsed .settings-button:focus-visible,
+.vault-page.app-shell--sidebar-collapsed .logout-button:hover,
+.vault-page.app-shell--sidebar-collapsed .logout-button:focus-visible {
+  color: var(--synapse-color-text);
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 35%,
+    var(--synapse-color-border)
+  );
+  background: var(--synapse-color-surface-muted);
+  outline: none;
+}
+
 .vault-page > :deep(.app-shell-content) {
   padding: 0;
 }
@@ -955,7 +1080,45 @@ watch(settingsOpen, (open) => {
 
 .vault-nav-header {
   display: grid;
-  gap: 1.2rem;
+  gap: 0.75rem;
+}
+
+.vault-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.vault-toolbar-row :deep(.vault-explorer-toolbar) {
+  flex: 1 1 auto;
+}
+
+.vault-page--compact .brand-name,
+.vault-page--compact .settings-label,
+.vault-page--compact .logout-label,
+.vault-page--compact :deep(.theme-toggle-label) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.vault-page--compact .settings-button,
+.vault-page--compact .logout-button {
+  justify-content: center;
+  min-height: 2.35rem;
+  padding-inline: 0.7rem;
+}
+
+.vault-page--compact .vault-brand-row,
+.vault-page--compact .vault-nav-header {
+  gap: 0.5rem;
 }
 
 .vault-brand-row,
@@ -1047,10 +1210,6 @@ watch(settingsOpen, (open) => {
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
 }
 
-.new-note-button {
-  width: 100%;
-}
-
 .tag-filter {
   display: flex;
   flex-wrap: wrap;
@@ -1076,7 +1235,9 @@ watch(settingsOpen, (open) => {
 }
 
 .sidebar-footer {
-  display: grid;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
   gap: 0.25rem;
   margin-top: auto;
   padding-top: 1rem;
@@ -1088,7 +1249,8 @@ watch(settingsOpen, (open) => {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
   padding: 0.65rem 0.7rem;
   border: 0;
   border-radius: var(--synapse-radius-sm);
@@ -1108,16 +1270,38 @@ watch(settingsOpen, (open) => {
   height: 1.15rem;
 }
 
-.settings-button:hover {
+.settings-button:hover,
+.settings-button:focus-visible {
   color: var(--synapse-color-text);
-  background: var(--synapse-color-surface-muted);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-border) 40%,
+    var(--synapse-color-surface-muted)
+  );
 }
 
-.logout-button:hover {
+.settings-button[aria-expanded="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  font-weight: 650;
+}
+
+.settings-button[aria-expanded="true"]:hover,
+.settings-button[aria-expanded="true"]:focus-visible {
+  color: var(--synapse-color-accent-strong);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 10%,
+    var(--synapse-color-surface-accent)
+  );
+}
+
+.logout-button:hover,
+.logout-button:focus-visible {
   color: var(--synapse-color-danger);
   background: color-mix(
     in srgb,
-    var(--synapse-color-danger) 8%,
+    var(--synapse-color-danger) 14%,
     var(--synapse-color-surface-muted)
   );
 }
