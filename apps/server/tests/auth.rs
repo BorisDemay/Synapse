@@ -601,6 +601,10 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
     assert!(cookie.contains("HttpOnly"));
     assert!(cookie.contains("Secure"));
     assert!(cookie.contains("SameSite=Strict"));
+    assert!(
+        cookie.contains("Max-Age=28800"),
+        "the default account session stays short: {cookie}"
+    );
     let raw_token = cookie.split(';').next().expect("cookie pair");
     let token_bytes = URL_SAFE_NO_PAD
         .decode(raw_token.strip_prefix("session=").expect("token"))
@@ -789,6 +793,115 @@ async fn router_uses_injected_clock_for_session_creation_and_expiration() {
     assert_eq!(
         app.oneshot(logout).await.expect("response").status(),
         StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn remembering_the_device_extends_the_account_session_without_a_vault_secret() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, password_hash, activated_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP)")
+        .bind(user_id.to_string())
+        .bind("remember@example.test")
+        .bind(
+            synapse_server::auth::password::hash("a secure password")
+                .expect("password hashes")
+                .into_bytes(),
+        )
+        .execute(&pool)
+        .await
+        .expect("user is stored");
+    let clock = Arc::new(TestClock::new(UNIX_EPOCH + Duration::from_secs(10)));
+    let app = synapse_server::router_with_clock(Some(pool.clone()), clock.clone());
+
+    let rejected = app
+        .clone()
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"remember@example.test","password":"a secure password","vault_key":"must-never-be-accepted"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let response = app
+        .clone()
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"remember@example.test","password":"a secure password","remember_device":true}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("session cookie");
+    assert!(
+        cookie.contains("Max-Age=2592000"),
+        "remembered account sessions last thirty days: {cookie}"
+    );
+    assert!(!cookie.to_lowercase().contains("vault"));
+    let token = cookie
+        .split(';')
+        .next()
+        .and_then(|pair| pair.strip_prefix("session="))
+        .and_then(synapse_server::auth::session::SessionToken::parse)
+        .expect("session cookie has an opaque token");
+
+    clock.advance(Duration::from_secs(8 * 60 * 60 + 1));
+    assert_eq!(
+        synapse_server::auth::session::user_for(&pool, &token, clock.now())
+            .await
+            .expect("remembered session survives the short ttl"),
+        Some(user_id)
+    );
+
+    let logout = Request::builder()
+        .method("POST")
+        .uri("/auth/logout")
+        .header(header::COOKIE, format!("session={}", token.cookie_value()))
+        .header(header::ORIGIN, "https://synapse.local")
+        .body(Body::empty())
+        .expect("logout request");
+    let logout_response = app.clone().oneshot(logout).await.expect("response");
+    assert_eq!(logout_response.status(), StatusCode::NO_CONTENT);
+    let expired_cookie = logout_response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("logout clears the browser cookie");
+    assert!(
+        expired_cookie.contains("Max-Age=0"),
+        "logout must drop a remembered cookie: {expired_cookie}"
+    );
+
+    let second = app
+        .clone()
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"remember@example.test","password":"a secure password","remember_device":true}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(second.status(), StatusCode::NO_CONTENT);
+    let leftover = second
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookie| cookie.split(';').next())
+        .and_then(|pair| pair.strip_prefix("session="))
+        .and_then(synapse_server::auth::session::SessionToken::parse)
+        .expect("second remembered cookie");
+    clock.advance(Duration::from_secs(30 * 24 * 60 * 60));
+    assert!(
+        synapse_server::auth::session::user_for(&pool, &leftover, clock.now())
+            .await
+            .expect("lookup")
+            .is_none()
     );
 }
 

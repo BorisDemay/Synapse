@@ -55,4 +55,35 @@ describe("LoginView", () => {
       "Créer un compte",
     );
   });
+
+  it("offers remembering the account session on the login form", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { component: { template: "<div />" }, path: "/" },
+        { component: LoginView, path: "/login" },
+        { component: { template: "<div />" }, path: "/register" },
+        { component: { template: "<div />" }, path: "/unlock" },
+        { component: { template: "<div />" }, path: "/vault" },
+      ],
+    });
+    await router.push("/login");
+    await router.isReady();
+    const wrapper = mount(LoginView, {
+      global: { plugins: [pinia, installSynapseUi, router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.get("#login-remember-device").attributes("type")).toBe(
+      "checkbox",
+    );
+    expect(wrapper.get("#login-remember-hint").text()).toContain(
+      "phrase du coffre",
+    );
+    expect(
+      wrapper.get("#login-remember-device").attributes("aria-describedby"),
+    ).toBe("login-remember-hint");
+  });
 });

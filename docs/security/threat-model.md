@@ -22,7 +22,7 @@ l’appartenance à un coffre ou les numéros de révision.
 | Enveloppe d’appareil de confiance | AES-GCM Web Crypto, clé non extractible dans IndexedDB ; jamais de clé de coffre en clair |
 | Jeton d’assistant Codex | Optionnel ; enveloppé avec la clé de coffre, ciphertext IndexedDB sur web et desktop ; appel direct à OpenAI, jamais le serveur Synapse |
 | Conversations Codex | Fils, titres, messages et notes liées chiffrés avec la clé de coffre et un AAD dédié ; stockage local uniquement, purgé de la mémoire au verrouillage |
-| Cookie de session desktop | Jar mémoire Rust ; jamais exposé à Vue ni à `localStorage` |
+| Cookie de session desktop | Jar mémoire Rust ; copie optionnelle du jeton opaque dans le répertoire de données de l’application si « Se souvenir de cet appareil » (ADR 0014) ; jamais exposé à Vue ni à `localStorage` |
 
 ## Frontières de confiance
 
@@ -68,7 +68,7 @@ par une empreinte validée et ne dérivent jamais d’un chemin fourni par un cl
 | Menace | Contrôles MVP |
 | --- | --- |
 | Compromission du serveur | XChaCha20-Poly1305 côté client, AAD versionné, pas de Markdown serveur |
-| Vol ou rejeu de session | Cookies opaques, rotation, expiration, révocation (liste et révocation depuis les paramètres) et rate limiting |
+| Vol ou rejeu de session | Cookies opaques, rotation, expiration (8 h par défaut, 30 jours si appareil mémorisé), révocation (liste et révocation depuis les paramètres) et rate limiting |
 | Compromission d’un mot de passe | Changement authentifié, CSRF, révocation des autres sessions |
 | Suppression de compte | Mot de passe actuel, CSRF, effacement des coffres possédés ; pas de récupération serveur |
 | Traversal ou symlink | `VaultPath` validé, résolution confinée, tests multi-plateformes |

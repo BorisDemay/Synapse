@@ -45,6 +45,36 @@ describe("auth store", () => {
     expect(auth.userId).toBe("user-1");
   });
 
+  it("asks the native bridge to remember this device", async () => {
+    invoke.mockResolvedValue("http://127.0.0.1:3000");
+    nativeFetch
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user_id: "user-1" }), { status: 200 }),
+      );
+
+    const auth = useAuthStore();
+    await auth.login("alice@example.test", "a secure password", {
+      rememberDevice: true,
+    });
+
+    expect(nativeFetch).toHaveBeenNthCalledWith(
+      1,
+      "/auth/login",
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: "alice@example.test",
+          password: "a secure password",
+          remember_device: true,
+        }),
+      }),
+    );
+    expect(JSON.stringify(auth.$state)).not.toMatch(/session=/);
+    expect(localStorage.getItem("synapse-instance-url")).toBe(
+      "http://127.0.0.1:3000",
+    );
+  });
+
   it("does not expose a session cookie to vue", async () => {
     invoke.mockResolvedValue("http://127.0.0.1:3000");
     nativeFetch

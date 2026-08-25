@@ -23,7 +23,9 @@
 L’appareil de confiance enveloppe la clé de coffre dans IndexedDB avec une
 clé AES-GCM non extractible (Web Crypto). Aucune passkey, aucun envoi
 serveur. Quiconque contrôle le profil navigateur peut déverrouiller ; la
-phrase reste la secours.
+phrase reste la secours. « Se souvenir de cet appareil » à la connexion
+(ADR 0014) allonge seulement le cookie de session de compte ; cela ne
+persiste pas la clé de coffre.
 
 La CSP de `apps/web/index.html` autorise `connect-src` vers `'self'`, `ws:`,
 `wss:`, `https://api.openai.com`, `https://auth.openai.com` et
@@ -39,7 +41,9 @@ au chrome natif. Pas de shell, HTTP générique ni accès filesystem. Le même
 client Vue/IndexedDB chiffré que le web s'exécute dans le WebView ; ses appels
 Synapse (auth, enveloppe, push/pull) passent par un enum Rust fermé, borné à
 l’URL d’instance configurée. Le cookie de session reste dans un jar mémoire
-Rust et n’est jamais exposé à Vue. CSP fenêtre : `default-src 'self'` avec
+Rust et n’est jamais exposé à Vue. Une session mémorisée (ADR 0014) peut
+être recopiée dans `app_data_dir()/remembered-session` avec des permissions
+restreignantes ; la déconnexion efface ce fichier. CSP fenêtre : `default-src 'self'` avec
 styles/images locaux et `connect-src` OpenAI/ChatGPT pour l’assistant Codex
 optionnel (jamais le serveur Synapse).
 

@@ -35,4 +35,15 @@ describe("application routes", () => {
 
     expect(router.currentRoute.value.fullPath).toBe("/register");
   });
+
+  it("skips the login form when the account session is already valid", async () => {
+    const auth = { isAuthenticated: true };
+    const vault = { hasEncryptedVault: true, isUnlocked: false };
+    const router = createAppRouter(auth, vault, { memory: true });
+
+    await router.push("/login");
+    await router.isReady();
+
+    expect(router.currentRoute.value.fullPath).toBe("/unlock");
+  });
 });

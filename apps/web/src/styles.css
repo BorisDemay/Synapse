@@ -166,6 +166,13 @@ a {
   accent-color: var(--synapse-color-accent);
 }
 
+.form-hint {
+  margin: -0.35rem 0 0;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .trusted-device-status {
   margin: 0 0 1rem;
   color: var(--synapse-color-success);

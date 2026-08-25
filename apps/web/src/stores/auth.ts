@@ -10,6 +10,11 @@ import { useVaultStore } from "./vault";
 interface LoginCredentials {
   email: string;
   password: string;
+  remember_device?: boolean;
+}
+
+export interface LoginOptions {
+  rememberDevice?: boolean;
 }
 
 interface RegisterInput {
@@ -112,8 +117,11 @@ export const useAuthStore = defineStore("auth", {
       }
       await this.login(input.email, input.password);
     },
-    async login(email: string, password: string) {
+    async login(email: string, password: string, options: LoginOptions = {}) {
       const credentials: LoginCredentials = { email, password };
+      if (options.rememberDevice) {
+        credentials.remember_device = true;
+      }
       const response = await fetch("/auth/login", {
         body: JSON.stringify(credentials),
         credentials: "include",

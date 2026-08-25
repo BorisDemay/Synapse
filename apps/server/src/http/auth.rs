@@ -38,6 +38,8 @@ pub struct ActivateRequest {
 pub struct LoginRequest {
     email: String,
     password: String,
+    #[serde(default)]
+    remember_device: bool,
 }
 
 #[derive(Deserialize)]
@@ -269,37 +271,40 @@ pub async fn login(
     if !user.get::<bool, _>("activated") {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let Ok(token) = session::create(&pool, user_id, state.clock.now()).await else {
+    let lifetime = if request.remember_device {
+        session::SessionLifetime::Remembered
+    } else {
+        session::SessionLifetime::Standard
+    };
+    let Ok(token) =
+        session::create_with_lifetime(&pool, user_id, state.clock.now(), lifetime).await
+    else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let secure = if state.cookie_secure { "; Secure" } else { "" };
-    let value = format!(
-        "session={}; Path=/; HttpOnly{secure}; SameSite=Strict; Max-Age=28800",
-        token.cookie_value()
-    );
-    let mut response = StatusCode::NO_CONTENT.into_response();
-    if let Ok(cookie) = HeaderValue::from_str(&value) {
-        response.headers_mut().insert(header::SET_COOKIE, cookie);
-    }
-    response
+    session_cookie_response(
+        StatusCode::NO_CONTENT,
+        Some(&token),
+        state.cookie_secure,
+        lifetime.max_age_secs(),
+    )
 }
 
-pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> StatusCode {
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     if !csrf_origin_allowed(&headers, &state.allowed_origins) {
-        return StatusCode::FORBIDDEN;
+        return StatusCode::FORBIDDEN.into_response();
     }
     let (pool, token) = match authenticated_user(&headers, &state) {
         Ok(value) => value,
-        Err(status) => return status,
+        Err(status) => return status.into_response(),
     };
     match session::user_for(pool, &token, state.clock.now()).await {
         Ok(Some(_)) => {}
-        Ok(None) => return StatusCode::UNAUTHORIZED,
-        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
     match session::revoke(pool, &token).await {
-        Ok(()) => StatusCode::NO_CONTENT,
-        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+        Ok(()) => session_cookie_response(StatusCode::NO_CONTENT, None, state.cookie_secure, 0),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 
@@ -485,6 +490,27 @@ pub async fn delete_account(
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
+}
+
+fn session_cookie_response(
+    status: StatusCode,
+    token: Option<&session::SessionToken>,
+    cookie_secure: bool,
+    max_age: u64,
+) -> axum::response::Response {
+    let secure = if cookie_secure { "; Secure" } else { "" };
+    let value = match token {
+        Some(token) => format!(
+            "session={}; Path=/; HttpOnly{secure}; SameSite=Strict; Max-Age={max_age}",
+            token.cookie_value()
+        ),
+        None => format!("session=; Path=/; HttpOnly{secure}; SameSite=Strict; Max-Age=0"),
+    };
+    let mut response = status.into_response();
+    if let Ok(cookie) = HeaderValue::from_str(&value) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
 }
 
 fn random_token() -> String {

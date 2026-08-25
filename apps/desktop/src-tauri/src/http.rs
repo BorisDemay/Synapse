@@ -1,5 +1,5 @@
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -86,6 +86,8 @@ pub enum SynapseRequest {
 pub struct LoginBody {
     email: String,
     password: String,
+    #[serde(default)]
+    remember_device: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -126,16 +128,22 @@ pub struct InstanceClient {
     client: reqwest::Client,
     base: Url,
     session: Mutex<Option<String>>,
+    session_store: Option<PathBuf>,
 }
 
 impl InstanceClient {
     pub fn connect(raw: &str) -> Result<Self, String> {
+        Self::connect_with_session_store(raw, None)
+    }
+
+    pub fn connect_with_session_store(raw: &str, store: Option<PathBuf>) -> Result<Self, String> {
         let base = Url::parse(raw.trim()).map_err(|_| "invalid instance url".to_owned())?;
         let host = base.host_str().unwrap_or_default();
         let localhost = host == "127.0.0.1" || host == "localhost";
         if base.scheme() != "https" && !(base.scheme() == "http" && localhost) {
             return Err("instance url must be https (or http on localhost)".to_owned());
         }
+        let restored = store.as_deref().and_then(load_remembered_session);
         Ok(Self {
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -144,7 +152,8 @@ impl InstanceClient {
                 .build()
                 .map_err(|_| "unable to build http client".to_owned())?,
             base,
-            session: Mutex::new(None),
+            session: Mutex::new(restored),
+            session_store: store,
         })
     }
 
@@ -164,6 +173,19 @@ impl InstanceClient {
     pub fn clear_session(&self) {
         if let Ok(mut session) = self.session.lock() {
             *session = None;
+        }
+        forget_remembered_session(self.session_store.as_deref());
+    }
+
+    fn persist_current_session(&self) {
+        let Some(path) = self.session_store.as_deref() else {
+            return;
+        };
+        let Ok(guard) = self.session.lock() else {
+            return;
+        };
+        if let Some(token) = guard.as_deref() {
+            let _ = persist_remembered_session(path, token);
         }
     }
 
@@ -189,6 +211,10 @@ impl InstanceClient {
         else {
             return;
         };
+        if token.is_empty() {
+            self.clear_session();
+            return;
+        }
         if let Ok(mut session) = self.session.lock() {
             *session = Some(token.to_owned());
         }
@@ -314,8 +340,18 @@ impl InstanceClient {
                     .await
             }
             SynapseRequest::Login { body } => {
-                self.relay_json(reqwest::Method::POST, "auth/login", &body, false)
-                    .await
+                let remember = body.remember_device;
+                let response = self
+                    .relay_json(reqwest::Method::POST, "auth/login", &body, false)
+                    .await?;
+                if response.status == 204 {
+                    if remember {
+                        self.persist_current_session();
+                    } else {
+                        forget_remembered_session(self.session_store.as_deref());
+                    }
+                }
+                Ok(response)
             }
             SynapseRequest::Logout => {
                 let response = self
@@ -768,11 +804,68 @@ pub fn parse_session_cookie(set_cookie: &str) -> Option<&str> {
         .split(';')
         .next()
         .and_then(|part| part.strip_prefix("session="))
+        .filter(|token| !token.is_empty())
+}
+
+fn opaque_session_token(value: &str) -> bool {
+    let trimmed = value.trim();
+    (16..=128).contains(&trimmed.len())
+        && trimmed
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+fn persist_remembered_session(path: &Path, token: &str) -> Result<(), String> {
+    if !opaque_session_token(token) {
+        return Err("invalid session token".to_owned());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| "unable to persist session".to_owned())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|_| "unable to persist session".to_owned())?;
+        file.write_all(token.as_bytes())
+            .map_err(|_| "unable to persist session".to_owned())?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, token).map_err(|_| "unable to persist session".to_owned())?;
+    }
+    Ok(())
+}
+
+fn load_remembered_session(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let token = String::from_utf8(bytes).ok()?;
+    let token = token.trim();
+    if !opaque_session_token(token) {
+        forget_remembered_session(Some(path));
+        return None;
+    }
+    Some(token.to_owned())
+}
+
+fn forget_remembered_session(path: Option<&Path>) {
+    if let Some(path) = path {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_session_cookie;
+    use super::{
+        InstanceClient, forget_remembered_session, load_remembered_session, parse_session_cookie,
+        persist_remembered_session,
+    };
 
     #[test]
     fn session_cookie_parser_keeps_only_the_opaque_token() {
@@ -780,5 +873,58 @@ mod tests {
             parse_session_cookie("session=opaque-token; Path=/; HttpOnly; SameSite=Strict"),
             Some("opaque-token")
         );
+        assert_eq!(
+            parse_session_cookie("session=; Path=/; HttpOnly; Max-Age=0"),
+            None
+        );
+    }
+
+    #[test]
+    fn remembered_native_session_survives_a_new_client() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("remembered-session");
+        persist_remembered_session(&path, "opaque-session-token").expect("persist");
+        let client =
+            InstanceClient::connect_with_session_store("http://127.0.0.1:3000", Some(path.clone()))
+                .expect("client");
+        assert_eq!(
+            client.cookie_header(),
+            Some("session=opaque-session-token".to_owned())
+        );
+        client.clear_session();
+        assert!(load_remembered_session(&path).is_none());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn forgetting_the_device_removes_the_native_session_file() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("remembered-session");
+        persist_remembered_session(&path, "opaque-session-token").expect("persist");
+        forget_remembered_session(Some(&path));
+        assert!(!path.exists());
+        let client =
+            InstanceClient::connect_with_session_store("http://127.0.0.1:3000", Some(path))
+                .expect("client");
+        assert_eq!(client.cookie_header(), None);
+    }
+
+    #[test]
+    fn remembered_session_file_is_not_world_readable() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("remembered-session");
+        persist_remembered_session(&path, "opaque-session-token").expect("persist");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path)
+                .expect("metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let stored = std::fs::read_to_string(&path).expect("file");
+        assert_eq!(stored, "opaque-session-token");
+        assert!(!stored.contains("vault"));
     }
 }

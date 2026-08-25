@@ -40,6 +40,9 @@ export function createAppRouter(
 
   router.beforeEach((to) => {
     if (to.path === "/login" || to.path === "/register") {
+      if (auth.isAuthenticated) {
+        return vault.isUnlocked ? "/vault" : "/unlock";
+      }
       return true;
     }
     if (!auth.isAuthenticated) {

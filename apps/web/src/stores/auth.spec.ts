@@ -51,6 +51,39 @@ describe("auth store", () => {
     expect(auth.userId).toBe("0198e5de-1111-7222-8333-444455556666");
   });
 
+  it("asks the server to remember this device without storing secrets", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ user_id: "0198e5de-1111-7222-8333-444455556666" }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        ),
+      );
+
+    const auth = useAuthStore();
+    await auth.login("alice@example.test", "correct horse battery staple", {
+      rememberDevice: true,
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "/auth/login", {
+      body: JSON.stringify({
+        email: "alice@example.test",
+        password: "correct horse battery staple",
+        remember_device: true,
+      }),
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(localStorage.length).toBe(0);
+    expect(JSON.stringify(auth.$state)).not.toMatch(/session=/);
+    expect(JSON.stringify(auth.$state)).not.toContain("correct horse");
+  });
+
   it("restores an opaque session without secrets", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(

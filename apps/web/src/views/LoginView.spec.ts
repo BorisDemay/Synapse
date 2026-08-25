@@ -98,4 +98,38 @@ describe("LoginView", () => {
     expect(vault.tryUnlockFromTrustedDevice).toHaveBeenCalledOnce();
     expect(router.currentRoute.value.path).toBe("/vault");
   });
+
+  it("offers remembering the account session without skipping vault unlock", async () => {
+    mockSignupStatus(false);
+    const { router, wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    const vault = useVaultStore();
+    const login = vi.spyOn(auth, "login").mockResolvedValue();
+    vi.spyOn(vault, "tryUnlockFromTrustedDevice").mockResolvedValue(false);
+
+    expect(wrapper.get("#login-remember-device").attributes("type")).toBe(
+      "checkbox",
+    );
+    expect(wrapper.get("#login-remember-hint").text()).toContain(
+      "phrase du coffre",
+    );
+    expect(
+      wrapper.get("#login-remember-device").attributes("aria-describedby"),
+    ).toBe("login-remember-hint");
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("#login-remember-device").setValue(true);
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(login).toHaveBeenCalledWith(
+      "person@example.test",
+      "a secure password",
+      {
+        rememberDevice: true,
+      },
+    );
+    expect(router.currentRoute.value.path).toBe("/unlock");
+  });
 });

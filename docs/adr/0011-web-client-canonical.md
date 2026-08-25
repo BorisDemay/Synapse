@@ -15,7 +15,9 @@ Tauri embarque désormais le même client Vue que le navigateur : mêmes routes,
 stores, cache IndexedDB chiffré, outbox, chiffrement, conflits, historique,
 appareil de confiance et export. Le WebView ne reçoit ni filesystem ni HTTP
 générique. Un pont Rust fermé traduit seulement les opérations Synapse v1
-typées ; son cookie de session reste en mémoire native.
+typées. Le cookie de session reste en mémoire native ; si l’utilisateur coche
+« Se souvenir de cet appareil », le jeton opaque peut être recopié dans le
+répertoire de données de l’application (ADR 0014), jamais dans Vue.
 
 Les anciens coffres de dossier ne sont plus ouverts par le parcours produit et
 ne sont jamais supprimés implicitement. Leur migration exige une étape

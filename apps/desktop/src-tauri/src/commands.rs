@@ -1,14 +1,19 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
 
 use crate::http::{InstanceClient, SynapseRequest, SynapseResponse};
+use crate::local_folder::{FolderEntry, LocalFolderMirror, default_folder_path};
 
 /// Native boundary for the shared web client.
 ///
 /// The webview has no filesystem or arbitrary HTTP permission.  It can only
 /// configure one validated Synapse instance and invoke the closed request enum
-/// from `http.rs`; the session cookie remains in this process.
+/// from `http.rs`. The session cookie stays in Rust; a remembered device may
+/// persist that opaque token in the application data directory, never in Vue.
 pub struct VaultCommands {
     http: Mutex<Option<Arc<InstanceClient>>>,
 }
@@ -29,7 +34,15 @@ impl VaultCommands {
     }
 
     pub fn set_instance_url(&self, url: String) -> Result<String, String> {
-        let client = InstanceClient::connect(&url)?;
+        self.set_instance_url_with_session_store(url, None)
+    }
+
+    pub fn set_instance_url_with_session_store(
+        &self,
+        url: String,
+        store: Option<PathBuf>,
+    ) -> Result<String, String> {
+        let client = InstanceClient::connect_with_session_store(&url, store)?;
         let origin = client.origin();
         *self
             .http
@@ -53,8 +66,17 @@ impl Default for VaultCommands {
 }
 
 #[tauri::command]
-pub fn set_instance_url(url: String, commands: State<'_, VaultCommands>) -> Result<String, String> {
-    commands.set_instance_url(url)
+pub fn set_instance_url(
+    url: String,
+    commands: State<'_, VaultCommands>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let store = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("remembered-session"));
+    commands.set_instance_url_with_session_store(url, store)
 }
 
 #[tauri::command]
@@ -63,4 +85,167 @@ pub async fn synapse_request(
     commands: State<'_, VaultCommands>,
 ) -> Result<SynapseResponse, String> {
     commands.synapse_request(request).await
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct FolderConfigFile {
+    roots: BTreeMap<String, String>,
+}
+
+struct FolderSlot {
+    written: BTreeSet<String>,
+}
+
+#[derive(Default)]
+pub struct LocalFolderRegistry {
+    slots: Mutex<BTreeMap<String, FolderSlot>>,
+}
+
+impl LocalFolderRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|_| "local folder is unavailable")?;
+    Ok(dir.join("local-folders.json"))
+}
+
+fn load_config(app: &AppHandle) -> FolderConfigFile {
+    let path = match config_path(app) {
+        Ok(path) => path,
+        Err(_) => return FolderConfigFile::default(),
+    };
+    std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn save_config(app: &AppHandle, config: &FolderConfigFile) -> Result<(), String> {
+    let path = config_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| "local folder is unavailable")?;
+    }
+    let bytes = serde_json::to_vec(config).map_err(|_| "local folder is unavailable")?;
+    std::fs::write(path, bytes).map_err(|_| "local folder is unavailable".to_owned())
+}
+
+fn default_root(app: &AppHandle, vault_id: &str) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .map_err(|_| "local folder is unavailable")?;
+    default_folder_path(&base, vault_id)
+}
+
+async fn mirror_for(
+    vault_id: &str,
+    root: PathBuf,
+    registry: &LocalFolderRegistry,
+) -> Result<LocalFolderMirror, String> {
+    let written = registry
+        .slots
+        .lock()
+        .map_err(|_| "local folder is unavailable")?
+        .get(vault_id)
+        .map(|slot| slot.written.clone())
+        .unwrap_or_default();
+    let mut mirror = LocalFolderMirror::open(root).await?;
+    mirror.set_written(written);
+    Ok(mirror)
+}
+
+fn remember_slot(
+    vault_id: &str,
+    mirror: &LocalFolderMirror,
+    registry: &LocalFolderRegistry,
+) -> Result<(), String> {
+    registry
+        .slots
+        .lock()
+        .map_err(|_| "local folder is unavailable")?
+        .insert(
+            vault_id.to_owned(),
+            FolderSlot {
+                written: mirror.written(),
+            },
+        );
+    Ok(())
+}
+
+fn persist_root(app: &AppHandle, vault_id: &str, root: &std::path::Path) -> Result<(), String> {
+    let mut config = load_config(app);
+    config
+        .roots
+        .insert(vault_id.to_owned(), root.to_string_lossy().into_owned());
+    save_config(app, &config)
+}
+
+fn resolve_root(app: &AppHandle, vault_id: &str) -> Result<PathBuf, String> {
+    if let Some(stored) = load_config(app).roots.get(vault_id) {
+        return Ok(PathBuf::from(stored));
+    }
+    default_root(app, vault_id)
+}
+
+#[tauri::command]
+pub async fn ensure_local_vault_folder(
+    vault_id: String,
+    app: AppHandle,
+    registry: State<'_, LocalFolderRegistry>,
+) -> Result<String, String> {
+    let root = resolve_root(&app, &vault_id)?;
+    let mirror = mirror_for(&vault_id, root, &registry).await?;
+    persist_root(&app, &vault_id, &mirror.root())?;
+    remember_slot(&vault_id, &mirror, &registry)?;
+    Ok(mirror.root().to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn mirror_local_vault_folder(
+    vault_id: String,
+    entries: Vec<FolderEntry>,
+    app: AppHandle,
+    registry: State<'_, LocalFolderRegistry>,
+) -> Result<String, String> {
+    let root = resolve_root(&app, &vault_id)?;
+    let mut mirror = mirror_for(&vault_id, root, &registry).await?;
+    mirror.replace_snapshot(&entries).await?;
+    persist_root(&app, &vault_id, &mirror.root())?;
+    remember_slot(&vault_id, &mirror, &registry)?;
+    Ok(mirror.root().to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn choose_local_vault_folder(
+    vault_id: Option<String>,
+    app: AppHandle,
+    registry: State<'_, LocalFolderRegistry>,
+) -> Result<Option<String>, String> {
+    let Some(vault_id) = vault_id.filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        ensure_local_vault_folder(vault_id, app, registry).await?,
+    ))
+}
+
+#[tauri::command]
+pub async fn bind_local_vault_folder(
+    vault_id: String,
+    path: String,
+    app: AppHandle,
+    registry: State<'_, LocalFolderRegistry>,
+) -> Result<String, String> {
+    let root = PathBuf::from(path);
+    persist_root(&app, &vault_id, &root)?;
+    let mirror = mirror_for(&vault_id, root, &registry).await?;
+    remember_slot(&vault_id, &mirror, &registry)?;
+    Ok(mirror.root().to_string_lossy().into_owned())
 }

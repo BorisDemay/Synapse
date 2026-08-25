@@ -65,13 +65,53 @@ impl fmt::Display for SessionError {
 
 impl std::error::Error for SessionError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionLifetime {
+    Standard,
+    Remembered,
+}
+
+impl SessionLifetime {
+    pub const STANDARD_MAX_AGE_SECS: u64 = 8 * 60 * 60;
+    pub const REMEMBERED_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
+
+    pub const fn max_age_secs(self) -> u64 {
+        match self {
+            Self::Standard => Self::STANDARD_MAX_AGE_SECS,
+            Self::Remembered => Self::REMEMBERED_MAX_AGE_SECS,
+        }
+    }
+
+    fn expiry_sql(self) -> &'static str {
+        match self {
+            Self::Standard => {
+                "INSERT INTO sessions (id, user_id, token_hash, expires_at) \
+                 VALUES ($1::uuid, $2::uuid, $3, to_timestamp($4) + INTERVAL '8 hours')"
+            }
+            Self::Remembered => {
+                "INSERT INTO sessions (id, user_id, token_hash, expires_at) \
+                 VALUES ($1::uuid, $2::uuid, $3, to_timestamp($4) + INTERVAL '30 days')"
+            }
+        }
+    }
+}
+
 pub async fn create(
     pool: &PgPool,
     user_id: Uuid,
     now: SystemTime,
 ) -> Result<SessionToken, SessionError> {
+    create_with_lifetime(pool, user_id, now, SessionLifetime::Standard).await
+}
+
+pub async fn create_with_lifetime(
+    pool: &PgPool,
+    user_id: Uuid,
+    now: SystemTime,
+    lifetime: SessionLifetime,
+) -> Result<SessionToken, SessionError> {
     let token = SessionToken::generate();
-    sqlx::query("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES ($1::uuid, $2::uuid, $3, to_timestamp($4) + INTERVAL '8 hours')")
+    sqlx::query(lifetime.expiry_sql())
         .bind(Uuid::new_v4().to_string())
         .bind(user_id.to_string())
         .bind(token.hash())

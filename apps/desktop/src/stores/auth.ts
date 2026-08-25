@@ -11,6 +11,10 @@ export interface AuthSession {
   id: string;
 }
 
+export interface LoginOptions {
+  rememberDevice?: boolean;
+}
+
 function rememberedInstanceUrl(): string {
   return localStorage.getItem(INSTANCE_URL_KEY) ?? "http://127.0.0.1:3000";
 }
@@ -77,9 +81,13 @@ export const useAuthStore = defineStore("auth", {
         return false;
       }
     },
-    async login(email: string, password: string) {
+    async login(email: string, password: string, options: LoginOptions = {}) {
+      const body: Record<string, unknown> = { email, password };
+      if (options.rememberDevice) {
+        body.remember_device = true;
+      }
       const response = await this.request("/auth/login", {
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body),
         headers: { "content-type": "application/json" },
         method: "POST",
       });

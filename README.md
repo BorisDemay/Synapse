@@ -98,7 +98,7 @@ La sécurité est une exigence de conception, pas une étape de finition.
 
 - TLS obligatoire en production ; redirection HTTP vers HTTPS.
 - Authentification avec mots de passe hachés par un algorithme moderne et résistant (Argon2id).
-- Sessions courtes, cookies `HttpOnly`, `Secure`, `SameSite`, rotation et révocation des jetons.
+- Sessions courtes (8 h), cookies `HttpOnly`, `Secure`, `SameSite`, rotation et révocation ; 30 jours seulement si l’utilisateur coche « Se souvenir de cet appareil » (mot de passe de compte, pas la phrase du coffre).
 - Autorisation systématique côté serveur sur chaque coffre, fichier et opération.
 - Protection contre les attaques usuelles : CSRF, XSS, injection, traversal de chemin, SSRF, brute force et rejeu de requêtes.
 - Validation stricte des schémas d’API, limites de taille, quotas et limitation de débit.
@@ -133,6 +133,8 @@ Les frontières de responsabilité du monorepo sont consignées dans les ADR :
 - [ADR 0001 — Monorepo et frontières de confiance](docs/adr/0001-monorepo-and-boundaries.md)
 - [ADR 0002 — Synchronisation par opérations et révisions](docs/adr/0002-sync-versioning.md)
 - [ADR 0011 — Le client web chiffré est canonique](docs/adr/0011-web-client-canonical.md)
+- [ADR 0014 — Session de compte mémorisée](docs/adr/0014-remembered-account-session.md)
+- [ADR 0013 — Réplique dossier desktop et priorité serveur](docs/adr/0013-desktop-folder-replica-and-server-priority.md)
 - [ADR 0007 — Éditeur Markdown à rendu instantané](docs/adr/0007-vditor-instant-rendering-editor.md)
 - [ADR 0008 — Assistant Codex optionnel côté client](docs/adr/0008-client-side-codex-assistant.md)
 - [ADR 0010 — Item de coffre chiffré](docs/adr/0010-encrypted-vault-item.md)
@@ -183,8 +185,9 @@ just desktop
 
 Démarre PostgreSQL (`synapse_dev`), l’API Rust (`http://127.0.0.1:3000`) et
 la fenêtre native Tauri (Vite `http://127.0.0.1:1420`) dans un seul terminal.
-`Ctrl+C` arrête les deux. L’édition utilise le cache chiffré local et ne bloque
-pas l’interface pendant une indisponibilité réseau.
+`Ctrl+C` arrête les deux. L’édition utilise le cache chiffré local et une
+réplique Markdown desktop, et ne bloque pas l’interface pendant une
+indisponibilité réseau.
 
 ### Qualité
 
@@ -245,8 +248,15 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
 
 - Le client Tauri embarque le client web chiffré via un pont Rust fermé. Il ne
   reçoit aucun accès filesystem ou HTTP générique ; la session native reste en
-  mémoire. Les anciens coffres de dossier sont conservés sans suppression
-  implicite pendant leur migration explicite.
+  mémoire. En plus du cache IndexedDB chiffré, le desktop réplique le Markdown
+  déchiffré dans un dossier local : à la **première création** de coffre, un
+  dialogue demande de choisir ce dossier ; sinon `Documents/Synapse/<vault_id>`
+  (ou le répertoire de données de l’app). Quand le serveur est joignable, un
+  pull précède le push (priorité web). Un retry d’appareil toutes les 10 s
+  (réglable 3–60 s dans Paramètres → Coffre) reprend la file jusqu’à ack. Le
+  **navigateur** n’affiche jamais ce dialogue de dossier OS : seulement le
+  cache IndexedDB. Les anciens coffres de dossier sont conservés sans
+  suppression implicite pendant leur migration explicite.
 - Aucun contenu de coffre en clair n’atteint le serveur ; la phrase de
   déchiffrement reste locale.
 - Pas de SaaS obligatoire, pas de télémétrie distante. Un chat Codex

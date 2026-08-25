@@ -91,4 +91,28 @@ describe("desktop Synapse fetch bridge", () => {
       },
     });
   });
+
+  it("forwards remember_device through the closed login command", async () => {
+    invoke.mockResolvedValue({ status: 204 });
+
+    await fetch("/auth/login", {
+      body: JSON.stringify({
+        email: "user@example.test",
+        password: "secret",
+        remember_device: true,
+      }),
+      method: "POST",
+    });
+
+    expect(invoke).toHaveBeenLastCalledWith("synapse_request", {
+      request: {
+        body: {
+          email: "user@example.test",
+          password: "secret",
+          remember_device: true,
+        },
+        kind: "login",
+      },
+    });
+  });
 });

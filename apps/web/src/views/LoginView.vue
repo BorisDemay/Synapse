@@ -17,6 +17,7 @@ const vault = useVaultStore();
 const router = useRouter();
 const email = ref("");
 const password = ref("");
+const rememberDevice = ref(false);
 const error = ref("");
 const publicSignup = ref(false);
 
@@ -27,7 +28,9 @@ onMounted(async () => {
 async function submit() {
   error.value = "";
   try {
-    await auth.login(email.value, password.value);
+    await auth.login(email.value, password.value, {
+      rememberDevice: rememberDevice.value,
+    });
     password.value = "";
     if (await vault.tryUnlockFromTrustedDevice()) {
       await router.push("/vault");
@@ -93,6 +96,19 @@ async function submit() {
               toggle-mask
             />
           </div>
+          <label class="trusted-device-option" for="login-remember-device">
+            <input
+              id="login-remember-device"
+              v-model="rememberDevice"
+              type="checkbox"
+              aria-describedby="login-remember-hint"
+            />
+            <span>Se souvenir de cet appareil</span>
+          </label>
+          <p id="login-remember-hint" class="form-hint">
+            Saute la saisie du mot de passe de compte sur cet appareil. La
+            phrase du coffre reste exigée.
+          </p>
           <Button label="Se connecter" type="submit" />
         </form>
         <p v-if="error" role="alert">

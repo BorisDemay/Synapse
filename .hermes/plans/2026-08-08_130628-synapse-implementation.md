@@ -18,6 +18,13 @@
 > produit. Les modèles Markdown ordinaires restent pris en charge, sans
 > préférence ni commande de création quotidienne.
 
+> Amendement du 2026-08-25 — ADR 0013 : le desktop réplique le Markdown
+> déchiffré dans un dossier local (filet hors-ligne) tout en gardant le client
+> Vue/IndexedDB et la file d’ops chiffrée. Quand le serveur est joignable, un
+> pull précède le push ; retry d’appareil toutes les X secondes (défaut 10).
+> Le dialogue de dossier local n’apparaît que sur Tauri à la première création
+> de coffre. Le navigateur reste sur le cache IndexedDB, sans dossier OS.
+
 ---
 
 ## 1. Périmètre, hypothèses et critères de sortie
@@ -764,7 +771,7 @@ git commit -m "feat(server): add axum service and postgres schema"
 
 **Step 2: TDD création de compte** : email normalisé, mot de passe minimal, doublon générique sans fuite d’information, invitation valide obligatoire par défaut, et création de l’administrateur initial seulement via variable d’environnement consommée après initialisation. Ajouter `SYNAPSE_ALLOW_PUBLIC_SIGNUP=false` comme défaut explicite.
 
-**Step 3: TDD connexion** : cookie opaque `HttpOnly; Secure; SameSite=Strict`, hash de session côté base, rotation après authentification. Le mot de passe d’authentification reste distinct des secrets de wrapping E2EE : le serveur ne reçoit jamais la clé de coffre ni une phrase secrète de déchiffrement.
+**Step 3: TDD connexion** : cookie opaque `HttpOnly; Secure; SameSite=Strict`, hash de session côté base, rotation après authentification. Le mot de passe d’authentification reste distinct des secrets de wrapping E2EE : le serveur ne reçoit jamais la clé de coffre ni une phrase secrète de déchiffrement. Option `remember_device` : session de 30 jours (ADR 0014), distincte du déverrouillage coffre (ADR 0006).
 
 **Step 4: TDD révocation et expiration** avec horloge injectée.
 
