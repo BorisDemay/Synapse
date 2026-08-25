@@ -30,7 +30,7 @@ async function mountVault(): Promise<{
   });
   vault.preferences = {
     pinnedNoteIds: [noteId],
-    recentNoteIds: [],
+    recentNoteIds: [noteId],
     restorePoints: [],
     savedSearches: [savedSearch],
     templatesPath: "Templates",
@@ -112,5 +112,41 @@ describe("VaultView saved navigation", () => {
     expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
       "# Note épinglée",
     );
+  });
+
+  it("renders recent notes as sidebar nav items", async () => {
+    const { wrapper } = await mountVault();
+    const recent = wrapper.get('[aria-label="Notes récentes"] button');
+
+    expect(recent.classes()).toContain("sidebar-nav-item");
+    expect(recent.text()).toContain("Note épinglée");
+  });
+});
+
+describe("VaultView folder import action", () => {
+  it("uses the same PrimeVue sidebar button as the other vault actions", async () => {
+    const { wrapper } = await mountVault();
+    const folder = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Importer un dossier"));
+
+    expect(folder).toBeTruthy();
+    expect(folder!.classes()).toContain("new-note-button");
+    expect(folder!.attributes("data-pc-name")).toBe("button");
+  });
+
+  it("opens the directory picker from the folder import action", async () => {
+    const { wrapper } = await mountVault();
+    const picker = wrapper.get("input[webkitdirectory]")
+      .element as HTMLInputElement;
+    const click = vi.spyOn(picker, "click").mockImplementation(() => {});
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Importer un dossier"))!
+      .trigger("click");
+
+    expect(click).toHaveBeenCalledOnce();
+    click.mockRestore();
   });
 });

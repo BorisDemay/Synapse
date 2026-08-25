@@ -17,6 +17,28 @@ pub fn is_production() -> bool {
     )
 }
 
+pub fn expand_allowed_origins(primary: &str) -> Vec<String> {
+    let mut origins = vec![primary.to_owned()];
+    if let Some(alias) = localhost_loopback_alias(primary) {
+        origins.push(alias);
+    }
+    origins
+}
+
+pub fn origin_allowed(allowed_origins: &[String], origin: &str) -> bool {
+    allowed_origins.iter().any(|allowed| allowed == origin)
+}
+
+fn localhost_loopback_alias(origin: &str) -> Option<String> {
+    if let Some(port) = origin.strip_prefix("http://localhost:") {
+        return Some(format!("http://127.0.0.1:{port}"));
+    }
+    if let Some(port) = origin.strip_prefix("http://127.0.0.1:") {
+        return Some(format!("http://localhost:{port}"));
+    }
+    None
+}
+
 pub async fn layer(State(state): State<AppState>, request: Request, next: Next) -> Response {
     if request.method() == Method::OPTIONS {
         return cors_preflight(&state, &request);
@@ -88,7 +110,7 @@ fn apply_security_headers(state: &AppState, headers: &mut axum::http::HeaderMap)
 }
 
 fn apply_cors_if_allowed(state: &AppState, origin: &str, headers: &mut axum::http::HeaderMap) {
-    if origin == state.csrf_origin
+    if origin_allowed(&state.allowed_origins, origin)
         && let Ok(value) = HeaderValue::from_str(origin)
     {
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);

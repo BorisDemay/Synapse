@@ -55,7 +55,7 @@ pub struct AppState {
     pub(crate) blob_store: Option<Arc<dyn blob::BlobStore>>,
     pub(crate) allow_public_signup: bool,
     pub(crate) cookie_secure: bool,
-    pub(crate) csrf_origin: String,
+    pub(crate) allowed_origins: Arc<[String]>,
     pub(crate) enable_hsts: bool,
     pub(crate) clock: Arc<dyn auth::session::Clock>,
     pub(crate) mailer: Arc<dyn auth::mail::Mailer>,
@@ -125,12 +125,15 @@ pub struct RouterSettings {
 }
 
 pub fn router_with_settings(settings: RouterSettings) -> Router {
+    let allowed_origins = Arc::from(
+        http::security::expand_allowed_origins(&settings.csrf_origin).into_boxed_slice(),
+    );
     let state = AppState {
         pool: settings.pool,
         blob_store: settings.blob_store,
         allow_public_signup: settings.allow_public_signup,
         cookie_secure: settings.cookie_secure,
-        csrf_origin: settings.csrf_origin,
+        allowed_origins,
         enable_hsts: settings.enable_hsts,
         clock: settings.clock,
         mailer: settings.mailer,

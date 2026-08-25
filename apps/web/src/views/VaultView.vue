@@ -920,13 +920,14 @@ watch(settingsOpen, (open) => {
           webkitdirectory=""
           @change="previewImport"
         />
-        <button
-          class="import-folder-button"
+        <Button
+          class="new-note-button"
+          icon="pi pi-folder"
+          label="Importer un dossier"
+          outlined
           type="button"
           @click="requestFolderImport"
-        >
-          Importer un dossier
-        </button>
+        />
       </header>
       <div v-if="allTags.length" class="tag-filter" aria-label="Tags">
         <button
@@ -948,6 +949,7 @@ watch(settingsOpen, (open) => {
         <button
           v-for="property in propertySummary"
           :key="property.key"
+          class="sidebar-nav-item"
           type="button"
           @click="openLocalSearch(`property:${property.key}`)"
         >
@@ -963,7 +965,9 @@ watch(settingsOpen, (open) => {
         <button
           v-for="note in pinnedNotes"
           :key="note.id"
+          class="sidebar-nav-item"
           type="button"
+          :data-active="selectedNoteId === note.id ? 'true' : undefined"
           @click="selectNote(note.id)"
         >
           {{ note.label }}
@@ -978,7 +982,9 @@ watch(settingsOpen, (open) => {
         <button
           v-for="note in recentNotes"
           :key="note.id"
+          class="sidebar-nav-item"
           type="button"
+          :data-active="selectedNoteId === note.id ? 'true' : undefined"
           @click="selectNote(note.id)"
         >
           {{ note.label }}
@@ -993,6 +999,7 @@ watch(settingsOpen, (open) => {
         <button
           v-for="search in vault.preferences.savedSearches"
           :key="search.id"
+          class="sidebar-nav-item"
           type="button"
           @click="openLocalSearch(search.query)"
         >
@@ -1493,6 +1500,48 @@ watch(settingsOpen, (open) => {
 .tag-filter button[data-active="true"] {
   color: var(--synapse-color-accent-strong);
   background: var(--synapse-color-surface-accent);
+}
+
+.property-browser,
+.pinned-notes,
+.recent-notes,
+.saved-searches {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.sidebar-nav-item {
+  display: block;
+  width: 100%;
+  min-height: 2.35rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+}
+
+.sidebar-nav-item:hover,
+.sidebar-nav-item:focus-visible {
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-muted);
+}
+
+.sidebar-nav-item[data-active="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  font-weight: 650;
+}
+
+.sidebar-nav-item small {
+  color: var(--synapse-color-text-muted);
+  font-weight: 600;
 }
 
 .sidebar-section-label {

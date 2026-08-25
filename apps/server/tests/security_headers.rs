@@ -110,3 +110,48 @@ async fn cors_allowlist_echoes_only_the_configured_origin() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn local_dev_ui_accepts_localhost_and_loopback_aliases() {
+    let allowed_localhost = test_router("http://localhost:5173", false)
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/v1/session")
+                .header(header::ORIGIN, "http://127.0.0.1:5173")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(allowed_localhost.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        allowed_localhost
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .unwrap(),
+        "http://127.0.0.1:5173"
+    );
+
+    let allowed_loopback = test_router("http://127.0.0.1:5173", false)
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/v1/session")
+                .header(header::ORIGIN, "http://localhost:5173")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(allowed_loopback.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        allowed_loopback
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .unwrap(),
+        "http://localhost:5173"
+    );
+}

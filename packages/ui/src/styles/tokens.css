@@ -43,6 +43,15 @@
   --synapse-shadow-md: 0 18px 50px rgb(0 0 0 / 30%);
 }
 
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 17rem minmax(0, 1fr);

@@ -24,13 +24,13 @@ db:
 # JSON API only — pair with `just web`, or use `just dev` for both.
 serve: db
     @echo "API  http://${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}"
-    @echo "UI   http://localhost:5173"
+    @echo "UI   http://127.0.0.1:5173"
     mkdir -p synapse-blobs synapse-mail
     SYNAPSE_BIND_ADDR="${SYNAPSE_BIND_ADDR:-127.0.0.1:3000}" \
     SYNAPSE_DATABASE_URL="${SYNAPSE_DATABASE_URL:-postgres://postgres@127.0.0.1:55432/synapse_dev}" \
     SYNAPSE_STORAGE_PATH="${SYNAPSE_STORAGE_PATH:-$PWD/synapse-blobs}" \
     SYNAPSE_MAIL_DIRECTORY="${SYNAPSE_MAIL_DIRECTORY:-$PWD/synapse-mail}" \
-    SYNAPSE_ALLOWED_ORIGIN="${SYNAPSE_ALLOWED_ORIGIN:-http://localhost:5173}" \
+    SYNAPSE_ALLOWED_ORIGIN="${SYNAPSE_ALLOWED_ORIGIN:-http://127.0.0.1:5173}" \
     SYNAPSE_ALLOW_PUBLIC_SIGNUP="${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}" \
     SYNAPSE_COOKIE_SECURE="${SYNAPSE_COOKIE_SECURE:-false}" \
     SYNAPSE_ENV="${SYNAPSE_ENV:-development}" \

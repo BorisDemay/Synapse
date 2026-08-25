@@ -102,11 +102,11 @@ fn opaque_hash(value: &str) -> Vec<u8> {
     Sha256::digest(value.as_bytes()).to_vec()
 }
 
-fn csrf_origin_allowed(headers: &HeaderMap, csrf_origin: &str) -> bool {
+fn csrf_origin_allowed(headers: &HeaderMap, allowed_origins: &[String]) -> bool {
     headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
-        == Some(csrf_origin)
+        .is_some_and(|origin| crate::http::security::origin_allowed(allowed_origins, origin))
 }
 
 fn authenticated_user<'a>(
@@ -285,7 +285,7 @@ pub async fn login(
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> StatusCode {
-    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+    if !csrf_origin_allowed(&headers, &state.allowed_origins) {
         return StatusCode::FORBIDDEN;
     }
     let (pool, token) = match authenticated_user(&headers, &state) {
@@ -354,7 +354,7 @@ pub async fn change_password(
     headers: HeaderMap,
     Json(request): Json<ChangePasswordRequest>,
 ) -> StatusCode {
-    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+    if !csrf_origin_allowed(&headers, &state.allowed_origins) {
         return StatusCode::FORBIDDEN;
     }
     let (pool, token) = match authenticated_user(&headers, &state) {
@@ -405,7 +405,7 @@ pub async fn revoke_other_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> StatusCode {
-    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+    if !csrf_origin_allowed(&headers, &state.allowed_origins) {
         return StatusCode::FORBIDDEN;
     }
     let (pool, token) = match authenticated_user(&headers, &state) {
@@ -428,7 +428,7 @@ pub async fn revoke_session(
     headers: HeaderMap,
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> StatusCode {
-    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+    if !csrf_origin_allowed(&headers, &state.allowed_origins) {
         return StatusCode::FORBIDDEN;
     }
     let Ok(session_id) = Uuid::parse_str(&session_id) else {
@@ -455,7 +455,7 @@ pub async fn delete_account(
     headers: HeaderMap,
     Json(request): Json<DeleteAccountRequest>,
 ) -> StatusCode {
-    if !csrf_origin_allowed(&headers, &state.csrf_origin) {
+    if !csrf_origin_allowed(&headers, &state.allowed_origins) {
         return StatusCode::FORBIDDEN;
     }
     let (pool, token) = match authenticated_user(&headers, &state) {
