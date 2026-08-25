@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use synapse_core::{VaultAssetPath, VaultId, VaultPath, VaultService};
+use synapse_core::{
+    ContentHash, VaultAssetPath, VaultError, VaultId, VaultPath, VaultService,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -20,6 +22,7 @@ impl FolderEntry {
 }
 
 pub struct LocalFolderMirror {
+    root: PathBuf,
     vault: VaultService,
     written: BTreeSet<String>,
 }
@@ -33,7 +36,11 @@ impl LocalFolderMirror {
         let vault = VaultService::open(root)
             .await
             .map_err(|_| "local folder is unavailable")?;
+        let root = tokio::fs::canonicalize(root)
+            .await
+            .map_err(|_| "local folder is unavailable")?;
         Ok(Self {
+            root,
             vault,
             written: BTreeSet::new(),
         })
@@ -48,7 +55,7 @@ impl LocalFolderMirror {
     }
 
     pub fn root(&self) -> PathBuf {
-        self.vault.root().to_path_buf()
+        self.root.clone()
     }
 
     pub async fn apply(&mut self, entries: &[FolderEntry]) -> Result<(), String> {
@@ -77,18 +84,48 @@ impl LocalFolderMirror {
         match entry {
             FolderEntry::Note { path, markdown } => {
                 let parsed = VaultPath::parse(path).map_err(|_| "invalid vault path")?;
-                self.vault
-                    .upsert_note(&parsed, markdown)
-                    .await
-                    .map_err(|_| "local folder write failed")?;
+                match self.vault.create_note(&parsed, markdown).await {
+                    Ok(()) => {}
+                    Err(VaultError::AlreadyExists) => {
+                        let existing = self
+                            .vault
+                            .read_note(&parsed)
+                            .await
+                            .map_err(|_| "local folder write failed")?;
+                        self.vault
+                            .replace_note_if_unchanged(
+                                &parsed,
+                                &ContentHash::from_bytes(existing.as_bytes()),
+                                markdown,
+                            )
+                            .await
+                            .map_err(|_| "local folder write failed")?;
+                    }
+                    Err(_) => return Err("local folder write failed".into()),
+                }
                 self.written.insert(parsed.as_str().to_owned());
             }
             FolderEntry::Attachment { path, bytes } => {
                 let parsed = VaultAssetPath::parse(path).map_err(|_| "invalid vault path")?;
-                self.vault
-                    .upsert_attachment(&parsed, bytes)
-                    .await
-                    .map_err(|_| "local folder write failed")?;
+                match self.vault.create_attachment(&parsed, bytes).await {
+                    Ok(()) => {}
+                    Err(VaultError::AlreadyExists) => {
+                        let existing = self
+                            .vault
+                            .read_attachment(&parsed)
+                            .await
+                            .map_err(|_| "local folder write failed")?;
+                        self.vault
+                            .replace_attachment_if_unchanged(
+                                &parsed,
+                                &ContentHash::from_bytes(&existing),
+                                bytes,
+                            )
+                            .await
+                            .map_err(|_| "local folder write failed")?;
+                    }
+                    Err(_) => return Err("local folder write failed".into()),
+                }
                 self.written.insert(parsed.as_str().to_owned());
             }
         }
