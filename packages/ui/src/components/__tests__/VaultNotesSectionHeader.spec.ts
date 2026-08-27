@@ -29,7 +29,7 @@ describe("VaultNotesSectionHeader", () => {
 
     expect(wrapper.find(".vault-notes-section-title").exists()).toBe(true);
     expect(wrapper.find(".vault-notes-section-title").text()).toBe("Notes");
-    expect(wrapper.get('[aria-label="Nouvelle note"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="Nouvelle note"]').exists()).toBe(true);
   });
 
   it("hides the Notes title in collapsed mini-rail mode", () => {
@@ -38,7 +38,9 @@ describe("VaultNotesSectionHeader", () => {
     });
 
     expect(wrapper.find(".vault-notes-section-title").exists()).toBe(false);
-    expect(wrapper.classes()).toContain("vault-notes-section-header--collapsed");
-    expect(wrapper.get('[aria-label="Nouvelle note"]').exists()).toBe(true);
+    expect(wrapper.classes()).toContain(
+      "vault-notes-section-header--collapsed",
+    );
+    expect(wrapper.find('[aria-label="Nouvelle note"]').exists()).toBe(true);
   });
 });

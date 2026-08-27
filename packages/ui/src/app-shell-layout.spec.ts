@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ref } from "vue";
 
 import {
   COMPACT_ASSISTANT_MEDIA_QUERY,
@@ -30,7 +31,10 @@ function mockMatchMedia(matches: boolean) {
       }
     },
   };
-  vi.stubGlobal("matchMedia", vi.fn(() => mql));
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => mql),
+  );
   return mql;
 }
 
@@ -78,8 +82,8 @@ describe("app-shell-layout", () => {
   it("collapses side panels when entering compact viewport", () => {
     const mql = mockMatchMedia(false);
     const layout = useCompactAssistantLayout();
-    const historyOpen = { value: true };
-    const relationsOpen = { value: true };
+    const historyOpen = ref(true);
+    const relationsOpen = ref(true);
 
     layout.bindSidePanels({
       historyOpen,

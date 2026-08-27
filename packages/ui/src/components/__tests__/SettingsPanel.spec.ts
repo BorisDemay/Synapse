@@ -72,7 +72,7 @@ describe("SettingsPanel", () => {
     const panel = wrapper.get(".settings-panel");
     expect(panel.classes()).toContain("settings-panel-wide");
     expect(
-      wrapper.get('[aria-label="Catégories de paramètres"]').exists(),
+      wrapper.find('[aria-label="Catégories de paramètres"]').exists(),
     ).toBe(true);
   });
 
@@ -113,7 +113,7 @@ describe("SettingsPanel", () => {
     );
 
     await selectCategory(wrapper, "Appareil");
-    expect(wrapper.get('[aria-label="Oublier cet appareil"]').exists()).toBe(
+    expect(wrapper.find('[aria-label="Oublier cet appareil"]').exists()).toBe(
       true,
     );
   });
