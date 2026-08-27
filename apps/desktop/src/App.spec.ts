@@ -53,7 +53,7 @@ describe("VaultView", () => {
       },
     });
 
-    await wrapper.get(".new-note-button").trigger("click");
+    await wrapper.get('[aria-label="Nouvelle note"]').trigger("click");
     const editor = wrapper.get("textarea");
     await editor.setValue("# Inbox");
     await editor.trigger("change");
