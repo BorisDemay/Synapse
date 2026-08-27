@@ -145,9 +145,7 @@ pub async fn write_envelope(
     if !headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|origin| {
-            crate::http::security::origin_allowed(&state.allowed_origins, origin)
-        })
+        .is_some_and(|origin| crate::http::security::origin_allowed(&state.allowed_origins, origin))
     {
         return StatusCode::FORBIDDEN;
     }

@@ -125,9 +125,8 @@ pub struct RouterSettings {
 }
 
 pub fn router_with_settings(settings: RouterSettings) -> Router {
-    let allowed_origins = Arc::from(
-        http::security::expand_allowed_origins(&settings.csrf_origin).into_boxed_slice(),
-    );
+    let allowed_origins =
+        Arc::from(http::security::expand_allowed_origins(&settings.csrf_origin).into_boxed_slice());
     let state = AppState {
         pool: settings.pool,
         blob_store: settings.blob_store,
