@@ -207,7 +207,7 @@ onBeforeUnmount(() => {
             role="menuitem"
             type="button"
             :aria-checked="
-              item.checked === undefined ? undefined : String(item.checked)
+              item.checked === undefined ? undefined : item.checked
             "
             @click="selectCommand(item.id)"
             @pointerenter="activeIndex = commandIndex(item.id)"
