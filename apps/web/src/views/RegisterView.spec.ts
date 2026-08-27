@@ -52,12 +52,23 @@ describe("RegisterView", () => {
         getItem: () => null,
         setItem: () => undefined,
       },
-      matchMedia: () => ({ matches: false }),
+      matchMedia: () => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
     });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("provides MediaQueryList listeners required by the mounted theme toggle", () => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    expect(mediaQuery.addEventListener).toBeTypeOf("function");
+    expect(mediaQuery.removeEventListener).toBeTypeOf("function");
   });
 
   it("hides the form when public signup is closed", async () => {
