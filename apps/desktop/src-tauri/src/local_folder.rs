@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use synapse_core::{
@@ -30,9 +30,7 @@ pub struct LocalFolderMirror {
 impl LocalFolderMirror {
     pub async fn open(root: impl AsRef<Path>) -> Result<Self, String> {
         let root = root.as_ref();
-        tokio::fs::create_dir_all(root)
-            .await
-            .map_err(|_| "local folder is unavailable")?;
+        ensure_root_directory(root).await?;
         let vault = VaultService::open(root)
             .await
             .map_err(|_| "local folder is unavailable")?;
@@ -134,15 +132,48 @@ impl LocalFolderMirror {
 
     async fn delete(&self, path: &str) -> Result<(), String> {
         if let Ok(note) = VaultPath::parse(path) {
-            let _ = self.vault.delete_note(&note).await;
-            return Ok(());
+            return self
+                .vault
+                .delete_note(&note)
+                .await
+                .map_err(|_| "local folder write failed".into());
         }
         if let Ok(attachment) = VaultAssetPath::parse(path) {
-            let _ = self.vault.delete_attachment(&attachment).await;
-            return Ok(());
+            return self
+                .vault
+                .delete_attachment(&attachment)
+                .await
+                .map_err(|_| "local folder write failed".into());
         }
         Err("invalid vault path".into())
     }
+}
+
+async fn ensure_root_directory(root: &Path) -> Result<(), String> {
+    let mut directory = PathBuf::new();
+
+    for component in root.components() {
+        match component {
+            Component::CurDir => continue,
+            Component::ParentDir => return Err("local folder is unavailable".into()),
+            _ => directory.push(component.as_os_str()),
+        }
+
+        match tokio::fs::symlink_metadata(&directory).await {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err("local folder is unavailable".into());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tokio::fs::create_dir(&directory)
+                    .await
+                    .map_err(|_| "local folder is unavailable")?;
+            }
+            Err(_) => return Err("local folder is unavailable".into()),
+        }
+    }
+
+    Ok(())
 }
 
 pub fn default_folder_path(documents_or_data: &Path, vault_id: &str) -> Result<PathBuf, String> {

@@ -3,6 +3,47 @@ use tempfile::tempdir;
 
 use synapse_desktop::local_folder::{FolderEntry, LocalFolderMirror};
 
+#[cfg(unix)]
+#[tokio::test]
+async fn mirror_rejects_a_symlinked_root() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("tempdir");
+    let linked_root = directory.path().join("linked-root");
+    let target = tempdir().expect("target tempdir");
+    symlink(target.path(), &linked_root).expect("symlink");
+
+    let error = match LocalFolderMirror::open(&linked_root).await {
+        Err(error) => error,
+        Ok(_) => panic!("symlinked root is accepted"),
+    };
+
+    assert_eq!(error, "local folder is unavailable");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mirror_rejects_a_root_with_a_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("tempdir");
+    let target = tempdir().expect("target tempdir");
+    let linked_parent = directory.path().join("linked-parent");
+    symlink(target.path(), &linked_parent).expect("symlink");
+
+    let error = match LocalFolderMirror::open(linked_parent.join("nested")).await {
+        Err(error) => error,
+        Ok(_) => panic!("root with a symlinked parent is accepted"),
+    };
+
+    assert_eq!(error, "local folder is unavailable");
+    assert!(
+        !tokio::fs::try_exists(target.path().join("nested"))
+            .await
+            .expect("nested root lookup")
+    );
+}
+
 #[tokio::test]
 async fn mirror_upserts_markdown_inside_the_chosen_root() {
     let directory = tempdir().expect("tempdir");
@@ -54,6 +95,38 @@ async fn mirror_rejects_a_path_that_escapes_the_root() {
             .await
             .unwrap_or(true)
             || VaultPath::parse("../escape.md").is_err()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mirror_refuses_to_remove_a_written_file_through_an_outgoing_symlinked_parent() {
+    use std::collections::BTreeSet;
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    let outside_note = outside.path().join("outside.md");
+    tokio::fs::write(&outside_note, "# Outside")
+        .await
+        .expect("outside note");
+    symlink(outside.path(), directory.path().join("notes")).expect("parent symlink");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror.set_written(BTreeSet::from(["notes/outside.md".to_owned()]));
+
+    let error = mirror
+        .replace_snapshot(&[])
+        .await
+        .expect_err("symlinked parent is rejected");
+
+    assert_eq!(error, "local folder write failed");
+    assert_eq!(
+        tokio::fs::read_to_string(outside_note)
+            .await
+            .expect("outside note remains"),
+        "# Outside"
     );
 }
 

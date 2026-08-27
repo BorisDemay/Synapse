@@ -126,6 +126,49 @@ async fn create_note_rejects_a_final_symlink_that_points_outside_the_vault() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn vault_operations_reject_a_final_symlink_even_when_its_target_is_inside_the_vault() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().unwrap();
+    let vault = VaultService::open(directory.path()).await.unwrap();
+    let target = VaultPath::parse("notes/target.md").unwrap();
+    let linked = VaultPath::parse("notes/linked.md").unwrap();
+    vault.create_note(&target, "# Inside").await.unwrap();
+    symlink(
+        directory.path().join("notes/target.md"),
+        directory.path().join("notes/linked.md"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        vault
+            .create_note(&linked, "# Unsafe")
+            .await
+            .unwrap_err()
+            .to_string(),
+        "vault path escapes the vault root"
+    );
+    assert_eq!(
+        vault
+            .replace_note_if_unchanged(&linked, &ContentHash::from_bytes(b"# Inside"), "# Unsafe")
+            .await
+            .unwrap_err()
+            .to_string(),
+        "vault path escapes the vault root"
+    );
+    assert_eq!(
+        vault.read_note(&linked).await.unwrap_err().to_string(),
+        "vault path escapes the vault root"
+    );
+    assert_eq!(
+        vault.delete_note(&linked).await.unwrap_err().to_string(),
+        "vault path escapes the vault root"
+    );
+    assert_eq!(vault.read_note(&target).await.unwrap(), "# Inside");
+}
+
 #[tokio::test]
 async fn replace_note_rejects_content_changed_since_the_caller_read_it() {
     let directory = tempdir().unwrap();

@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::{ContentHash, VaultAssetPath, VaultPath, fs};
 
@@ -42,18 +42,30 @@ pub type VaultResult<T> = Result<T, VaultError>;
 
 impl VaultService {
     pub async fn open(root: impl AsRef<Path>) -> VaultResult<Self> {
-        let root = tokio::fs::canonicalize(root)
-            .await
-            .map_err(VaultError::Io)?;
-        if !tokio::fs::metadata(&root)
-            .await
-            .map_err(VaultError::Io)?
-            .is_dir()
-        {
-            return Err(VaultError::InvalidRoot);
+        let root = root.as_ref();
+        let root = if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            std::env::current_dir().map_err(VaultError::Io)?.join(root)
+        };
+        let mut directory = PathBuf::new();
+
+        for component in root.components() {
+            match component {
+                Component::CurDir => continue,
+                Component::ParentDir => return Err(VaultError::InvalidRoot),
+                _ => directory.push(component.as_os_str()),
+            }
+
+            let metadata = tokio::fs::symlink_metadata(&directory)
+                .await
+                .map_err(VaultError::Io)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(VaultError::InvalidRoot);
+            }
         }
 
-        Ok(Self { root })
+        Ok(Self { root: directory })
     }
 
     pub async fn create_note(&self, path: &VaultPath, content: &str) -> VaultResult<()> {

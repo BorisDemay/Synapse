@@ -149,22 +149,27 @@ async fn move_existing_file(source: PathBuf, destination: PathBuf) -> VaultResul
 }
 
 async fn resolve_existing_file(root: &Path, relative_path: &str) -> VaultResult<PathBuf> {
-    let path = root.join(relative_path);
-    let canonical = tokio::fs::canonicalize(path)
-        .await
-        .map_err(VaultError::Io)?;
-    if !canonical.starts_with(root) {
-        return Err(VaultError::PathEscapesVault);
+    let mut path = root.to_path_buf();
+    let mut components = relative_path.split('/').peekable();
+
+    while let Some(component) = components.next() {
+        path.push(component);
+        let metadata = tokio::fs::symlink_metadata(&path)
+            .await
+            .map_err(VaultError::Io)?;
+        if metadata.file_type().is_symlink() {
+            return Err(VaultError::PathEscapesVault);
+        }
+        if components.peek().is_some() {
+            if !metadata.is_dir() {
+                return Err(VaultError::PathEscapesVault);
+            }
+        } else if !metadata.is_file() {
+            return Err(VaultError::NotAFile);
+        }
     }
 
-    let metadata = tokio::fs::metadata(&canonical)
-        .await
-        .map_err(VaultError::Io)?;
-    if !metadata.is_file() {
-        return Err(VaultError::NotAFile);
-    }
-
-    Ok(canonical)
+    Ok(path)
 }
 
 async fn prepare_destination(root: &Path, relative_path: &str) -> VaultResult<PathBuf> {
