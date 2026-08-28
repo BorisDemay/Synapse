@@ -60,7 +60,11 @@ const compactToggleLabel = computed(() =>
         />
       </svg>
     </IconActionButton>
-    <IconActionButton v-if="showImport" label="importer une note" @click="emit('import')">
+    <IconActionButton
+      v-if="showImport"
+      label="importer une note"
+      @click="emit('import')"
+    >
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
           fill="currentColor"

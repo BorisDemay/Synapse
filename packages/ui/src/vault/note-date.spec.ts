@@ -23,7 +23,10 @@ describe("noteUpdatedAt", () => {
 
   it("retombe sur le front matter updated puis l'UUID v7", () => {
     expect(
-      noteUpdatedAt("018f8e62-0000-7000-8000-000000000000", "---\nupdated: 2025-06-01\n---\n"),
+      noteUpdatedAt(
+        "018f8e62-0000-7000-8000-000000000000",
+        "---\nupdated: 2025-06-01\n---\n",
+      ),
     ).toBe(Date.parse("2025-06-01"));
     expect(noteUpdatedAt("note-path", "# Sans date")).toBe(0);
   });

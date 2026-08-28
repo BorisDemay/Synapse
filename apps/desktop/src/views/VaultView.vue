@@ -620,7 +620,10 @@ watch(settingsOpen, (open) => {
           </div>
           <ThemeToggle />
         </div>
-        <div v-if="!sidebar.collapsed.value && !sidebar.compact.value" class="vault-heading">
+        <div
+          v-if="!sidebar.collapsed.value && !sidebar.compact.value"
+          class="vault-heading"
+        >
           <div>
             <span class="eyebrow">ESPACE PRIVÉ</span>
             <h1>{{ vault.vaultName || "Coffre local" }}</h1>
@@ -631,10 +634,7 @@ watch(settingsOpen, (open) => {
           </span>
         </div>
         <div class="vault-toolbar-row">
-          <IconActionButton
-            label="Ouvrir un coffre"
-            @click="vault.openVault()"
-          >
+          <IconActionButton label="Ouvrir un coffre" @click="vault.openVault()">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
                 fill="currentColor"
@@ -668,7 +668,11 @@ watch(settingsOpen, (open) => {
           />
         </div>
       </header>
-      <div v-if="!sidebar.collapsed.value && allTags.length" class="tag-filter" aria-label="Tags">
+      <div
+        v-if="!sidebar.collapsed.value && allTags.length"
+        class="tag-filter"
+        aria-label="Tags"
+      >
         <button
           v-for="tag in allTags"
           :key="tag"
@@ -730,7 +734,9 @@ watch(settingsOpen, (open) => {
     <section class="vault-workspace" aria-label="Édition de note">
       <header class="workspace-header">
         <div>
-          <span v-if="!sidebar.compact.value" class="eyebrow">ÉDITION MARKDOWN</span>
+          <span v-if="!sidebar.compact.value" class="eyebrow"
+            >ÉDITION MARKDOWN</span
+          >
         </div>
         <div class="workspace-meta">
           <span v-if="vault.isUnlocked" class="online-label"

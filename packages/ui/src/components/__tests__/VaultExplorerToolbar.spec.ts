@@ -23,9 +23,9 @@ describe("VaultExplorerToolbar", () => {
       wrapper.get('[aria-label="importer une vault"]').attributes("title"),
     ).toBe("importer une vault");
     expect(
-      wrapper.get('[aria-label="Masquer la barre latérale"]').attributes(
-        "title",
-      ),
+      wrapper
+        .get('[aria-label="Masquer la barre latérale"]')
+        .attributes("title"),
     ).toBe("Masquer la barre latérale");
   });
 
@@ -39,9 +39,9 @@ describe("VaultExplorerToolbar", () => {
     });
 
     await wrapper.get('[aria-label="importer une note"]').trigger("click");
-    await wrapper.get('[aria-label="Masquer la barre latérale"]').trigger(
-      "click",
-    );
+    await wrapper
+      .get('[aria-label="Masquer la barre latérale"]')
+      .trigger("click");
 
     expect(wrapper.emitted("import")).toHaveLength(1);
     expect(wrapper.emitted("toggle-sidebar")).toHaveLength(1);
@@ -59,7 +59,9 @@ describe("VaultExplorerToolbar", () => {
 
     expect(wrapper.classes()).toContain("vault-explorer-toolbar--collapsed");
     expect(
-      wrapper.get('[aria-label="Afficher la barre latérale"]').attributes("title"),
+      wrapper
+        .get('[aria-label="Afficher la barre latérale"]')
+        .attributes("title"),
     ).toBe("Afficher la barre latérale");
   });
 });

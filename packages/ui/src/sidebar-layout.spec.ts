@@ -1,9 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 
-import {
-  resetSidebarLayoutState,
-  useSidebarLayout,
-} from "./sidebar-layout";
+import { resetSidebarLayoutState, useSidebarLayout } from "./sidebar-layout";
 
 describe("useSidebarLayout", () => {
   beforeEach(() => {

@@ -898,7 +898,10 @@ watch(settingsOpen, (open) => {
           </div>
           <ThemeToggle />
         </div>
-        <div v-if="!sidebar.collapsed.value && !sidebar.compact.value" class="vault-heading">
+        <div
+          v-if="!sidebar.collapsed.value && !sidebar.compact.value"
+          class="vault-heading"
+        >
           <div>
             <span class="eyebrow">ESPACE PRIVÉ</span>
             <h1>Coffre</h1>
@@ -936,7 +939,11 @@ watch(settingsOpen, (open) => {
           @change="previewImport"
         />
       </header>
-      <div v-if="!sidebar.collapsed.value && allTags.length" class="tag-filter" aria-label="Tags">
+      <div
+        v-if="!sidebar.collapsed.value && allTags.length"
+        class="tag-filter"
+        aria-label="Tags"
+      >
         <button
           v-for="tag in allTags"
           :key="tag"
@@ -952,7 +959,9 @@ watch(settingsOpen, (open) => {
         class="property-browser"
         aria-label="Propriétés"
       >
-        <div class="sidebar-section-label" v-if="!sidebar.compact.value">PROPRIÉTÉS</div>
+        <div class="sidebar-section-label" v-if="!sidebar.compact.value">
+          PROPRIÉTÉS
+        </div>
         <button
           v-for="property in propertySummary"
           :key="property.key"
@@ -968,7 +977,9 @@ watch(settingsOpen, (open) => {
         class="pinned-notes"
         aria-label="Notes épinglées"
       >
-        <div class="sidebar-section-label" v-if="!sidebar.compact.value">ÉPINGLÉES</div>
+        <div class="sidebar-section-label" v-if="!sidebar.compact.value">
+          ÉPINGLÉES
+        </div>
         <button
           v-for="note in pinnedNotes"
           :key="note.id"
@@ -981,11 +992,15 @@ watch(settingsOpen, (open) => {
         </button>
       </section>
       <section
-        v-if="!sidebar.collapsed.value && vault.preferences.savedSearches.length"
+        v-if="
+          !sidebar.collapsed.value && vault.preferences.savedSearches.length
+        "
         class="saved-searches"
         aria-label="Recherches sauvegardées"
       >
-        <div class="sidebar-section-label" v-if="!sidebar.compact.value">RECHERCHES</div>
+        <div class="sidebar-section-label" v-if="!sidebar.compact.value">
+          RECHERCHES
+        </div>
         <button
           v-for="search in vault.preferences.savedSearches"
           :key="search.id"
@@ -1045,7 +1060,9 @@ watch(settingsOpen, (open) => {
     <section class="vault-workspace" aria-label="Édition de note">
       <header class="workspace-header">
         <div>
-          <span v-if="!sidebar.compact.value" class="eyebrow">ÉDITION MARKDOWN</span>
+          <span v-if="!sidebar.compact.value" class="eyebrow"
+            >ÉDITION MARKDOWN</span
+          >
         </div>
         <div class="workspace-meta">
           <span v-if="auth.isOfflineSession" class="offline-label"

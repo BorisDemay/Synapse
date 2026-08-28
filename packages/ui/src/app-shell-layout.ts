@@ -1,10 +1,4 @@
-import {
-  getCurrentInstance,
-  onMounted,
-  onUnmounted,
-  ref,
-  type Ref,
-} from "vue";
+import { getCurrentInstance, onMounted, onUnmounted, ref, type Ref } from "vue";
 
 export const COMPACT_ASSISTANT_MEDIA_QUERY = "(max-width: 75rem)";
 
@@ -32,7 +26,10 @@ function syncCompactState(matches: boolean) {
 }
 
 export function readCompactAssistantViewport(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+  if (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
     return false;
   }
   return window.matchMedia(COMPACT_ASSISTANT_MEDIA_QUERY).matches;
