@@ -4,7 +4,10 @@ import PrimeVue from "primevue/config";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 
-import { resetCompactAssistantLayoutState, resetSidebarLayoutState } from "@synapse/ui";
+import {
+  resetCompactAssistantLayoutState,
+  resetSidebarLayoutState,
+} from "@synapse/ui";
 import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 import VaultView from "./VaultView.vue";
@@ -31,9 +34,7 @@ beforeEach(() => {
   mockMatchMedia(false);
 });
 
-async function mountVault(options?: {
-  stubVaultTree?: boolean;
-}): Promise<{
+async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
   router: Router;
   vault: ReturnType<typeof useVaultStore>;
   wrapper: VueWrapper;
@@ -201,7 +202,9 @@ describe("VaultView sidebar layout", () => {
 
     expect(wrapper.find(".app-shell--sidebar-collapsed").exists()).toBe(false);
 
-    await wrapper.get('[aria-label="Masquer la barre latérale"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Masquer la barre latérale"]')
+      .trigger("click");
 
     expect(wrapper.find(".app-shell--sidebar-collapsed").exists()).toBe(true);
   });
@@ -209,29 +212,39 @@ describe("VaultView sidebar layout", () => {
   it("keeps a mini-rail of icons when the sidebar is collapsed", async () => {
     const { wrapper } = await mountVault();
 
-    await wrapper.get('[aria-label="Masquer la barre latérale"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Masquer la barre latérale"]')
+      .trigger("click");
 
-    expect(wrapper.get('[aria-label="Nouvelle note"]').exists()).toBe(true);
-    expect(wrapper.get('[aria-label="Créer depuis un modèle"]').exists()).toBe(
+    expect(wrapper.find('[aria-label="Nouvelle note"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="Créer depuis un modèle"]').exists()).toBe(
       true,
     );
-    expect(wrapper.get('[aria-label="importer une note"]').exists()).toBe(true);
-    expect(wrapper.get('[aria-label="importer une vault"]').exists()).toBe(true);
-    expect(wrapper.get('[aria-label="Afficher la barre latérale"]').exists()).toBe(
+    expect(wrapper.find('[aria-label="importer une note"]').exists()).toBe(
       true,
     );
-    expect(wrapper.get('[aria-label="Ouvrir les paramètres"]').exists()).toBe(
+    expect(wrapper.find('[aria-label="importer une vault"]').exists()).toBe(
       true,
     );
-    expect(wrapper.get('[aria-label="Se déconnecter"]').exists()).toBe(true);
+    expect(
+      wrapper.find('[aria-label="Afficher la barre latérale"]').exists(),
+    ).toBe(true);
+    expect(wrapper.find('[aria-label="Ouvrir les paramètres"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.find('[aria-label="Se déconnecter"]').exists()).toBe(true);
     expect(wrapper.find("vault-tree-stub").exists()).toBe(false);
   });
 
   it("restores the full sidebar from the expand icon", async () => {
     const { wrapper } = await mountVault();
 
-    await wrapper.get('[aria-label="Masquer la barre latérale"]').trigger("click");
-    await wrapper.get('[aria-label="Afficher la barre latérale"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Masquer la barre latérale"]')
+      .trigger("click");
+    await wrapper
+      .get('[aria-label="Afficher la barre latérale"]')
+      .trigger("click");
 
     expect(wrapper.find(".app-shell--sidebar-collapsed").exists()).toBe(false);
     expect(wrapper.find("vault-tree-stub").exists()).toBe(true);
@@ -257,7 +270,7 @@ describe("VaultView notes section", () => {
     const heading = wrapper.get(".vault-notes-section-header");
 
     expect(heading.text()).toContain("Notes");
-    expect(heading.get('[aria-label="Nouvelle note"]').exists()).toBe(true);
+    expect(heading.find('[aria-label="Nouvelle note"]').exists()).toBe(true);
   });
 
   it("does not expose new-note in the explorer toolbar", async () => {
