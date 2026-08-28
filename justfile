@@ -125,7 +125,8 @@ audit-rust:
 audit-js:
     pnpm audit --prod
 
-# Targeted Playwright smoke (API + Vite must be reachable; see docs/operations/ci.md).
+# Targeted Playwright smoke. Its Playwright global setup starts PostgreSQL, the
+# API and Vite with bounded readiness checks, then removes its temporary data.
 e2e-smoke:
     SYNAPSE_ALLOW_PUBLIC_SIGNUP="${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}" \
       SYNAPSE_COOKIE_SECURE="${SYNAPSE_COOKIE_SECURE:-false}" \

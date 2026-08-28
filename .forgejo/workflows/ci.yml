@@ -12,20 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_DB: synapse_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 55432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+
     env:
       SYNAPSE_DATABASE_URL: postgres://postgres@127.0.0.1:55432/synapse_test
       SYNAPSE_STORAGE_PATH: ${{ github.workspace }}/.ci-blobs
@@ -68,21 +55,8 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Start API for e2e
-        run: |
-          mkdir -p "$SYNAPSE_STORAGE_PATH"
-          cargo build -p synapse-server
-          ./target/debug/synapse-server > /tmp/synapse-ci-server.log 2>&1 &
-          echo $! > /tmp/synapse-ci-server.pid
-          for _ in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:3000/health/ready >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "API failed to become ready" >&2
-          cat /tmp/synapse-ci-server.log >&2 || true
-          exit 1
+      - name: Start test database
+        run: just db
 
       - name: just verify
         run: just verify
@@ -93,7 +67,6 @@ jobs:
         with:
           name: ci-failure-logs
           path: |
-            /tmp/synapse-ci-server.log
             playwright-report/
             test-results/
           if-no-files-found: ignore

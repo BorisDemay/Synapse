@@ -7,14 +7,16 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   timeout: 120_000,
+  globalSetup: "tests/e2e/global-setup.ts",
   use: {
     baseURL: "http://127.0.0.1:5173",
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm --filter @synapse/web dev --port 5173 --strictPort",
+    command:
+      "pnpm --filter @synapse/web dev --host 127.0.0.1 --port 5173 --strictPort",
     url: "http://127.0.0.1:5173",
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   projects: [
