@@ -5,6 +5,12 @@ import { join } from "node:path";
 test("registers, creates a vault, and saves an encrypted note", async ({
   page,
 }) => {
+  let attemptedRemoteMedia = 0;
+  await page.route("https://attacker.invalid/**", async (route) => {
+    attemptedRemoteMedia += 1;
+    await route.abort();
+  });
+
   const email = `e2e-${Date.now()}@example.test`;
   const password = "a secure password";
   const passphrase = "local unlock passphrase";
@@ -68,7 +74,16 @@ test("registers, creates a vault, and saves an encrypted note", async ({
   await page.keyboard.type("# hello from playwright\n\nRendered body");
   await expect(editor).toContainText("hello from playwright");
 
-  await expect(page.locator('[data-status="synced"]')).toHaveText("synced", {
-    timeout: 30_000,
-  });
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type(
+    "![image](https://attacker.invalid/private-markdown-media.png)",
+  );
+  await expect(editor.locator('img[alt="image"]')).toHaveCount(1);
+  await page.waitForTimeout(1_000);
+  expect(attemptedRemoteMedia).toBe(0);
+
+  await expect(page.locator('.sync-pill[data-status="synced"]')).toHaveText(
+    "synced",
+    { timeout: 30_000 },
+  );
 });
