@@ -17,6 +17,11 @@ bash infra/docker/healthcheck.sh http://127.0.0.1:8080
 Services démarrés : PostgreSQL, API Rust, UI web (nginx), Caddy. Les blobs
 chiffrés vivent dans le volume `blob_data` ; PostgreSQL dans `postgres_data`.
 
+Le chemin `SYNAPSE_RELEASES_PATH` est monté en lecture seule dans nginx et sert
+`/updates`. En production NAS, le définir à
+`/mnt/nas1/synapse/releases`. Le répertoire `stable/<version>` est immuable ;
+seuls `stable/latest.json` et `stable/web.json` sont remplacés atomiquement.
+
 Inscription publique locale : `SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` dans `.env`.
 En production, désactivez-la et utilisez des invitations / un admin bootstrap.
 

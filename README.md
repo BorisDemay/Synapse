@@ -134,6 +134,7 @@ Les frontières de responsabilité du monorepo sont consignées dans les ADR :
 - [ADR 0002 — Synchronisation par opérations et révisions](docs/adr/0002-sync-versioning.md)
 - [ADR 0011 — Le client web chiffré est canonique](docs/adr/0011-web-client-canonical.md)
 - [ADR 0014 — Session de compte mémorisée](docs/adr/0014-remembered-account-session.md)
+- [ADR 0015 — Mises à jour continues et signées](docs/adr/0015-continuous-signed-updates.md)
 - [ADR 0013 — Réplique dossier desktop et priorité serveur](docs/adr/0013-desktop-folder-replica-and-server-priority.md)
 - [ADR 0007 — Éditeur Markdown à rendu instantané](docs/adr/0007-vditor-instant-rendering-editor.md)
 - [ADR 0008 — Assistant Codex optionnel côté client](docs/adr/0008-client-side-codex-assistant.md)
@@ -264,6 +265,10 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
   l’utilisateur ; les notes liées vont alors vers OpenAI, jamais vers le
   serveur Synapse (ADR 0008). La CI ne valide pas d’appel live à Codex.
 - SBOM CycloneDX : `just sbom` écrit sous `target/sbom/` (non versionné).
+- Les builds web et desktop partagent un coordinateur de mise à jour. Le web
+  propose un rechargement explicite ; Windows/Linux téléchargent en arrière-plan
+  un paquet signé Tauri, puis proposent l’installation et le redémarrage. Le
+  premier binaire compatible updater doit être installé manuellement.
 
 ## Feuille de route
 
@@ -304,23 +309,23 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
 
 Le projet retient une stack **open source, auto-hébergeable et sans dépendance à un service payant**. Chaque composant de production doit pouvoir être exécuté sur l’infrastructure de l’utilisateur. Les éventuels services managés ne sont ni nécessaires, ni une dépendance du produit.
 
-| Couche | Technologies retenues | Licence / rôle |
-|---|---|---|
-| Client lourd | **Tauri 2**, **Rust**, **Vue 3**, TypeScript, Vite | Tauri (MIT/Apache-2.0), Vue (MIT) ; application native légère et sécurisée |
-| Interface web | **Vue 3**, TypeScript, Vite, Vue Router, Pinia | MIT ; SPA statique servie par le serveur ou un proxy inverse |
-| Design système | Tailwind CSS ou UnoCSS, composants Vue internes | MIT ; aucun kit UI propriétaire requis |
-| Éditeur Markdown | Vditor 3 en mode IR + prévisualisation markdown-it | MIT ; rendu instantané CommonMark/GFM, ressources embarquées localement |
-| Serveur | **Rust**, Axum, Tokio, Tower | MIT ; API HTTP et synchronisation temps réel à faible empreinte |
-| Contrats API | OpenAPI, JSON Schema, génération de clients TypeScript | Standards ouverts ; protocole versionné et documenté |
-| Temps réel | WebSocket sécurisé, opérations idempotentes, synchronisation delta | Standard ouvert ; protocole applicatif documenté |
-| Collaboration avancée | Automerge ou yrs/Yjs, uniquement si les benchmarks le justifient | MIT ; CRDT auto-hébergeable, sans service tiers |
-| Métadonnées | **PostgreSQL** | PostgreSQL License ; comptes, droits, index et historique de synchronisation |
-| Index local | **SQLite** + FTS5 ; Tantivy si une indexation Rust plus poussée est nécessaire | Domaine public / MIT ; recherche locale hors ligne |
-| Stockage de fichiers | Système de fichiers local par défaut ; **MinIO** pour le stockage objet S3-compatible distribué | AGPLv3 ; entièrement auto-hébergeable |
-| Proxy et TLS | **Caddy** | Apache-2.0 ; certificats TLS automatisés et reverse proxy |
-| Conteneurs | Docker Engine + Docker Compose | Déploiement reproductible ; possibilité Podman/Compose compatible |
-| Observabilité | OpenTelemetry, Prometheus, Grafana, Loki | Apache-2.0/AGPLv3 ; métriques, traces et logs locaux |
-| CI locale | Forgejo Actions ou Woodpecker CI | GPLv3/Apache-2.0 ; aucune plateforme SaaS obligatoire |
+| Couche                | Technologies retenues                                                                           | Licence / rôle                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Client lourd          | **Tauri 2**, **Rust**, **Vue 3**, TypeScript, Vite                                              | Tauri (MIT/Apache-2.0), Vue (MIT) ; application native légère et sécurisée   |
+| Interface web         | **Vue 3**, TypeScript, Vite, Vue Router, Pinia                                                  | MIT ; SPA statique servie par le serveur ou un proxy inverse                 |
+| Design système        | Tailwind CSS ou UnoCSS, composants Vue internes                                                 | MIT ; aucun kit UI propriétaire requis                                       |
+| Éditeur Markdown      | Vditor 3 en mode IR + prévisualisation markdown-it                                              | MIT ; rendu instantané CommonMark/GFM, ressources embarquées localement      |
+| Serveur               | **Rust**, Axum, Tokio, Tower                                                                    | MIT ; API HTTP et synchronisation temps réel à faible empreinte              |
+| Contrats API          | OpenAPI, JSON Schema, génération de clients TypeScript                                          | Standards ouverts ; protocole versionné et documenté                         |
+| Temps réel            | WebSocket sécurisé, opérations idempotentes, synchronisation delta                              | Standard ouvert ; protocole applicatif documenté                             |
+| Collaboration avancée | Automerge ou yrs/Yjs, uniquement si les benchmarks le justifient                                | MIT ; CRDT auto-hébergeable, sans service tiers                              |
+| Métadonnées           | **PostgreSQL**                                                                                  | PostgreSQL License ; comptes, droits, index et historique de synchronisation |
+| Index local           | **SQLite** + FTS5 ; Tantivy si une indexation Rust plus poussée est nécessaire                  | Domaine public / MIT ; recherche locale hors ligne                           |
+| Stockage de fichiers  | Système de fichiers local par défaut ; **MinIO** pour le stockage objet S3-compatible distribué | AGPLv3 ; entièrement auto-hébergeable                                        |
+| Proxy et TLS          | **Caddy**                                                                                       | Apache-2.0 ; certificats TLS automatisés et reverse proxy                    |
+| Conteneurs            | Docker Engine + Docker Compose                                                                  | Déploiement reproductible ; possibilité Podman/Compose compatible            |
+| Observabilité         | OpenTelemetry, Prometheus, Grafana, Loki                                                        | Apache-2.0/AGPLv3 ; métriques, traces et logs locaux                         |
+| CI locale             | Forgejo Actions ou Woodpecker CI                                                                | GPLv3/Apache-2.0 ; aucune plateforme SaaS obligatoire                        |
 
 ### Décisions d’architecture
 

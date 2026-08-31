@@ -121,6 +121,7 @@ lint:
 
 audit-rust:
     cargo deny check
+    cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml check
 
 audit-js:
     pnpm audit --prod

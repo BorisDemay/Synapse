@@ -3,6 +3,8 @@
 - Statut : accepté
 - Date : 2026-08-24
 
+> La décision de reporter l’auto-update est remplacée par l’ADR 0015.
+
 ## Contexte
 
 Les modèles, propriétés, recherches, graphe, import de

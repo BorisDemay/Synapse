@@ -1,15 +1,17 @@
 /// <reference lib="webworker" />
 
-const CACHE = "synapse-assets-v1";
+const CACHE = `synapse-assets-${import.meta.env.VITE_SYNAPSE_VERSION ?? "development"}-${import.meta.env.VITE_SYNAPSE_COMMIT_SHA ?? "local"}`;
 
 const worker = self as unknown as ServiceWorkerGlobalScope;
 
 function isPrivateApi(pathname: string): boolean {
   return (
+    pathname === "/build.json" ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/v1") ||
     pathname.startsWith("/vaults") ||
-    pathname.startsWith("/health")
+    pathname.startsWith("/health") ||
+    pathname.startsWith("/updates")
   );
 }
 
@@ -18,7 +20,20 @@ worker.addEventListener("install", (event) => {
 });
 
 worker.addEventListener("activate", (event) => {
-  event.waitUntil(worker.clients.claim());
+  event.waitUntil(
+    Promise.all([
+      worker.clients.claim(),
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key !== CACHE)
+              .map((key) => caches.delete(key)),
+          ),
+        ),
+    ]),
+  );
 });
 
 worker.addEventListener("fetch", (event) => {
@@ -44,9 +59,7 @@ worker.addEventListener("fetch", (event) => {
           return fresh;
         } catch {
           const fallback = await cache.match("/index.html");
-          if (fallback) {
-            return fallback;
-          }
+          if (fallback) return fallback;
           throw new Error("offline shell unavailable");
         }
       }

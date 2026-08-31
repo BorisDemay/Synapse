@@ -8,8 +8,23 @@ pub struct HealthStatus {
     status: &'static str,
 }
 
+#[derive(Serialize)]
+pub struct VersionStatus {
+    version: &'static str,
+    commit_sha: &'static str,
+    protocol_version: &'static str,
+}
+
 pub async fn live() -> Json<HealthStatus> {
     Json(HealthStatus { status: "ok" })
+}
+
+pub async fn version() -> Json<VersionStatus> {
+    Json(VersionStatus {
+        version: env!("CARGO_PKG_VERSION"),
+        commit_sha: option_env!("SYNAPSE_COMMIT_SHA").unwrap_or("development"),
+        protocol_version: "v1",
+    })
 }
 
 pub async fn ready(State(state): State<AppState>) -> Result<Json<HealthStatus>, StatusCode> {

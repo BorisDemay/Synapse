@@ -3,6 +3,29 @@ all-features = true
 
 [advisories]
 yanked = "warn"
+ignore = [
+    # Tauri 2 on Linux still uses the archived GTK3 bindings. There is no safe
+    # GTK4 migration in Tauri today; keep these narrow unmaintained notices
+    # visible here until upstream removes GTK3.
+    "RUSTSEC-2024-0411",
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0414",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0417",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    # Transitive proc-macro-error and rust-unic crates are unmaintained but
+    # have no safe upgrade while Tauri depends on this graph.
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+]
 
 [licenses]
 confidence-threshold = 0.8
@@ -21,6 +44,9 @@ allow = [
     "ISC",
     "LGPL-2.1-or-later",
     "MIT",
+    # Tauri's CSS parser is dynamically linked as an independent dependency;
+    # MPL-2.0 is compatible with distribution alongside AGPLv3 code.
+    "MPL-2.0",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",

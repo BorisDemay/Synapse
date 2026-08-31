@@ -8,6 +8,7 @@ import { installDesktopFetchBridge } from "./platform/fetch-bridge";
 import { createAppRouter } from "./router";
 import { useAuthStore } from "../../web/src/stores/auth";
 import { useVaultStore } from "../../web/src/stores/vault";
+import { startDesktopUpdateChecks } from "./update/desktop-updates";
 import "./styles.css";
 import "../../web/src/styles.css";
 
@@ -40,6 +41,7 @@ async function bootstrap() {
 
   app.use(createAppRouter(auth, vault));
   app.mount("#app");
+  startDesktopUpdateChecks();
 }
 
 void bootstrap();

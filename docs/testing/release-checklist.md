@@ -3,6 +3,14 @@
 Exécuter dans l’ordre sur une machine de référence (Linux ou Windows/WSL2).
 Ne cocher une case qu’après une sortie réelle de commande.
 
+## Mise à jour continue
+
+- [ ] `node --test tests/release/*.test.mjs` valide parité, SemVer, SHA et URLs immuables.
+- [ ] Windows Authenticode et les signatures Tauri Windows/Linux sont vérifiées.
+- [ ] `/health/version`, `web.json` et `latest.json` exposent la même version et le même SHA.
+- [ ] Un onglet web déjà ouvert et les deux clients desktop affichent la mise à jour prête.
+- [ ] Le drill NAS confirme backup migration, manifestes en dernier et rollback d’images.
+
 Vérifié le 2026-08-11 sur WSL2 (i5-14600KF) pour la préversion MVP.
 
 ## Qualité locale

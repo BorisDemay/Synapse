@@ -25,6 +25,12 @@
 > Le dialogue de dossier local n’apparaît que sur Tauri à la première création
 > de coffre. Le navigateur reste sur le cache IndexedDB, sans dossier OS.
 
+> Amendement du 2026-08-31 — ADR 0015 remplace la mise à jour manuelle de
+> l’ADR 0012. Chaque pipeline GitHub `main` vert publie une release stable
+> complète et cohérente (serveur, web, Windows et Linux), signée puis activée
+> sur le NAS seulement après les vérifications de santé. L’application partage
+> un coordinateur d’update et l’activation reste explicite.
+
 ---
 
 ## 1. Périmètre, hypothèses et critères de sortie
@@ -161,6 +167,7 @@
 **Objective:** Figer le MVP, le modèle de cohérence, la stratégie de stockage et le modèle de menace avant le scaffolding.
 
 **Files:**
+
 - Create: `docs/adr/0001-monorepo-and-boundaries.md`
 - Create: `docs/adr/0002-sync-versioning.md`
 - Create: `docs/adr/0003-local-files-are-canonical.md`
@@ -190,6 +197,7 @@ git commit -m "docs: define synapse architecture and threat model"
 **Objective:** Créer les workspaces Rust et pnpm avec des versions verrouillées et des commandes racine cohérentes.
 
 **Files:**
+
 - Create: `Cargo.toml`
 - Create: `rust-toolchain.toml`
 - Create: `package.json`
@@ -244,6 +252,7 @@ git commit -m "chore: initialize rust and pnpm workspaces"
 **Objective:** Représenter les identifiants, chemins relatifs, versions et empreintes avec des types validés.
 
 **Files:**
+
 - Create: `crates/synapse-core/src/ids.rs`
 - Create: `crates/synapse-core/src/path.rs`
 - Create: `crates/synapse-core/src/version.rs`
@@ -286,6 +295,7 @@ git commit -m "feat(core): add validated vault domain types"
 **Objective:** Extraire titre, front matter, tags, wikilinks et empreinte sans modifier le contenu original.
 
 **Files:**
+
 - Create: `crates/synapse-core/src/markdown.rs`
 - Modify: `crates/synapse-core/src/lib.rs`
 - Create: `tests/fixtures/markdown/basic.md`
@@ -328,6 +338,7 @@ git commit -m "feat(core): parse markdown metadata and wikilinks"
 **Objective:** Persister l’index local et une outbox générique de payloads opaques dans SQLite, sans construire de protocole ou de ciphertext dans cette couche.
 
 **Files:**
+
 - Create: `crates/synapse-local-store/Cargo.toml`
 - Create: `crates/synapse-local-store/src/lib.rs`
 - Create: `crates/synapse-local-store/src/schema.rs`
@@ -382,6 +393,7 @@ git commit -m "feat(storage): add sqlite local index and opaque operation outbox
 **Objective:** Fournir uniquement les opérations filesystem sûres et atomiques du coffre, sans dépendance SQLite, crypto, réseau ou protocole.
 
 **Files:**
+
 - Create: `crates/synapse-core/src/vault.rs`
 - Create: `crates/synapse-core/src/fs.rs`
 - Test: `crates/synapse-core/tests/vault_service.rs`
@@ -421,6 +433,7 @@ git commit -m "feat(core): add safe local vault filesystem service"
 **Objective:** Détecter les créations, modifications, renommages et suppressions externes sans boucle d’événements.
 
 **Files:**
+
 - Create: `crates/synapse-core/src/watcher.rs`
 - Test: `crates/synapse-core/tests/watcher.rs`
 
@@ -449,6 +462,7 @@ git commit -m "feat(core): watch external vault changes"
 **Objective:** Mettre en place le shell d’application, les tokens de design et les composants accessibles partagés.
 
 **Files:**
+
 - Create: `packages/ui/package.json`
 - Create: `packages/ui/src/index.ts`
 - Create: `packages/ui/src/styles/tokens.css`
@@ -459,11 +473,13 @@ git commit -m "feat(core): watch external vault changes"
 **Step 1: Écrire le test de navigation clavier** avec Vitest et Vue Test Utils.
 
 ```ts
-it('sélectionne la note suivante avec ArrowDown', async () => {
-  const wrapper = mount(VaultTree, { props: { nodes } })
-  await wrapper.get('[role="treeitem"]').trigger('keydown', { key: 'ArrowDown' })
-  expect(wrapper.emitted('select')?.[0]).toEqual(['note-2'])
-})
+it("sélectionne la note suivante avec ArrowDown", async () => {
+  const wrapper = mount(VaultTree, { props: { nodes } });
+  await wrapper
+    .get('[role="treeitem"]')
+    .trigger("keydown", { key: "ArrowDown" });
+  expect(wrapper.emitted("select")?.[0]).toEqual(["note-2"]);
+});
 ```
 
 **Step 2: Vérifier RED**
@@ -490,6 +506,7 @@ git commit -m "feat(ui): add accessible vault application shell"
 **Objective:** Fournir édition Vditor en rendu instantané, autosauvegarde différée et rendu Markdown assaini.
 
 **Files:**
+
 - Create: `packages/ui/src/components/MarkdownEditor.vue`
 - Create: `packages/ui/src/components/MarkdownPreview.vue`
 - Create: `packages/ui/src/markdown/render.ts`
@@ -499,9 +516,9 @@ git commit -m "feat(ui): add accessible vault application shell"
 **Step 1: Écrire un test XSS**
 
 ```ts
-it('supprime les scripts du rendu', () => {
-  expect(renderMarkdown('<script>alert(1)</script>')).not.toContain('<script')
-})
+it("supprime les scripts du rendu", () => {
+  expect(renderMarkdown("<script>alert(1)</script>")).not.toContain("<script");
+});
 ```
 
 **Step 2: Vérifier RED**, implémenter `markdown-it` avec HTML brut désactivé et assainissement DOM explicite, puis vérifier GREEN.
@@ -527,6 +544,7 @@ git commit -m "feat(ui): add secure markdown editor and preview"
 **Objective:** Exposer au frontend Vue une API Tauri minimale et allowlistée pour les opérations du coffre.
 
 **Files:**
+
 - Create: `apps/desktop/package.json`
 - Create: `apps/desktop/src/main.ts`
 - Create: `apps/desktop/src/App.vue`
@@ -570,6 +588,7 @@ git commit -m "feat(desktop): connect vue shell to tauri vault commands"
 **Objective:** Rendre les fonctions locales principales utilisables sans serveur.
 
 **Files:**
+
 - Modify: `crates/synapse-local-store/src/lib.rs`
 - Create: `crates/synapse-core/src/history.rs`
 - Modify: `apps/desktop/src/stores/vault.ts`
@@ -605,6 +624,7 @@ git commit -m "feat: add local search backlinks and history"
 **Objective:** Chiffrer et déchiffrer les contenus synchronisés sans jamais exposer la clé de coffre ou le Markdown au serveur.
 
 **Files:**
+
 - Create: `crates/synapse-crypto/Cargo.toml`
 - Create: `crates/synapse-crypto/src/lib.rs`
 - Create: `crates/synapse-crypto/src/kdf.rs`
@@ -643,6 +663,7 @@ git commit -m "feat(crypto): add client side vault encryption"
 **Objective:** Créer des contrats stables où le serveur ne manipule que des ciphertexts, enveloppes de clés et métadonnées minimales.
 
 **Files:**
+
 - Create: `crates/synapse-protocol/Cargo.toml`
 - Create: `crates/synapse-protocol/src/lib.rs`
 - Create: `crates/synapse-protocol/src/v1.rs`
@@ -687,6 +708,7 @@ git commit -m "feat(protocol): define encrypted versioned sync contracts"
 **Objective:** Relier le service filesystem, SQLite, la crypto et le protocole sans créer de dépendance circulaire ni prétendre à une transaction ACID inter-systèmes.
 
 **Files:**
+
 - Create: `crates/synapse-vault-service/Cargo.toml`
 - Create: `crates/synapse-vault-service/src/lib.rs`
 - Create: `crates/synapse-vault-service/src/reconcile.rs`
@@ -727,6 +749,7 @@ git commit -m "feat(vault): orchestrate local index and encrypted outbox"
 **Objective:** Démarrer une API avec configuration validée, pool PostgreSQL, migrations et health checks.
 
 **Files:**
+
 - Create: `apps/server/Cargo.toml`
 - Create: `apps/server/src/main.rs`
 - Create: `apps/server/src/lib.rs`
@@ -761,6 +784,7 @@ git commit -m "feat(server): add axum service and postgres schema"
 **Objective:** Protéger l’API par des sessions serveur révocables et des mots de passe Argon2id.
 
 **Files:**
+
 - Create: `apps/server/src/auth/mod.rs`
 - Create: `apps/server/src/auth/password.rs`
 - Create: `apps/server/src/auth/session.rs`
@@ -794,6 +818,7 @@ git commit -m "feat(server): add argon2 authentication and secure sessions"
 **Objective:** Autoriser un utilisateur à créer et consulter uniquement ses propres coffres.
 
 **Files:**
+
 - Create: `apps/server/src/http/vaults.rs`
 - Create: `apps/server/src/repository/vaults.rs`
 - Test: `apps/server/tests/vault_authorization.rs`
@@ -823,6 +848,7 @@ git commit -m "feat(server): add vault ownership authorization"
 **Objective:** Stocker des ciphertexts adressés par l’empreinte du ciphertext derrière une interface remplaçable, sans traversal ni duplication.
 
 **Files:**
+
 - Create: `apps/server/src/blob/mod.rs`
 - Create: `apps/server/src/blob/filesystem.rs`
 - Test: `apps/server/tests/blob_store.rs`
@@ -852,6 +878,7 @@ git commit -m "feat(server): add encrypted content addressed blobs"
 **Objective:** Accepter une opération locale une seule fois, créer une révision et retourner le même résultat en cas de rejeu.
 
 **Files:**
+
 - Create: `apps/server/src/http/sync.rs`
 - Create: `apps/server/src/sync/apply.rs`
 - Test: `apps/server/tests/sync_push.rs`
@@ -881,6 +908,7 @@ git commit -m "feat(sync): accept idempotent push operations"
 **Objective:** Retourner seulement les opérations postérieures au curseur, dans un ordre stable et reprenable.
 
 **Files:**
+
 - Create: `apps/server/src/sync/pull.rs`
 - Modify: `apps/server/src/http/sync.rs`
 - Test: `apps/server/tests/sync_pull.rs`
@@ -920,6 +948,7 @@ git commit -m "feat(sync): add cursor based incremental pull"
 **Objective:** Empêcher l’écrasement d’une révision distante lorsque la base locale est obsolète, sans demander au serveur de lire le contenu.
 
 **Files:**
+
 - Create: `crates/synapse-sync/Cargo.toml`
 - Create: `crates/synapse-sync/src/conflict.rs`
 - Create: `apps/server/src/sync/conflict.rs`
@@ -951,6 +980,7 @@ git commit -m "feat(sync): preserve encrypted concurrent edits"
 **Objective:** Envoyer les opérations en attente, tirer les nouveautés et reprendre après coupure. Le transport desktop est un client HTTP Rust allowlisté (ADR 0009), pas un plugin HTTP Vue.
 
 **Files:**
+
 - Create: `crates/synapse-sync/src/client.rs`
 - Create: `crates/synapse-sync/src/engine.rs`
 - Modify: `apps/desktop/src-tauri/src/commands.rs`
@@ -981,6 +1011,7 @@ git commit -m "feat(desktop): synchronize queued operations after reconnect"
 **Objective:** Réveiller les clients lorsqu’un coffre reçoit une nouvelle révision, sans remplacer le pull durable.
 
 **Files:**
+
 - Create: `apps/server/src/http/ws.rs`
 - Modify: `apps/server/src/lib.rs`
 - Modify: `crates/synapse-sync/src/client.rs`
@@ -1011,6 +1042,7 @@ git commit -m "feat(sync): notify clients through authenticated websocket"
 **Objective:** Éviter la duplication manuelle des contrats entre Rust et Vue.
 
 **Files:**
+
 - Create: `packages/api-client/package.json`
 - Create: `packages/api-client/src/index.ts`
 - Create: `packages/api-client/scripts/generate.mjs`
@@ -1040,6 +1072,7 @@ git commit -m "feat(protocol): generate typescript api client"
 **Objective:** Permettre authentification, déverrouillage local du coffre, navigation, édition et synchronisation depuis un navigateur.
 
 **Files:**
+
 - Create: `apps/web/package.json`
 - Create: `apps/web/src/main.ts`
 - Create: `apps/web/src/App.vue`
@@ -1081,6 +1114,7 @@ git commit -m "feat(web): add encrypted authenticated vault editor"
 **Objective:** Conserver une copie complète des notes, pièces jointes et opérations dans IndexedDB sous forme de ciphertexts, puis permettre leur déchiffrement local après déverrouillage.
 
 **Files:**
+
 - Create: `apps/web/src/offline/db.ts`
 - Create: `apps/web/src/offline/cache.ts`
 - Create: `apps/web/src/offline/queue.ts`
@@ -1116,6 +1150,7 @@ git commit -m "feat(web): cache complete encrypted vault offline"
 **Objective:** Comparer base, local et distant puis créer explicitement une révision résolue.
 
 **Files:**
+
 - Create: `packages/ui/src/components/ConflictResolver.vue`
 - Modify: `apps/desktop/src/stores/vault.ts`
 - Modify: `apps/web/src/stores/vault.ts`
@@ -1147,6 +1182,7 @@ git commit -m "feat(ui): add non destructive conflict resolution"
 **Objective:** Appliquer les contrôles du modèle de menace avant exposition réseau.
 
 **Files:**
+
 - Create: `apps/server/src/http/security.rs`
 - Create: `apps/server/tests/security_headers.rs`
 - Create: `apps/server/tests/path_traversal.rs`
@@ -1182,6 +1218,7 @@ git commit -m "security: harden server and desktop capabilities"
 **Objective:** Produire logs structurés, métriques et traces sans contenu sensible.
 
 **Files:**
+
 - Create: `apps/server/src/telemetry.rs`
 - Create: `apps/server/src/metrics.rs`
 - Test: `apps/server/tests/telemetry.rs`
@@ -1210,6 +1247,7 @@ git commit -m "feat(ops): add privacy safe telemetry"
 **Objective:** Démarrer Synapse avec PostgreSQL, stockage persistant, migrations et Caddy sans service payant.
 
 **Files:**
+
 - Create: `apps/server/Dockerfile`
 - Create: `apps/web/Dockerfile`
 - Create: `docker-compose.yml`
@@ -1248,6 +1286,7 @@ git commit -m "feat(ops): add self hosted compose deployment"
 **Objective:** Prouver que PostgreSQL et les blobs peuvent être sauvegardés et restaurés de façon cohérente.
 
 **Files:**
+
 - Create: `infra/scripts/backup.sh`
 - Create: `infra/scripts/restore.sh`
 - Create: `infra/scripts/migrate.sh`
@@ -1278,6 +1317,7 @@ git commit -m "feat(ops): add tested backup and restore workflow"
 **Objective:** Mesurer les chemins critiques et empêcher les régressions majeures.
 
 **Files:**
+
 - Create: `crates/synapse-core/benches/markdown.rs`
 - Create: `crates/synapse-local-store/benches/search.rs`
 - Create: `tests/load/sync.js`
@@ -1309,6 +1349,7 @@ git commit -m "perf: add vault and sync benchmarks"
 **Objective:** Automatiser formatage, tests, audits, SBOM et builds sur une CI auto-hébergeable.
 
 **Files:**
+
 - Create: `.forgejo/workflows/ci.yml`
 - Create: `.forgejo/workflows/release.yml`
 - Create: `justfile`
@@ -1343,6 +1384,7 @@ git commit -m "ci: add self hosted quality and security gates"
 **Objective:** Prouver le parcours desktop → serveur → web → conflit → restauration sur un environnement réel.
 
 **Files:**
+
 - Create: `tests/e2e/full-sync.spec.ts`
 - Create: `tests/e2e/desktop.spec.ts`
 - Create: `tests/e2e/fixtures.ts`
@@ -1373,6 +1415,28 @@ git commit -m "test: validate end to end synapse workflow"
 
 ---
 
+### Task 33: Livrer les mises à jour continues multi-plateformes
+
+**Objective:** Transformer chaque commit `main` vert en une release stable
+atomique, signée, déployée et détectable par les clients ouverts.
+
+**Files:** `packages/ui/src/update/`, `apps/web/src/update/`,
+`apps/desktop/src/update/`, `apps/desktop/src-tauri/src/updater.rs`,
+`.github/workflows/`, `infra/scripts/release/`,
+`infra/scripts/deploy-release.sh`, documentation release/sécurité.
+
+1. TDD du coordinateur partagé et de la bannière globale.
+2. TDD de `web.json`, du cache de shell versionné et du rechargement explicite.
+3. TDD de la frontière Tauri : feed HTTPS/loopback, téléchargement vérifié,
+   progression, absence de downgrade et installation explicite.
+4. Ajouter `/health/version` sans donnée de coffre.
+5. Générer et valider les manifestes seulement si Windows et Linux sont
+   présents avec la même version et le même SHA.
+6. Sérialiser le workflow `main`, signer, produire images/SBOM/checksums,
+   déployer via Tailscale et un compte restreint, puis créer la release GitHub.
+7. Tester le déploiement NAS : backup sur changement de migration, santé,
+   publication des manifestes en dernier et rollback d’images.
+
 ## 5. Ordre des jalons
 
 ### Milestone 0 — Architecture prête
@@ -1401,39 +1465,39 @@ Task 32. Sortie : parcours complet vérifié et documentation honnête, prête p
 
 ## 6. Matrice de tests
 
-| Niveau | Outil | Cible | Commande principale |
-|---|---|---|---|
-| Unitaire Rust | cargo-nextest | domaine, protocole, sync, stockage | `cargo nextest run --workspace` |
-| Propriétés Rust | proptest | chemins, versions, sérialisation | `cargo nextest run --workspace` |
-| Unitaire Vue | Vitest | stores, composants, sécurité rendu | `pnpm test` |
-| Intégration DB | SQLx + PostgreSQL réel | migrations, auth, push/pull | `cargo nextest run -p synapse-server` |
-| Desktop | tests Rust + Webdriver Tauri selon disponibilité | commandes et parcours local | `pnpm --filter @synapse/desktop test:e2e` |
-| Web E2E | Playwright | auth, offline, conflit | `pnpm playwright test` |
-| Self-host | Bash + Compose | installation, restart, health | `bash tests/integration/self_hosted.sh` |
-| Reprise | Bash + Compose | sauvegarde/restauration | `bash tests/integration/backup_restore.sh` |
-| Performance | Criterion + k6 | parse, recherche, sync | `cargo bench && k6 run tests/load/sync.js` |
-| Sécurité | cargo-deny, pnpm audit, tests dédiés | licences, vulnérabilités, contrôles | `cargo deny check && pnpm audit --prod` |
+| Niveau          | Outil                                            | Cible                               | Commande principale                        |
+| --------------- | ------------------------------------------------ | ----------------------------------- | ------------------------------------------ |
+| Unitaire Rust   | cargo-nextest                                    | domaine, protocole, sync, stockage  | `cargo nextest run --workspace`            |
+| Propriétés Rust | proptest                                         | chemins, versions, sérialisation    | `cargo nextest run --workspace`            |
+| Unitaire Vue    | Vitest                                           | stores, composants, sécurité rendu  | `pnpm test`                                |
+| Intégration DB  | SQLx + PostgreSQL réel                           | migrations, auth, push/pull         | `cargo nextest run -p synapse-server`      |
+| Desktop         | tests Rust + Webdriver Tauri selon disponibilité | commandes et parcours local         | `pnpm --filter @synapse/desktop test:e2e`  |
+| Web E2E         | Playwright                                       | auth, offline, conflit              | `pnpm playwright test`                     |
+| Self-host       | Bash + Compose                                   | installation, restart, health       | `bash tests/integration/self_hosted.sh`    |
+| Reprise         | Bash + Compose                                   | sauvegarde/restauration             | `bash tests/integration/backup_restore.sh` |
+| Performance     | Criterion + k6                                   | parse, recherche, sync              | `cargo bench && k6 run tests/load/sync.js` |
+| Sécurité        | cargo-deny, pnpm audit, tests dédiés             | licences, vulnérabilités, contrôles | `cargo deny check && pnpm audit --prod`    |
 
 ## 7. Risques et mesures de réduction
 
-| Risque | Impact | Mesure |
-|---|---|---|
-| Perte de données lors d’une concurrence | Critique | versions immuables, opérations idempotentes, tests crash/rejeu, conflit explicite |
-| Traversal ou symlink hors coffre | Critique | `VaultPath` validé, résolution canonique, handles relatifs si disponibles, corpus multi-OS |
-| Boucles du watcher | Élevé | origine d’opération, hash, debounce et tests de rafales |
-| Divergence contrats Rust/TypeScript | Élevé | OpenAPI généré, golden tests et CI anti-dérive |
-| Fuite de contenu dans logs/métriques | Élevé | redaction par défaut, tests de capture, labels sans identifiant utilisateur |
-| Compromission ou perte de clé E2EE | Critique | clés uniquement en mémoire, enveloppes Argon2id, AAD versionné, documentation d’irréversibilité, revue crypto externe avant release |
-| Cache web complet exposé sur un poste partagé | Élevé | IndexedDB ciphertext-only, clé purgée au verrouillage/logout, option d’effacement de l’appareil, CSP stricte |
-| Serveur incapable de rechercher/fusionner grâce à E2EE | Moyen | index/recherche/fusion sur le client ; accepter les limites fonctionnelles et ne pas ajouter de clair serveur |
-| Partage E2EE mal conçu | Critique | hors MVP ; protocole de distribution/rotation/révocation de clés soumis à audit avant implémentation |
-| Service worker servant des données d’un autre compte | Élevé | cache d’assets uniquement, IndexedDB partitionnée par utilisateur, purge au logout |
-| SQLite FTS5 absent sur une cible | Moyen | vérifier les builds Tauri par OS ; fallback Tantivy si nécessaire après benchmark |
-| WebView Tauri différent selon OS | Moyen | E2E sur Linux/Windows/macOS avant release |
-| Tests filesystem instables | Moyen | événements observables, délais bornés, exécution sérialisée ciblée, pas de sleeps arbitraires |
-| AGPL des services optionnels | Moyen | services séparés, non requis, obligations documentées et audit `cargo-deny`/licences Node |
-| Complexité prématurée du CRDT | Moyen | hors MVP ; synchronisation par révisions et conflits explicites d’abord |
-| Nom `Synapse` potentiellement indisponible | Moyen | recherche de marque et renommage avant publication publique |
+| Risque                                                 | Impact   | Mesure                                                                                                                              |
+| ------------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Perte de données lors d’une concurrence                | Critique | versions immuables, opérations idempotentes, tests crash/rejeu, conflit explicite                                                   |
+| Traversal ou symlink hors coffre                       | Critique | `VaultPath` validé, résolution canonique, handles relatifs si disponibles, corpus multi-OS                                          |
+| Boucles du watcher                                     | Élevé    | origine d’opération, hash, debounce et tests de rafales                                                                             |
+| Divergence contrats Rust/TypeScript                    | Élevé    | OpenAPI généré, golden tests et CI anti-dérive                                                                                      |
+| Fuite de contenu dans logs/métriques                   | Élevé    | redaction par défaut, tests de capture, labels sans identifiant utilisateur                                                         |
+| Compromission ou perte de clé E2EE                     | Critique | clés uniquement en mémoire, enveloppes Argon2id, AAD versionné, documentation d’irréversibilité, revue crypto externe avant release |
+| Cache web complet exposé sur un poste partagé          | Élevé    | IndexedDB ciphertext-only, clé purgée au verrouillage/logout, option d’effacement de l’appareil, CSP stricte                        |
+| Serveur incapable de rechercher/fusionner grâce à E2EE | Moyen    | index/recherche/fusion sur le client ; accepter les limites fonctionnelles et ne pas ajouter de clair serveur                       |
+| Partage E2EE mal conçu                                 | Critique | hors MVP ; protocole de distribution/rotation/révocation de clés soumis à audit avant implémentation                                |
+| Service worker servant des données d’un autre compte   | Élevé    | cache d’assets uniquement, IndexedDB partitionnée par utilisateur, purge au logout                                                  |
+| SQLite FTS5 absent sur une cible                       | Moyen    | vérifier les builds Tauri par OS ; fallback Tantivy si nécessaire après benchmark                                                   |
+| WebView Tauri différent selon OS                       | Moyen    | E2E sur Linux/Windows/macOS avant release                                                                                           |
+| Tests filesystem instables                             | Moyen    | événements observables, délais bornés, exécution sérialisée ciblée, pas de sleeps arbitraires                                       |
+| AGPL des services optionnels                           | Moyen    | services séparés, non requis, obligations documentées et audit `cargo-deny`/licences Node                                           |
+| Complexité prématurée du CRDT                          | Moyen    | hors MVP ; synchronisation par révisions et conflits explicites d’abord                                                             |
+| Nom `Synapse` potentiellement indisponible             | Moyen    | recherche de marque et renommage avant publication publique                                                                         |
 
 ## 8. Questions ouvertes à trancher avant les tâches concernées
 

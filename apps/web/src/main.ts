@@ -8,6 +8,7 @@ import { registerAssetServiceWorker } from "./offline/register-sw";
 import { createAppRouter } from "./router";
 import { useAuthStore } from "./stores/auth";
 import { useVaultStore } from "./stores/vault";
+import { startWebUpdateChecks } from "./update/web-updates";
 import "./styles.css";
 
 async function bootstrap() {
@@ -38,6 +39,7 @@ async function bootstrap() {
   app.use(createAppRouter(auth, vault));
   app.mount("#app");
   registerAssetServiceWorker();
+  startWebUpdateChecks();
 }
 
 void bootstrap();

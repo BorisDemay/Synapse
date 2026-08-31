@@ -1,17 +1,23 @@
-# Publication Windows et Linux
+# Publication continue Windows, Linux, web et serveur
 
-Les tags `vX.Y.Z` lancent le workflow de release. Une préversion doit utiliser
-un tag contenant `-beta` et est publiée dans le canal `beta`; les autres tags
-vont dans `stable`. Les canaux ne réalisent pas encore de mise à jour automatique.
+Chaque push ou merge vert sur GitHub `main` devient `0.1.<run_number>` dans le
+canal `stable`. Le canal `beta` reste réservé. Le workflow refuse de publier si
+un artefact Windows ou Linux manque, ou si les identités web/desktop divergent.
 
 La publication exige les secrets protégés suivants :
 
 - `WINDOWS_CERTIFICATE_PFX_BASE64` et `WINDOWS_CERTIFICATE_PASSWORD` pour
   Authenticode ;
-- `LINUX_GPG_PRIVATE_KEY` et `LINUX_GPG_PASSPHRASE` pour signer les checksums.
+- `TAURI_SIGNING_PRIVATE_KEY` et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` pour les
+  paquets updater ; `TAURI_UPDATER_PUBLIC_KEY` est une variable GitHub publique
+  injectée dans le binaire ;
+- `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `NAS_DEPLOY_SSH_KEY` et
+  `NAS_SSH_KNOWN_HOSTS` pour le déploiement éphémère et l’identité NAS épinglée.
 
-Le workflow échoue si l'un des secrets manque. Avant publication, exécuter
-`just verify`, les parcours de sync/conflict, la checklist de sécurité et une
-revue crypto indépendante. Publier avec les artefacts les SBOM CycloneDX, les
-checksums SHA-256 et la signature OpenPGP. Les clés privées ne doivent jamais
-être enregistrées dans le dépôt, les logs ou les artefacts.
+L’import Authenticode précède le bundling ; Tauri signe ensuite le paquet déjà
+signé par Windows. Les artefacts versionnés, SBOM et checksums forment l’archive
+GitHub immuable. Le NAS active `latest.json` et `web.json` en dernier. Les clés
+privées ne doivent jamais être enregistrées dans le dépôt, les logs ou les
+artefacts.
+
+Le premier build updater doit être installé manuellement sur Windows et Linux.

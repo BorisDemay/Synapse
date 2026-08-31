@@ -161,6 +161,7 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
     Router::new()
         .route("/health/live", get(http::health::live))
         .route("/health/ready", get(http::health::ready))
+        .route("/health/version", get(http::health::version))
         .route("/metrics", get(metrics::render))
         .route("/auth/logout", post(http::auth::logout))
         .route("/auth/sessions", get(http::auth::list_sessions))

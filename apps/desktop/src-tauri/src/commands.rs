@@ -33,6 +33,10 @@ impl VaultCommands {
             .ok_or_else(|| "instance url is not configured".to_owned())
     }
 
+    pub fn instance_origin(&self) -> Result<String, String> {
+        self.http_client().map(|client| client.origin())
+    }
+
     pub fn set_instance_url(&self, url: String) -> Result<String, String> {
         self.set_instance_url_with_session_store(url, None)
     }

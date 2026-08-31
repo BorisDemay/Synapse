@@ -1,6 +1,6 @@
 # Contrôles qualité et CI auto-hébergeable
 
-Synapse utilise **Forgejo Actions** (compatible syntaxe GitHub Actions) et une
+Synapse utilise **GitHub Actions** et une
 commande locale unique `just verify`.
 
 ## Prérequis locaux
@@ -61,15 +61,19 @@ Les tests d’intégration `synapse-server` sont sérialisés via
 `.config/nextest.toml` (groupe `server-db`) parce qu’ils partagent une
 PostgreSQL unique.
 
-## Workflows Forgejo
+## Workflows GitHub
 
-| Fichier | Rôle |
-| --- | --- |
-| `.forgejo/workflows/ci.yml` | Gates sur push/PR, PostgreSQL service, artefacts d’échec |
-| `.forgejo/workflows/release.yml` | Build release + SBOM CycloneDX en artefacts (pas dans Git) |
+| Fichier                              | Rôle                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------------------ |
+| `.github/workflows/verify.yml`       | Gates de pull request, sans permission de publication                                |
+| `.github/workflows/main-release.yml` | Pipeline `main` sérialisé : verify, version, builds, signatures, NAS, release stable |
 
-Les permissions Actions sont limitées à `contents: read`. Le cache n’est pas
-obligatoire ; Node utilise le cache pnpm optionnel de l’action officielle.
+Le job final reçoit seul `contents: write`. Protéger `main` avec le statut
+`verify` requis. Les pushes directs déclenchent le même pipeline complet.
+
+La version est `0.1.<github.run_number>`. Si le workflow est renommé ou son
+compteur réinitialisé, augmenter la série au-dessus de toute version déjà
+publiée avant de réactiver l’updater.
 
 ## SBOM CycloneDX
 
@@ -84,6 +88,11 @@ sont des artefacts de release uniquement (répertoire `target/` ignoré par Git)
 
 - Aucun secret de production dans les workflows.
 - Les contrôles de licence/advisories Rust passent par `deny.toml`.
+- L’audit couvre aussi le lockfile Tauri autonome. Les avis `unmaintained`
+  GTK3/proc-macro/rust-unic sans upgrade sûr sont listés un par un dans
+  `deny.toml` ; aucune vulnérabilité exploitable n’est masquée globalement.
+- MPL-2.0 est autorisée pour les parseurs CSS transitifs Tauri, distribués comme
+  dépendances distinctes compatibles avec l’AGPLv3.
 - La licence permissive `0BSD` est autorisée uniquement comme dépendance
   transitive de `quoted_printable`, utilisée par le client SMTP `lettre`.
 - L’audit npm ne couvre que les dépendances de production (`pnpm audit --prod`).

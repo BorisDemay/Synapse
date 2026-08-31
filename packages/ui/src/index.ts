@@ -16,6 +16,18 @@ export { default as VaultExplorerToolbar } from "./components/VaultExplorerToolb
 export { default as VaultNotesSectionHeader } from "./components/VaultNotesSectionHeader.vue";
 export { default as IconActionButton } from "./components/IconActionButton.vue";
 export { default as VaultTree } from "./components/VaultTree.vue";
+export { default as UpdateBanner } from "./components/UpdateBanner.vue";
+export {
+  createUpdateCoordinator,
+  startUpdateChecks,
+} from "./update/coordinator";
+export type {
+  UpdateCoordinator,
+  UpdateMetadata,
+  UpdateProvider,
+  UpdateSnapshot,
+  UpdateState,
+} from "./update/coordinator";
 export type {
   AiChatAttachment,
   AiChatMessage,

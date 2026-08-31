@@ -1,0 +1,200 @@
+name: verify-build-deploy-release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: synapse-stable-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SYNAPSE_VERSION: 0.1.${{ github.run_number }}
+  SYNAPSE_COMMIT_SHA: ${{ github.sha }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      SYNAPSE_DATABASE_URL: postgres://postgres@127.0.0.1:55432/synapse_test
+      SYNAPSE_STORAGE_PATH: ${{ github.workspace }}/.ci-blobs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.17.1
+          cache: pnpm
+      - run: node infra/scripts/release/set-version.mjs "$SYNAPSE_VERSION"
+      - run: cargo install just cargo-nextest cargo-deny --locked
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: just db
+      - run: just verify
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: node --test tests/release/*.test.mjs
+
+  desktop:
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      SYNAPSE_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.17.1
+          cache: pnpm
+      - name: Install Linux bundle prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: pnpm install --frozen-lockfile
+      - run: node infra/scripts/release/set-version.mjs "$SYNAPSE_VERSION"
+      - name: Import Authenticode certificate before bundling
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE_PFX_BASE64 -or !$env:WINDOWS_CERTIFICATE_PASSWORD) { throw "Authenticode secret missing" }
+          $pfx = Join-Path $env:RUNNER_TEMP synapse.pfx
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+          $secure = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secure
+          $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $config.bundle | Add-Member -Force NoteProperty windows ([pscustomobject]@{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" })
+          $config | ConvertTo-Json -Depth 20 | Set-Content apps/desktop/src-tauri/tauri.conf.json
+      - name: Build signed updater bundle
+        run: pnpm --filter @synapse/desktop tauri build
+      - name: Normalize Linux updater artifact
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir release-desktop
+          artifact="$(find apps/desktop/src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)"
+          test -n "$artifact" && test -f "$artifact.sig"
+          cp "$artifact" release-desktop/synapse-linux-x86_64.AppImage
+          cp "$artifact.sig" release-desktop/synapse-linux-x86_64.AppImage.sig
+      - name: Normalize Windows updater artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory release-desktop
+          $artifact = Get-ChildItem apps/desktop/src-tauri/target/release/bundle -Recurse -Filter '*setup.exe' | Select-Object -First 1
+          if (!$artifact -or !(Test-Path "$($artifact.FullName).sig")) { throw "signed Windows updater missing" }
+          & signtool verify /pa $artifact.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item $artifact.FullName release-desktop/synapse-windows-x86_64.exe
+          Copy-Item "$($artifact.FullName).sig" release-desktop/synapse-windows-x86_64.exe.sig
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: release-desktop/
+          if-no-files-found: error
+
+  images:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.17.1
+          cache: pnpm
+      - run: node infra/scripts/release/set-version.mjs "$SYNAPSE_VERSION"
+      - run: pnpm install --frozen-lockfile
+      - run: cargo install just --locked
+      - run: just sbom
+      - run: docker build --build-arg SYNAPSE_VERSION --build-arg SYNAPSE_COMMIT_SHA -f apps/server/Dockerfile -t "synapse-server:$SYNAPSE_VERSION" .
+      - run: docker build --build-arg SYNAPSE_VERSION --build-arg SYNAPSE_COMMIT_SHA -f apps/web/Dockerfile -t "synapse-web:$SYNAPSE_VERSION" .
+      - run: docker save "synapse-server:$SYNAPSE_VERSION" -o "synapse-server-$SYNAPSE_VERSION.tar"
+      - run: docker save "synapse-web:$SYNAPSE_VERSION" -o "synapse-web-$SYNAPSE_VERSION.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-web
+          path: |
+            synapse-*.tar
+            target/sbom/
+          if-no-files-found: error
+
+  publish:
+    needs: [desktop, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+          merge-multiple: true
+      - name: Assemble and validate parity release
+        env:
+          SYNAPSE_RELEASE_ARTIFACTS: downloaded
+          SYNAPSE_RELEASE_BASE_URL: ${{ vars.SYNAPSE_PUBLIC_URL }}
+          SYNAPSE_RELEASE_OUTPUT: payload/release
+          SYNAPSE_RELEASE_PUBLISHED_AT: ${{ github.event.head_commit.timestamp }}
+          SYNAPSE_RELEASE_NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          node infra/scripts/release/generate-manifests.mjs
+          node infra/scripts/release/validate-release.mjs payload/release
+          cp downloaded/synapse-*.tar payload/
+          find downloaded -name '*.cdx.json' -exec cp {} payload/ \;
+          cp docker-compose.yml payload/
+          cp infra/scripts/release/validate-release.mjs payload/
+          sha256sum migrations/*.sql > payload/migrations.sha256
+          (cd payload && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:synapse-deploy
+      - name: Pin NAS host identity
+        env:
+          NAS_DEPLOY_SSH_KEY: ${{ secrets.NAS_DEPLOY_SSH_KEY }}
+          NAS_SSH_KNOWN_HOSTS: ${{ secrets.NAS_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 0700 -d ~/.ssh
+          printf '%s' "$NAS_DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$NAS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Deploy staged release
+        env:
+          NAS_DEPLOY_HOST: ${{ vars.NAS_DEPLOY_HOST }}
+          NAS_DEPLOY_USER: ${{ vars.NAS_DEPLOY_USER }}
+        run: |
+          tar -C payload -czf "synapse-$SYNAPSE_VERSION.tar.gz" .
+          scp "synapse-$SYNAPSE_VERSION.tar.gz" "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST:incoming/"
+          ssh "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST" synapse-deploy "$SYNAPSE_VERSION" "$SYNAPSE_COMMIT_SHA"
+      - name: Create immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ github.event.head_commit.message }}
+        run: find payload -type f -print0 | xargs -0 gh release create "v$SYNAPSE_VERSION" --target "$SYNAPSE_COMMIT_SHA" --title "Synapse $SYNAPSE_VERSION" --notes "$RELEASE_NOTES"

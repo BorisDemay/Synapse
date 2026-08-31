@@ -17,9 +17,13 @@ services:
     restart: unless-stopped
 
   server:
+    image: synapse-server:${SYNAPSE_VERSION:-0.1.0}
     build:
       context: .
       dockerfile: apps/server/Dockerfile
+      args:
+        SYNAPSE_COMMIT_SHA: ${SYNAPSE_COMMIT_SHA:-development}
+        SYNAPSE_VERSION: ${SYNAPSE_VERSION:-0.1.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,9 +52,13 @@ services:
     restart: unless-stopped
 
   web:
+    image: synapse-web:${SYNAPSE_VERSION:-0.1.0}
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        SYNAPSE_COMMIT_SHA: ${SYNAPSE_COMMIT_SHA:-development}
+        SYNAPSE_VERSION: ${SYNAPSE_VERSION:-0.1.0}
     depends_on:
       server:
         condition: service_healthy
@@ -59,6 +67,8 @@ services:
       - /tmp
       - /var/cache/nginx
       - /var/run
+    volumes:
+      - ${SYNAPSE_RELEASES_PATH:-./infra/releases}:/usr/share/nginx/updates:ro
     restart: unless-stopped
 
   caddy:
