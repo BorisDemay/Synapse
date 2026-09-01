@@ -9,6 +9,10 @@ use crate::commands::VaultCommands;
 
 pub const UPDATER_PUBLIC_KEY: Option<&str> = option_env!("SYNAPSE_UPDATER_PUBLIC_KEY");
 
+pub fn updater_public_key(public_key: Option<&'static str>) -> Result<&'static str, String> {
+    public_key.ok_or_else(|| "desktop updater is not configured".to_owned())
+}
+
 pub fn update_manifest_url(instance_origin: &str) -> Result<String, String> {
     let origin = Url::parse(instance_origin).map_err(|_| "invalid update instance")?;
     let allowed = origin.scheme() == "https"
@@ -73,13 +77,12 @@ pub async fn check_desktop_update(
     commands: State<'_, VaultCommands>,
     updater_state: State<'_, DesktopUpdater>,
 ) -> Result<Option<UpdateMetadata>, String> {
-    if UPDATER_PUBLIC_KEY.is_none() {
-        return Err("desktop updater is not configured".to_owned());
-    }
+    let public_key = updater_public_key(UPDATER_PUBLIC_KEY)?;
     let endpoint = update_manifest_url(&commands.instance_origin()?)?;
     let endpoint = Url::parse(&endpoint).map_err(|_| "invalid update endpoint")?;
     let update = app
         .updater_builder()
+        .pubkey(public_key)
         .endpoints(vec![endpoint])
         .map_err(|_| "desktop updater configuration failed")?
         .build()

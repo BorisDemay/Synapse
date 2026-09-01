@@ -1,4 +1,19 @@
-use synapse_desktop::updater::update_manifest_url;
+use synapse_desktop::updater::{update_manifest_url, updater_public_key};
+
+#[test]
+fn updater_builder_configuration_uses_the_embedded_public_key() {
+    let public_key = "untrusted comment: test public key\nRWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
+    assert_eq!(updater_public_key(Some(public_key)).unwrap(), public_key);
+}
+
+#[test]
+fn updater_requires_an_embedded_public_key_before_fetching() {
+    assert_eq!(
+        updater_public_key(None).unwrap_err(),
+        "desktop updater is not configured"
+    );
+}
 
 #[test]
 fn update_feed_is_scoped_to_the_connected_https_instance() {
