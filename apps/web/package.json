@@ -18,7 +18,7 @@
     "@primeuix/styles": "2.0.3",
     "@synapse/api-client": "workspace:*",
     "@synapse/ui": "workspace:*",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "idb": "8.0.3",
     "pinia": "4.0.2",
     "primevue": "^4.5.4",
