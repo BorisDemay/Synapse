@@ -31,10 +31,11 @@ Vérifié le 2026-08-11 sur WSL2 (i5-14600KF) pour la préversion MVP.
 - [x] API test + Postgres (`infra/docker/compose.test.yml`) et `SYNAPSE_ALLOW_PUBLIC_SIGNUP=true`
 - [x] `pnpm playwright test tests/e2e/full-sync.spec.ts`
 - [x] `pnpm playwright test tests/e2e/desktop.spec.ts`
+- [x] `xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native` — fenêtre Tauri native et parcours de connexion WebDriver (WSL2)
 - [ ] Optionnel : `SYNAPSE_RUN_BACKUP_E2E=1 pnpm playwright test tests/e2e/full-sync.spec.ts` (backup déjà couvert par `tests/integration/backup_restore.sh`)
 
 ## Limites connues à relire dans le README
 
-- [x] Pas de WebDriver Tauri pour le sync desktop complet : le stand-in navigateur couvre le conflit.
+- [x] Le smoke WebDriver natif vérifie la fenêtre et la connexion sans transmettre d’identifiant, mot de passe ou phrase de déchiffrement ; le conflit chiffré reste couvert par le scénario navigateur multi-client.
 - [x] Le serveur ne voit aucun clair de coffre ; la phrase de déchiffrement ne quitte pas le client.
 - [x] Aucun SaaS obligatoire ; SBOM via `just sbom` (artefacts sous `target/sbom/` seulement).

@@ -206,6 +206,8 @@ Le client desktop (éditeur local, sync optionnelle) est aussi couvert par :
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 pnpm --filter @synapse/desktop test
 pnpm --filter @synapse/desktop typecheck
+# Linux/WSL sans session graphique :
+xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native
 ```
 
 ### Self-hosting Docker Compose

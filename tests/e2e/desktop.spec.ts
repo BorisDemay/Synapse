@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { test } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
@@ -19,10 +19,7 @@ function run(command: string, args: string[], cwd = root) {
   return result;
 }
 
-/**
- * Desktop sync WebDriver is not wired yet. This suite proves the local vault
- * Tauri commands and Vue shell still pass their automated checks.
- */
+/** This suite proves the local vault commands and Vue shell checks. */
 test.describe("desktop local vault path", () => {
   test("Tauri vault commands open a directory without a window", () => {
     run("cargo", [
@@ -43,10 +40,4 @@ test.describe("desktop local vault path", () => {
   test("desktop package typechecks", () => {
     run("pnpm", ["--filter", "@synapse/desktop", "typecheck"]);
   });
-});
-
-test("desktop sync WebDriver is documented as unavailable", async () => {
-  // Placeholder assertion so the suite stays honest: full encrypted sync E2E for
-  // Tauri is covered by the dual-browser full-sync scenario until WebDriver lands.
-  expect(process.env.SYNAPSE_TAURI_WEBDRIVER ?? "").toBe("");
 });
