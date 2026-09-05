@@ -25,6 +25,25 @@ test("pull requests retain verification without publication", async () => {
   assert.doesNotMatch(workflow, /gh release create|synapse-deploy/u);
 });
 
+test("desktop-native runs the maintained native WebDriver smoke on every platform", async () => {
+  const [workflow, desktopPackage] = await Promise.all([
+    readFile(".github/workflows/verify.yml", "utf8"),
+    readFile("apps/desktop/package.json", "utf8"),
+  ]);
+  const scripts = JSON.parse(desktopPackage).scripts;
+
+  assert.match(
+    workflow,
+    /runner\.os == 'Linux'[\s\S]*?xvfb-run -a pnpm --filter @synapse\/desktop test:native/u,
+  );
+  assert.match(
+    workflow,
+    /runner\.os == 'Windows'[\s\S]*?pnpm --filter @synapse\/desktop test:native/u,
+  );
+  assert.equal(scripts["test:native"], "node e2e/native-webdriver-smoke.mjs");
+  assert.doesNotMatch(scripts["test:native"], /e2e\/native\.mjs/u);
+});
+
 test("NAS deployment health-gates manifest-last activation and keeps rollback", async () => {
   const script = await readFile("infra/scripts/deploy-release.sh", "utf8");
   const health = script.indexOf("/health/version");

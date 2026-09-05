@@ -9,7 +9,7 @@
     "build": "vite build",
     "test": "vitest run",
     "test:e2e:native": "node e2e/native-webdriver-smoke.mjs",
-    "test:native": "pnpm tauri build --debug --no-bundle && node e2e/native.mjs",
+    "test:native": "node e2e/native-webdriver-smoke.mjs",
     "typecheck": "vue-tsc --noEmit",
     "lint": "prettier --check .",
     "format": "prettier --write .",
