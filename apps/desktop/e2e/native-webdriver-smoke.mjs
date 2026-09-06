@@ -7,14 +7,13 @@ import { fileURLToPath } from "node:url";
 
 import { Builder, By, Capabilities, until } from "selenium-webdriver";
 
+import { resolveDesktopBinaryPath } from "./native-webdriver-path.mjs";
+
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../..",
 );
-const appBinary = path.join(
-  root,
-  "apps/desktop/src-tauri/target/debug/synapse-desktop",
-);
+const appBinary = resolveDesktopBinaryPath(root, process.platform);
 const frontendDist = path.join(root, "apps/desktop/dist");
 const webdriverPort = 4444;
 const timeoutMs = 60_000;
