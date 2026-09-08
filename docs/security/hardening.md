@@ -59,7 +59,10 @@ Synapse (auth, enveloppe, push/pull) passent par un enum Rust fermé, borné à
 l’URL d’instance configurée. Le cookie de session reste dans un jar mémoire
 Rust et n’est jamais exposé à Vue. Une session mémorisée (ADR 0014) peut
 être recopiée dans `app_data_dir()/remembered-session` avec des permissions
-restreignantes ; la déconnexion efface ce fichier. CSP fenêtre : `default-src 'self'` avec
+restreignantes et une liaison explicite à l’origine de l’instance ; elle n’est
+jamais réutilisée sur un autre serveur. Les anciens fichiers sans origine
+exigent une nouvelle connexion. La déconnexion efface ce fichier.
+CSP fenêtre : `default-src 'self'` avec
 styles/images locaux et `connect-src` OpenAI/ChatGPT pour l’assistant Codex
 optionnel (jamais le serveur Synapse).
 

@@ -30,6 +30,11 @@ de **session de compte** :
   de l’application, lu uniquement par Rust, jamais exposé à Vue ni à
   `localStorage`. Déconnexion, révocation (Paramètres → sessions) ou fichier
   illisible effacent cette copie.
+- Précision de sécurité du 2026-09-08 : la copie native associe explicitement le
+  jeton à l’origine validée de l’instance (schéma, hôte et port). Un changement
+  d’origine ne doit jamais réutiliser ce jeton. Les anciens fichiers sans
+  origine ne sont pas migrés par supposition : ils imposent une nouvelle
+  connexion. La reprise de session reste possible sur la même origine.
 - La clé de coffre, la phrase et le mot de passe ne sont jamais persistés par
   cette option.
 
