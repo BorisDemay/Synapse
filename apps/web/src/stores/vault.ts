@@ -369,6 +369,17 @@ export const useVaultStore = defineStore("vault", () => {
     noteId: string,
     label: string,
   ): Promise<void> {
+    const key = vaultKey;
+    const vaultId = currentVaultId.value;
+    const userId = useAuthStore().userId;
+    await loadHistory(noteId);
+    if (
+      !key ||
+      vaultKey !== key ||
+      currentVaultId.value !== vaultId ||
+      useAuthStore().userId !== userId
+    )
+      throw new Error("Vault is locked");
     const revision =
       historyFor(noteId)[0]?.revision ?? notes.get(noteId)?.revision;
     if (!revision || !label.trim()) {
@@ -509,13 +520,16 @@ export const useVaultStore = defineStore("vault", () => {
     historyByNote.set(operation.note_id, previous.slice(0, 50));
   }
 
-  async function hydrateHistory(userId: string, vaultId: string) {
+  async function loadHistory(noteId: string) {
     if (!vaultKey) {
       return;
     }
     const key = vaultKey;
+    const userId = requireUserId();
+    const vaultId = currentVaultId.value;
+    if (!vaultId || !notes.has(noteId)) return;
     const epoch = localEditEpoch;
-    for (const noteId of notes.keys()) {
+    {
       const records = await listNoteRevisions(userId, vaultId, noteId);
       if (
         vaultKey !== key ||
@@ -564,8 +578,9 @@ export const useVaultStore = defineStore("vault", () => {
     const epoch = localEditEpoch;
     const cached = await listCachedNotes(userId, vaultId);
     if (!active() || epoch !== localEditEpoch) return;
-    notes.clear();
-    attachments.clear();
+    const loadedNotes = new Map<string, LocalNote>();
+    const loadedAttachments = new Map<string, LocalAttachment>();
+    let decoded = 0;
     for (const record of cached) {
       const plaintext = xchacha20poly1305(
         key,
@@ -576,15 +591,23 @@ export const useVaultStore = defineStore("vault", () => {
         record.noteId,
         plaintext,
         record.revision,
-        notes,
-        attachments,
+        loadedNotes,
+        loadedAttachments,
       );
+      if (++decoded % 256 === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (!active() || epoch !== localEditEpoch) return;
+      }
     }
+    if (!active() || epoch !== localEditEpoch) return;
+    notes.clear();
+    attachments.clear();
+    for (const [id, note] of loadedNotes) notes.set(id, note);
+    for (const [id, attachment] of loadedAttachments)
+      attachments.set(id, attachment);
     const head = await getCachedHeadRevision(userId, vaultId);
     if (!active()) return;
     headRevision.value = Math.max(headRevision.value, head);
-    await hydrateHistory(userId, vaultId);
-    if (!active()) return;
     await loadPreferences(userId, vaultId);
     if (!active()) return;
     await refreshPending();
@@ -1482,6 +1505,17 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function restoreRevision(id: string, revision: number) {
+    const key = vaultKey;
+    const vaultId = currentVaultId.value;
+    const userId = useAuthStore().userId;
+    await loadHistory(id);
+    if (
+      !key ||
+      vaultKey !== key ||
+      currentVaultId.value !== vaultId ||
+      useAuthStore().userId !== userId
+    )
+      throw new Error("Vault is locked");
     const entry = historyFor(id).find((item) => item.revision === revision);
     if (!entry) {
       throw new Error("Revision is missing");
@@ -1600,6 +1634,7 @@ export const useVaultStore = defineStore("vault", () => {
     loadAssistantCredential,
     loadAssistantConversations,
     loadNotes,
+    loadHistory,
     lock,
     lockAndRequirePassphrase,
     attachments,

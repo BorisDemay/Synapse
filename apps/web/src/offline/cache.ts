@@ -44,13 +44,25 @@ export async function listCachedNotes(
 ): Promise<CachedNoteRecord[]> {
   const db = await openOfflineDb();
   const prefix = `${userId}:${vaultId}:`;
-  const all = await db.getAll("notes");
-  return all.filter(
-    (note) =>
-      note.userId === userId &&
-      note.vaultId === vaultId &&
-      noteKey(userId, vaultId, note.noteId).startsWith(prefix),
-  );
+  const rows: CachedNoteRecord[] = [];
+  let range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+  const tx = db.transaction("notes", "readonly");
+  for (;;) {
+    const [batch, keys] = await Promise.all([
+      tx.store.getAll(range, 256),
+      tx.store.getAllKeys(range, 256),
+    ]);
+    rows.push(
+      ...batch.filter(
+        (note) => note.userId === userId && note.vaultId === vaultId,
+      ),
+    );
+    if (batch.length < 256) {
+      await tx.done;
+      return rows;
+    }
+    range = IDBKeyRange.bound(keys[keys.length - 1]!, `${prefix}\uffff`, true);
+  }
 }
 
 export async function putCachedEnvelope(
@@ -273,25 +285,39 @@ export async function putNoteRevision(
     record.noteId,
     record.revision,
   );
-  await db.put("note_revisions", record, key);
-  const all = (await db.getAll("note_revisions"))
-    .filter(
-      (row) =>
-        row.userId === record.userId &&
-        row.vaultId === record.vaultId &&
-        row.noteId === record.noteId,
+  const tx = db.transaction("note_revisions", "readwrite");
+  try {
+    await tx.store.put(record, key);
+    const prefix = `${record.userId}:${record.vaultId}:${record.noteId}:`;
+    const all = (
+      await tx.store.getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`))
     )
-    .sort((left, right) => right.revision - left.revision);
-  await Promise.all(
-    all
-      .slice(50)
-      .map((row) =>
-        db.delete(
-          "note_revisions",
-          revisionKey(row.userId, row.vaultId, row.noteId, row.revision),
+      .filter(
+        (row) =>
+          row.userId === record.userId &&
+          row.vaultId === record.vaultId &&
+          row.noteId === record.noteId,
+      )
+      .sort((left, right) => right.revision - left.revision);
+    await Promise.all(
+      all
+        .slice(50)
+        .map((row) =>
+          tx.store.delete(
+            revisionKey(row.userId, row.vaultId, row.noteId, row.revision),
+          ),
         ),
-      ),
-  );
+    );
+    await tx.done;
+  } catch (error) {
+    try {
+      tx.abort();
+    } catch {
+      /* Already settled. */
+    }
+    await tx.done.catch(() => {});
+    throw error;
+  }
 }
 
 export async function listNoteRevisions(
@@ -300,7 +326,11 @@ export async function listNoteRevisions(
   noteId: string,
 ): Promise<CachedRevisionRecord[]> {
   const db = await openOfflineDb();
-  const all = await db.getAll("note_revisions");
+  const prefix = `${userId}:${vaultId}:${noteId}:`;
+  const all = await db.getAll(
+    "note_revisions",
+    IDBKeyRange.bound(prefix, `${prefix}\uffff`),
+  );
   return all
     .filter(
       (row) =>

@@ -83,3 +83,69 @@ et empreintes, conformément au protocole v1.
    nouvelle campagne.
 3. Criterion : échouer seulement via comparaison de baseline, pas sur un seuil
    absolu fragile en CI partagée.
+
+## Client Vue réel — 8 septembre 2026
+
+Commande depuis la racine (Chromium Playwright installé) :
+
+```bash
+node tests/performance/client-benchmark.mjs
+```
+
+Le script démarre un Vite isolé sur `127.0.0.1:16174`, sans HMR, et un profil
+Chromium jetable. Il chiffre 10 000 notes synthétiques d'environ 1 KiB et leur
+historique dans le vrai IndexedDB. Il utilise les stores et l'éditeur produit,
+vérifie les 10 000 notes, une recherche représentative, une modification durable
+après rechargement complet, puis un delta chiffré tiré depuis un curseur durable.
+Les réponses réseau sont simulées : la mesure de reconnexion concerne le client,
+pas la latence ou le débit serveur. Aucun compte réel n'est utilisé. Un timeout
+ou une vérification échouée termine la commande avec un code non nul.
+
+Mesures ponctuelles sur la machine WSL2 de référence ci-dessus, navigateur
+Chromium headless, build Vite de développement (pas un budget CI absolu) :
+
+| Étape | Avant | Après |
+| --- | ---: | ---: |
+| Ouverture froide, 10 000 ciphertexts + 10 000 révisions | **> 30 000 ms**, timeout pendant l'hydratation des historiques | 812 ms |
+| Recherche, médiane de 20 requêtes | 10,7 ms, fixture en mémoire uniquement | 17,1 ms, fixture chiffrée rouverte |
+| Recherche, p95 | 14,5 ms, fixture en mémoire uniquement | 22,4 ms |
+| Rendu du coffre (2 frames) | 615 ms, fixture en mémoire uniquement | 678 ms |
+| Modification UI → cache durable, debounce inclus | non mesuré | 1 004 ms |
+| Action `saveNote` durable | non mesuré | 319 ms |
+| Reconnexion client, curseur + delta puis page terminale | non mesuré | 1 432 ms, 2 GET |
+| Plus longue tâche observée pendant ouverture/recherche/rendu | non mesuré | 650 ms |
+
+La création du fixture (9 846 ms) est exclue de l'ouverture. Une mesure
+intermédiaire avec seulement les lectures IndexedDB bornées donnait 3 060 ms
+pour l'ouverture ; l'historique à la demande et le déchiffrement par groupes de
+256 notes réduisent encore le coût. Les variantes chiffrées restent persistées ;
+les historiques déchiffrés et clés sont purgés au verrouillage. La restauration
+et les points de restauration chargent explicitement l'historique de leur note.
+Les lectures par lots partagent une seule transaction readonly cohérente.
+
+Limites observées : l'arbre affiche encore 10 000 éléments (60 103 nœuds DOM) ;
+son rendu produit une longue tâche. La recherche reste sous 100 ms dans cette
+mesure et ne justifie pas une nouvelle dépendance d'indexation. Ces chiffres ne
+prouvent pas une frappe sans aucune pause sur toutes les machines. Les mesures
+« avant » en mémoire ne sont pas directement comparables à l'ouverture chiffrée.
+
+### Réplique Markdown native
+
+```bash
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml \
+  --test folder_performance -- --ignored --nocapture
+```
+
+Le test utilise exclusivement un dossier temporaire, 10 000 notes synthétiques,
+vérifie les octets modifiés et l'absence de réécriture d'un fichier inchangé.
+Mesure native debug : création initiale **22 459 ms**, snapshot inchangé
+**1 519 ms**, modification d'une note **1 870 ms**. Avant la journalisation par
+lot, une création de seulement 1 000 notes prenait 10 940 ms ; ce point de mesure
+n'est pas une extrapolation à 10 000 notes.
+
+Le manifeste journalise le lot avant les écritures, puis sa finalisation, au
+lieu de réécrire un manifeste croissant après chaque fichier. Les snapshots
+restent sérialisés en arrière-plan. Ils relisent les fichiers inchangés pour
+détecter les modifications externes mais ne les réécrivent pas ; cette
+vérification explique le coût résiduel. Le cache chiffré reste durable même si
+la réplique est lente ou échoue.

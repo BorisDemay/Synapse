@@ -10,10 +10,11 @@ the server. A different vault cannot adopt that directory. Unknown files and
 externally changed files are not silently replaced or deleted. Select an empty
 directory or explicitly import those files to recover interoperability.
 
-Before replacing a file, the manifest journals both its previous and intended
-hash. Reopening can therefore recover on either side of an interrupted atomic
-write. Each completed file narrows the journal; partial snapshot failure leaves
-other entries recoverable. The encrypted cache is retained on any mirror error,
+Before replacing any file, the manifest journals both previous and intended
+hashes for the validated batch. Reopening can therefore recover on either side
+of each interrupted atomic write. Completion narrows the journal; partial
+snapshot failure leaves every entry recoverable. Unchanged files are checked
+for external edits but are not rewritten. The encrypted cache is retained on any mirror error,
 and the UI exposes the error. Case-colliding snapshot paths are rejected on all
 platforms to retain Windows/Linux compatibility.
 

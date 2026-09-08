@@ -249,6 +249,10 @@ const importCollisions = computed(() => {
   ];
 });
 
+watch([noteId, noteHistoryOpen], ([id, open]) => {
+  if (open && id && vault.isUnlocked) void vault.loadHistory(id);
+});
+
 const historyEntries = computed(() =>
   vault.historyFor(noteId.value).map((entry) => ({
     label: `Révision ${entry.revision}`,

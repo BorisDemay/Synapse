@@ -115,30 +115,50 @@ impl LocalFolderMirror {
     }
 
     pub async fn apply(&mut self, entries: &[FolderEntry]) -> Result<(), String> {
-        for entry in entries {
-            if self.prepare(entry).await? {
-                self.upsert(entry).await?;
-                self.persist_manifest().await?;
-            }
+        let changed = self.prepare_batch(entries).await?;
+        for entry in changed {
+            self.upsert(entry).await?;
         }
         self.persist_manifest().await
     }
 
-    pub async fn replace_snapshot(&mut self, entries: &[FolderEntry]) -> Result<(), String> {
+    async fn prepare_batch<'a>(
+        &mut self,
+        entries: &'a [FolderEntry],
+    ) -> Result<Vec<&'a FolderEntry>, String> {
         let mut normalized = BTreeSet::new();
         for entry in entries {
             if !normalized.insert(entry.relative_path().to_lowercase()) {
                 return Err("duplicate or case-colliding vault paths".into());
             }
         }
-        let mut keep = BTreeSet::new();
+        let previous = self.hashes.clone();
+        let mut changed = Vec::new();
         for entry in entries {
-            if self.prepare(entry).await? {
-                self.upsert(entry).await?;
-                self.persist_manifest().await?;
+            match self.prepare(entry).await {
+                Ok(true) => changed.push(entry),
+                Ok(false) => {}
+                Err(error) => {
+                    self.hashes = previous;
+                    return Err(error);
+                }
             }
-            keep.insert(entry.relative_path().to_owned());
         }
+        // Journal the whole proposed batch before any file changes. Both sides
+        // of every interrupted write remain recoverable without quadratic fsyncs.
+        self.persist_manifest().await?;
+        Ok(changed)
+    }
+
+    pub async fn replace_snapshot(&mut self, entries: &[FolderEntry]) -> Result<(), String> {
+        let changed = self.prepare_batch(entries).await?;
+        for entry in changed {
+            self.upsert(entry).await?;
+        }
+        let keep = entries
+            .iter()
+            .map(|entry| entry.relative_path().to_owned())
+            .collect();
         let stale: Vec<String> = self.written.difference(&keep).cloned().collect();
         for path in stale {
             self.delete(&path).await?;
@@ -253,7 +273,6 @@ impl LocalFolderMirror {
         if !hashes.contains(&next) {
             hashes.push(next);
         }
-        self.persist_manifest().await?;
         Ok(true)
     }
 
