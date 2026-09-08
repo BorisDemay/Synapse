@@ -1,3 +1,4 @@
+import "../../../web/node_modules/fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   installDesktopLocalFolder,
@@ -68,7 +69,6 @@ describe("desktop durable folder replica", () => {
 });
 
 it("mirrors remote changes pulled by the real store synchronize action", async () => {
-  await import("../../../web/node_modules/fake-indexeddb/auto");
   const { createPinia, setActivePinia } = await import("pinia");
   const { useVaultStore } = await import("../../../web/src/stores/vault");
   const { useAuthStore } = await import("../../../web/src/stores/auth");
@@ -97,31 +97,29 @@ it("mirrors remote changes pulled by the real store synchronize action", async (
   ).encrypt(encodeNotePlaintext("remote.md", "remote content"));
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            protocol_version: 1,
-            next_cursor: null,
-            operations: [
-              {
-                protocol_version: 1,
-                operation_id: "0198e5de-aaaa-7bbb-8ccc-ddddeeeefff1",
-                vault_id: vaultId,
-                note_id: noteId,
-                base_revision: 0,
-                revision: 1,
-                nonce: Array.from(nonce),
-                ciphertext: Array.from(ciphertext),
-                ciphertext_hash: "aa".repeat(32),
-                aad_version: 1,
-              },
-            ],
-          }),
-          { status: 200 },
-        ),
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          protocol_version: 1,
+          next_cursor: null,
+          operations: [
+            {
+              protocol_version: 1,
+              operation_id: "0198e5de-aaaa-7bbb-8ccc-ddddeeeefff1",
+              vault_id: vaultId,
+              note_id: noteId,
+              base_revision: 0,
+              revision: 1,
+              nonce: Array.from(nonce),
+              ciphertext: Array.from(ciphertext),
+              ciphertext_hash: "aa".repeat(32),
+              aad_version: 1,
+            },
+          ],
+        }),
+        { status: 200 },
       ),
+    ),
   );
   installDesktopLocalFolder();
   invoke.mockReset().mockResolvedValue("/chosen");

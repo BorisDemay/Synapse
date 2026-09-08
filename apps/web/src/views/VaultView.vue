@@ -1159,7 +1159,7 @@ watch(settingsOpen, (open) => {
         @edit-manual="resolveWith(vault.activeConflict.manualDraft)"
       />
       <section
-        v-if="importPlan"
+        v-else-if="importPlan"
         class="import-preview"
         aria-labelledby="import-preview-title"
       >

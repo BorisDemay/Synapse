@@ -437,3 +437,23 @@ it("retains a rejected durable draft and blocks logout and note switching", asyn
     "# unsaved quota draft",
   );
 });
+
+it("gives conflict resolution the workspace without competing editor height", async () => {
+  const { wrapper, vault } = await mountVault();
+  vault.activeConflict = {
+    noteId,
+    base: "# base",
+    local: "# local",
+    remote: "# remote",
+    manualDraft: "# draft",
+    conflict: {} as never,
+  };
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "ConflictResolver" }).exists()).toBe(
+    true,
+  );
+  expect(wrapper.find('[data-test="markdown-editor"]').exists()).toBe(false);
+  vault.activeConflict = null;
+  await flushPromises();
+  expect(wrapper.find('[data-test="markdown-editor"]').exists()).toBe(true);
+});
