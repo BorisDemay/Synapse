@@ -68,6 +68,7 @@ const vditorMock = vi.hoisted(() => {
         </div>
       </div>
       <div class="vditor-content">
+        <div class="vditor-sv" contenteditable="true" style="display:none"></div>
         <div class="vditor-ir">
           <div contenteditable="true"></div>
         </div>
@@ -116,6 +117,16 @@ describe("MarkdownEditor", () => {
     document.body.innerHTML = "";
   });
 
+  it("labels only the active editor when hidden source mode comes first in the DOM", () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: "hello" } });
+    expect(
+      wrapper
+        .get('.vditor-ir [contenteditable="true"]')
+        .attributes("aria-label"),
+    ).toBe("Éditeur Markdown");
+    expect(wrapper.get(".vditor-sv").attributes("aria-label")).toBeUndefined();
+  });
+
   it("uses complete instant rendering without persistent or remote content", () => {
     mount(MarkdownEditor, {
       props: { modelValue: "# Titre\n\n- Élément" },
@@ -142,7 +153,7 @@ describe("MarkdownEditor", () => {
     expect(options?.toolbar).not.toContain("record");
     const editable = vditorMock
       .root()
-      ?.querySelector('[contenteditable="true"]');
+      ?.querySelector('.vditor-ir [contenteditable="true"]');
     expect(editable?.getAttribute("aria-label")).toBe("Éditeur Markdown");
     expect(editable?.getAttribute("lang")).toBe("fr");
   });

@@ -186,8 +186,17 @@ function applyAccessibility() {
     return;
   }
 
+  for (const inactive of root.querySelectorAll<HTMLElement>(
+    '[aria-label="Éditeur Markdown"]',
+  )) {
+    inactive.removeAttribute("aria-label");
+    inactive.removeAttribute("aria-multiline");
+    inactive.removeAttribute("role");
+  }
   const editable = root.querySelector<HTMLElement>(
-    '.vditor-ir [contenteditable="true"], .vditor-sv[contenteditable="true"]',
+    viewMode.value === "sv"
+      ? '.vditor-sv[contenteditable="true"]'
+      : '.vditor-ir [contenteditable="true"]',
   );
   if (!editable) {
     root.setAttribute("aria-label", "Éditeur Markdown");
