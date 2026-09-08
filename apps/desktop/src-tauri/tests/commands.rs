@@ -54,8 +54,8 @@ async fn bridge_retries_a_transient_instance_disconnect() {
             .expect("response writes");
     });
 
-    let client = InstanceClient::connect(&format!("http://{address}"))
-        .expect("local instance is allowed");
+    let client =
+        InstanceClient::connect(&format!("http://{address}")).expect("local instance is allowed");
     let request: SynapseRequest = serde_json::from_value(serde_json::json!({
         "kind": "login",
         "body": { "email": "test", "password": "test" }

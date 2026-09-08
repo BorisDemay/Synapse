@@ -1,3 +1,7 @@
+import { reactive } from "vue";
+
+export const localFolderStatus = reactive({ path: "", error: "" });
+
 export type FolderEntry =
   | { kind: "attachment"; bytes: number[]; path: string }
   | { kind: "note"; markdown: string; path: string };
@@ -63,5 +67,14 @@ export async function mirrorVaultSnapshot(
   vaultId: string,
   entries: FolderEntry[],
 ): Promise<string | null> {
-  return adapter.snapshot(vaultId, entries);
+  try {
+    const path = await adapter.snapshot(vaultId, entries);
+    localFolderStatus.path = path ?? "";
+    localFolderStatus.error = "";
+    return path;
+  } catch {
+    localFolderStatus.error =
+      "La copie du dossier a échoué. Vos modifications restent dans le cache chiffré. Choisissez un dossier vide si des fichiers ont été modifiés ailleurs.";
+    return null;
+  }
 }

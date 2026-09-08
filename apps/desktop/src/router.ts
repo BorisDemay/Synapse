@@ -12,6 +12,7 @@ import VaultView from "../../web/src/views/VaultView.vue";
 
 export interface AuthenticationState {
   isAuthenticated: boolean;
+  isLocalMode?: boolean;
 }
 
 export interface VaultAccessState {
@@ -35,12 +36,12 @@ export function createAppRouter(
   });
   router.beforeEach((to) => {
     if (to.path === "/login" || to.path === "/register") {
-      if (auth.isAuthenticated) {
+      if (auth.isAuthenticated || auth.isLocalMode) {
         return vault.isUnlocked ? "/vault" : "/unlock";
       }
       return true;
     }
-    if (!auth.isAuthenticated) {
+    if (!auth.isAuthenticated && !auth.isLocalMode) {
       return "/login";
     }
     if (to.path !== "/unlock" && !vault.isUnlocked) {

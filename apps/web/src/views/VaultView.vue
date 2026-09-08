@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LocalFolderPanel from "./LocalFolderPanel.vue";
 import {
   AiChat,
   AiConversationPanel,
@@ -436,7 +437,7 @@ async function save(nextContent = content.value) {
 }
 
 async function onOnline() {
-  await vault.flushPendingOperations();
+  await vault.synchronize();
 }
 
 async function resolveWith(contentChoice: string) {
@@ -503,7 +504,7 @@ async function lockVault() {
 
 async function loadAccountSettings() {
   settingsError.value = "";
-  if (auth.isOfflineSession) {
+  if (auth.isOfflineSession || auth.isLocalMode) {
     return;
   }
   try {
@@ -842,7 +843,7 @@ function refreshBlobUrls() {
 onMounted(() => {
   window.addEventListener("online", onOnline);
   if (navigator.onLine) {
-    void vault.flushPendingOperations();
+    void vault.synchronize();
   }
   if (vault.isUnlocked) {
     void assistant.restore();
@@ -1254,12 +1255,13 @@ watch(settingsOpen, (open) => {
       />
     </template>
   </AppShell>
+  <LocalFolderPanel />
   <SettingsPanel
     :account-email="accountEmail"
     :device-supported="deviceSupported"
     :device-trusted="deviceTrusted"
     :error-message="settingsError"
-    :offline="auth.isOfflineSession"
+    :offline="auth.isOfflineSession || auth.isLocalMode"
     :open="settingsOpen"
     :sessions="sessions"
     :status-message="settingsStatus"

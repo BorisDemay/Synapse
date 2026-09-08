@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::http::{InstanceClient, SynapseRequest, SynapseResponse};
 use crate::local_folder::{FolderEntry, LocalFolderMirror, default_folder_path};
@@ -96,13 +97,9 @@ struct FolderConfigFile {
     roots: BTreeMap<String, String>,
 }
 
-struct FolderSlot {
-    written: BTreeSet<String>,
-}
-
 #[derive(Default)]
 pub struct LocalFolderRegistry {
-    slots: Mutex<BTreeMap<String, FolderSlot>>,
+    writes: tokio::sync::Mutex<()>,
 }
 
 impl LocalFolderRegistry {
@@ -136,7 +133,25 @@ fn save_config(app: &AppHandle, config: &FolderConfigFile) -> Result<(), String>
         std::fs::create_dir_all(parent).map_err(|_| "local folder is unavailable")?;
     }
     let bytes = serde_json::to_vec(config).map_err(|_| "local folder is unavailable")?;
-    std::fs::write(path, bytes).map_err(|_| "local folder is unavailable".to_owned())
+    use std::io::Write;
+    let temporary = path.with_extension(format!("{}.pending", synapse_core::VaultId::new()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|_| "local folder is unavailable")?;
+    file.write_all(&bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|_| "local folder is unavailable")?;
+    drop(file);
+    std::fs::rename(&temporary, &path).map_err(|_| "local folder is unavailable")?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| "local folder is unavailable")?;
+    }
+    Ok(())
 }
 
 fn default_root(app: &AppHandle, vault_id: &str) -> Result<PathBuf, String> {
@@ -146,41 +161,6 @@ fn default_root(app: &AppHandle, vault_id: &str) -> Result<PathBuf, String> {
         .or_else(|_| app.path().app_data_dir())
         .map_err(|_| "local folder is unavailable")?;
     default_folder_path(&base, vault_id)
-}
-
-async fn mirror_for(
-    vault_id: &str,
-    root: PathBuf,
-    registry: &LocalFolderRegistry,
-) -> Result<LocalFolderMirror, String> {
-    let written = registry
-        .slots
-        .lock()
-        .map_err(|_| "local folder is unavailable")?
-        .get(vault_id)
-        .map(|slot| slot.written.clone())
-        .unwrap_or_default();
-    let mut mirror = LocalFolderMirror::open(root).await?;
-    mirror.set_written(written);
-    Ok(mirror)
-}
-
-fn remember_slot(
-    vault_id: &str,
-    mirror: &LocalFolderMirror,
-    registry: &LocalFolderRegistry,
-) -> Result<(), String> {
-    registry
-        .slots
-        .lock()
-        .map_err(|_| "local folder is unavailable")?
-        .insert(
-            vault_id.to_owned(),
-            FolderSlot {
-                written: mirror.written(),
-            },
-        );
-    Ok(())
 }
 
 fn persist_root(app: &AppHandle, vault_id: &str, root: &std::path::Path) -> Result<(), String> {
@@ -204,10 +184,11 @@ pub async fn ensure_local_vault_folder(
     app: AppHandle,
     registry: State<'_, LocalFolderRegistry>,
 ) -> Result<String, String> {
+    let _guard = registry.writes.lock().await;
     let root = resolve_root(&app, &vault_id)?;
-    let mirror = mirror_for(&vault_id, root, &registry).await?;
+    let mirror = LocalFolderMirror::open_for_vault(root, &vault_id).await?;
+    mirror.claim_selection().await?;
     persist_root(&app, &vault_id, &mirror.root())?;
-    remember_slot(&vault_id, &mirror, &registry)?;
     Ok(mirror.root().to_string_lossy().into_owned())
 }
 
@@ -218,11 +199,11 @@ pub async fn mirror_local_vault_folder(
     app: AppHandle,
     registry: State<'_, LocalFolderRegistry>,
 ) -> Result<String, String> {
+    let _guard = registry.writes.lock().await;
     let root = resolve_root(&app, &vault_id)?;
-    let mut mirror = mirror_for(&vault_id, root, &registry).await?;
+    let mut mirror = LocalFolderMirror::open_for_vault(root, &vault_id).await?;
     mirror.replace_snapshot(&entries).await?;
     persist_root(&app, &vault_id, &mirror.root())?;
-    remember_slot(&vault_id, &mirror, &registry)?;
     Ok(mirror.root().to_string_lossy().into_owned())
 }
 
@@ -232,12 +213,27 @@ pub async fn choose_local_vault_folder(
     app: AppHandle,
     registry: State<'_, LocalFolderRegistry>,
 ) -> Result<Option<String>, String> {
-    let Some(vault_id) = vault_id.filter(|id| !id.is_empty()) else {
+    if let Some(id) = &vault_id {
+        synapse_core::VaultId::parse(id).map_err(|_| "invalid vault path")?;
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Choisir un dossier de coffre Synapse")
+        .pick_folder(move |path| {
+            let _ = sender.send(path);
+        });
+    let Some(path) = receiver.await.map_err(|_| "folder selection failed")? else {
         return Ok(None);
     };
-    Ok(Some(
-        ensure_local_vault_folder(vault_id, app, registry).await?,
-    ))
+    let path = path.into_path().map_err(|_| "invalid vault path")?;
+    let path = path.to_str().ok_or("invalid vault path")?.to_owned();
+    if let Some(vault_id) = vault_id {
+        return bind_local_vault_folder(vault_id, path, app, registry)
+            .await
+            .map(Some);
+    }
+    Ok(Some(path))
 }
 
 #[tauri::command]
@@ -247,9 +243,11 @@ pub async fn bind_local_vault_folder(
     app: AppHandle,
     registry: State<'_, LocalFolderRegistry>,
 ) -> Result<String, String> {
+    let _guard = registry.writes.lock().await;
+    synapse_core::VaultId::parse(&vault_id).map_err(|_| "invalid vault path")?;
     let root = PathBuf::from(path);
-    persist_root(&app, &vault_id, &root)?;
-    let mirror = mirror_for(&vault_id, root, &registry).await?;
-    remember_slot(&vault_id, &mirror, &registry)?;
+    let mirror = LocalFolderMirror::open_for_vault(root, &vault_id).await?;
+    mirror.claim_selection().await?;
+    persist_root(&app, &vault_id, &mirror.root())?;
     Ok(mirror.root().to_string_lossy().into_owned())
 }

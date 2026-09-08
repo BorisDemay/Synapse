@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import {
+  isLocalFolderSupported,
+  localFolderStatus,
+  chooseLocalVaultFolder,
+  bindLocalVaultFolder,
+  ensureLocalVaultFolder,
+} from "../platform/local-folder";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -21,6 +28,7 @@ const vaultId = ref<string | null>(null);
 const hasTrustedDevice = ref(false);
 const trustedDeviceSupported = ref(false);
 const trustDevice = ref(false);
+const folderChoice = ref<"default" | "choose">("default");
 
 onMounted(async () => {
   trustedDeviceSupported.value = isTrustedDeviceSupported();
@@ -65,7 +73,26 @@ async function submit() {
   error.value = "";
   try {
     if (mode.value === "create") {
+      const folder =
+        isLocalFolderSupported() && folderChoice.value === "choose"
+          ? await chooseLocalVaultFolder("")
+          : null;
+      if (
+        isLocalFolderSupported() &&
+        folderChoice.value === "choose" &&
+        !folder
+      )
+        return;
       await vault.createAndUnlockVault(secret);
+      if (isLocalFolderSupported() && vault.currentVaultId) {
+        try {
+          if (folder) await bindLocalVaultFolder(vault.currentVaultId, folder);
+          else await ensureLocalVaultFolder(vault.currentVaultId);
+        } catch {
+          localFolderStatus.error =
+            "Coffre créé et conservé dans le cache chiffré. Choisissez un dossier Markdown vide dans le coffre.";
+        }
+      }
     } else if (vaultId.value) {
       const bytes = await vault.fetchEnvelopeBytes(vaultId.value);
       const envelope = parseWrappedVaultKey(bytes);
@@ -143,6 +170,16 @@ async function submit() {
             }}
           </p>
           <form class="form-stack" @submit.prevent="submit">
+            <label v-if="mode === 'create' && isLocalFolderSupported()">
+              Dossier Markdown local
+              <select
+                v-model="folderChoice"
+                aria-label="Dossier Markdown local"
+              >
+                <option value="default">Créer dans Documents/Synapse</option>
+                <option value="choose">Choisir un dossier</option>
+              </select>
+            </label>
             <div class="form-field">
               <label for="unlock-passphrase">Phrase de déchiffrement</label>
               <Password

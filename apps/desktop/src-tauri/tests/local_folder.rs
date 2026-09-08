@@ -184,3 +184,180 @@ fn default_folder_path_nests_a_validated_vault_id() {
     assert_eq!(path, root.join("Synapse").join(vault_id));
     assert!(synapse_desktop::local_folder::default_folder_path(root, "../escape").is_err());
 }
+
+#[tokio::test]
+async fn mirror_preserves_unknown_and_externally_changed_notes() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("note.md");
+    tokio::fs::write(&path, "external").await.unwrap();
+    let mut mirror = LocalFolderMirror::open(directory.path()).await.unwrap();
+    let entry = FolderEntry::Note {
+        path: "note.md".into(),
+        markdown: "app".into(),
+    };
+    assert!(
+        mirror
+            .replace_snapshot(std::slice::from_ref(&entry))
+            .await
+            .is_err()
+    );
+    assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "external");
+    tokio::fs::remove_file(&path).await.unwrap();
+    mirror
+        .replace_snapshot(std::slice::from_ref(&entry))
+        .await
+        .unwrap();
+    tokio::fs::write(&path, "external edit").await.unwrap();
+    assert!(mirror.replace_snapshot(&[entry]).await.is_err());
+    assert!(mirror.replace_snapshot(&[]).await.is_err());
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.unwrap(),
+        "external edit"
+    );
+}
+
+#[tokio::test]
+async fn mirror_remembers_owned_files_after_restart() {
+    let directory = tempdir().unwrap();
+    let mut mirror = LocalFolderMirror::open(directory.path()).await.unwrap();
+    mirror
+        .replace_snapshot(&[FolderEntry::Note {
+            path: "before.md".into(),
+            markdown: "saved".into(),
+        }])
+        .await
+        .unwrap();
+    drop(mirror);
+    let mut reopened = LocalFolderMirror::open(directory.path()).await.unwrap();
+    reopened
+        .replace_snapshot(&[FolderEntry::Note {
+            path: "after.md".into(),
+            markdown: "saved".into(),
+        }])
+        .await
+        .unwrap();
+    assert!(!directory.path().join("before.md").exists());
+    assert_eq!(
+        tokio::fs::read_to_string(directory.path().join("after.md"))
+            .await
+            .unwrap(),
+        "saved"
+    );
+}
+
+#[tokio::test]
+async fn folder_ownership_survives_restart() {
+    let directory = tempdir().unwrap();
+    let mut mirror = LocalFolderMirror::open_for_vault(directory.path(), "vault-a")
+        .await
+        .unwrap();
+    mirror
+        .replace_snapshot(&[FolderEntry::Note {
+            path: "note.md".into(),
+            markdown: "A".into(),
+        }])
+        .await
+        .unwrap();
+    assert!(
+        LocalFolderMirror::open_for_vault(directory.path(), "vault-b")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn partial_snapshot_can_resume_after_restart() {
+    let directory = tempdir().unwrap();
+    let mut mirror = LocalFolderMirror::open(directory.path()).await.unwrap();
+    let entry = |text: &str| FolderEntry::Note {
+        path: "note.md".into(),
+        markdown: text.into(),
+    };
+    mirror.replace_snapshot(&[entry("before")]).await.unwrap();
+    tokio::fs::write(directory.path().join("foreign.md"), "foreign")
+        .await
+        .unwrap();
+    assert!(
+        mirror
+            .replace_snapshot(&[
+                entry("after"),
+                FolderEntry::Note {
+                    path: "foreign.md".into(),
+                    markdown: "no".into()
+                }
+            ])
+            .await
+            .is_err()
+    );
+    drop(mirror);
+    let mut mirror = LocalFolderMirror::open(directory.path()).await.unwrap();
+    mirror.replace_snapshot(&[entry("resumed")]).await.unwrap();
+    assert_eq!(
+        tokio::fs::read_to_string(directory.path().join("note.md"))
+            .await
+            .unwrap(),
+        "resumed"
+    );
+}
+
+#[tokio::test]
+async fn interrupted_journal_accepts_either_side_of_atomic_write() {
+    for content in ["before", "after"] {
+        let directory = tempdir().unwrap();
+        let mut mirror = LocalFolderMirror::open(directory.path()).await.unwrap();
+        mirror
+            .replace_snapshot(&[FolderEntry::Note {
+                path: "note.md".into(),
+                markdown: "before".into(),
+            }])
+            .await
+            .unwrap();
+        let journal = serde_json::json!({ "owner": "test-profile", "hashes": {"note.md": [synapse_core::ContentHash::from_bytes(b"before").to_string(), synapse_core::ContentHash::from_bytes(b"after").to_string()] }});
+        tokio::fs::write(
+            directory.path().join("attachments/.synapse-mirror.json"),
+            serde_json::to_vec(&journal).unwrap(),
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(directory.path().join("note.md"), content)
+            .await
+            .unwrap();
+        drop(mirror);
+        let mut reopened = LocalFolderMirror::open(directory.path()).await.unwrap();
+        reopened
+            .replace_snapshot(&[FolderEntry::Note {
+                path: "note.md".into(),
+                markdown: "recovered".into(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(directory.path().join("note.md"))
+                .await
+                .unwrap(),
+            "recovered"
+        );
+    }
+}
+
+#[tokio::test]
+async fn snapshot_rejects_case_collisions_before_writing() {
+    let directory = tempdir().unwrap();
+    let mut mirror = LocalFolderMirror::open(directory.path()).await.unwrap();
+    assert!(
+        mirror
+            .replace_snapshot(&[
+                FolderEntry::Note {
+                    path: "A.md".into(),
+                    markdown: "first".into()
+                },
+                FolderEntry::Note {
+                    path: "a.md".into(),
+                    markdown: "second".into()
+                },
+            ])
+            .await
+            .is_err()
+    );
+    assert!(!directory.path().join("A.md").exists());
+}

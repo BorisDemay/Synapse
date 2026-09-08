@@ -5,6 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 
 import { useVaultStore } from "../stores/vault";
+import {
+  installLocalFolderAdapter,
+  resetLocalFolderAdapterForTests,
+  localFolderStatus,
+} from "../platform/local-folder";
 import UnlockVaultView from "./UnlockVaultView.vue";
 
 vi.mock("../crypto/vault-key", async (importOriginal) => {
@@ -73,6 +78,7 @@ async function mountUnlock(options?: {
 describe("UnlockVaultView trusted device", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    resetLocalFolderAdapterForTests();
   });
 
   it("unlocks from the browser wrap on page load when a trusted device exists", async () => {
@@ -141,4 +147,31 @@ describe("UnlockVaultView trusted device", () => {
     expect(vault.rememberCurrentDevice).toHaveBeenCalledOnce();
     expect(router.currentRoute.value.path).toBe("/vault");
   });
+});
+
+it("retains the created vault when folder setup fails and enters the vault for recovery", async () => {
+  installLocalFolderAdapter({
+    supported: true,
+    bind: async () => null,
+    choose: async () => null,
+    snapshot: async () => null,
+    ensure: async () => {
+      throw new Error("not empty");
+    },
+  });
+  const { router, vault, wrapper } = await mountUnlock({ vaultId: null });
+  const create = vi
+    .spyOn(vault, "createAndUnlockVault")
+    .mockImplementation(async () => {
+      vault.currentVaultId = "created";
+      vault.isUnlocked = true;
+      return "created";
+    });
+  await wrapper.get("#unlock-passphrase").setValue("local passphrase");
+  await wrapper.get("form").trigger("submit");
+  await flushPromises();
+  expect(create).toHaveBeenCalledOnce();
+  expect(router.currentRoute.value.path).toBe("/vault");
+  expect(localFolderStatus.error).toContain("Coffre créé");
+  resetLocalFolderAdapterForTests();
 });

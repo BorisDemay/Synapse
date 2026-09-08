@@ -36,6 +36,16 @@ async function configureInstance() {
   localStorage.setItem("synapse-instance-url", url);
 }
 
+async function openLocal() {
+  error.value = "";
+  try {
+    await auth.enterLocalMode();
+    await router.push("/unlock");
+  } catch {
+    error.value = "Impossible d’ouvrir le profil local.";
+  }
+}
+
 async function submit() {
   error.value = "";
   try {
@@ -145,7 +155,7 @@ async function submit() {
           <RouterLink to="/register">Créer un compte</RouterLink>
         </p>
         <p class="form-footer">
-          <RouterLink to="/">Choisir un coffre local</RouterLink>
+          <Button label="Choisir un coffre local" text @click="openLocal" />
         </p>
       </div>
     </section>
