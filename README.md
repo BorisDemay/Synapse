@@ -231,9 +231,11 @@ Guide opérateur : `docs/operations/install.md`, sauvegarde :
 
 ### Parcours chiffré web / sync
 
-Prérequis : `just serve` (PostgreSQL `synapse_dev` persistante, distincte de
-`synapse_test` que les tests Cargo vident) et
-`SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` / `SYNAPSE_COOKIE_SECURE=false`.
+Le harness Playwright construit l’application et démarre sa propre API, sa
+base jetable et ses répertoires temporaires. Les ports par défaut sont 13000
+et 15173 ; un port occupé fait échouer le démarrage. Il ne faut pas démarrer
+`just serve` pour ces tests. Prérequis : Docker Compose, Rust et Chromium
+Playwright installé.
 
 ```bash
 pnpm playwright test tests/e2e/full-sync.spec.ts
@@ -245,13 +247,16 @@ Checklist de préversion : `docs/testing/release-checklist.md`.
 ### Performance
 
 ```bash
-cargo run -p synapse-fixture-generator --release -- target/perf-vault 10000
-cargo bench -p synapse-core --bench markdown -- --quick
-cargo bench -p synapse-local-store --bench search -- --quick
-SYNAPSE_BASE_URL=http://127.0.0.1:3000 k6 run tests/load/sync.js
+node tests/performance/client-benchmark.mjs
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml \
+  --test folder_performance -- --ignored --nocapture
 ```
 
-Budgets mesurés : `docs/architecture/performance-budgets.md`.
+Ces commandes mesurent le client Vue/IndexedDB avec 10 000 notes chiffrées
+et la réplique Markdown dans un dossier temporaire. Le benchmark navigateur
+simule les réponses réseau : il mesure le traitement du delta côté client.
+Mesures, limites et anciens benchmarks Rust/k6 :
+[budgets de performance](docs/architecture/performance-budgets.md).
 
 ### Limites connues du MVP
 
