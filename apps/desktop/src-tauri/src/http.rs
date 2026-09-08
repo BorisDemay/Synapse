@@ -138,12 +138,32 @@ impl InstanceClient {
 
     pub fn connect_with_session_store(raw: &str, store: Option<PathBuf>) -> Result<Self, String> {
         let base = Url::parse(raw.trim()).map_err(|_| "invalid instance url".to_owned())?;
+        if !base.username().is_empty()
+            || base.password().is_some()
+            || base.query().is_some()
+            || base.fragment().is_some()
+            || base.host_str().is_none()
+        {
+            return Err("invalid instance url".into());
+        }
         let host = base.host_str().unwrap_or_default();
         let localhost = host == "127.0.0.1" || host == "localhost";
         if base.scheme() != "https" && !(base.scheme() == "http" && localhost) {
             return Err("instance url must be https (or http on localhost)".to_owned());
         }
-        let restored = store.as_deref().and_then(load_remembered_session);
+        let origin = base.origin().ascii_serialization();
+        let store = store.map(|path| {
+            // Legacy unbound tokens are never reused. Each origin owns its file,
+            // so a delayed response from another instance cannot erase it.
+            forget_remembered_session(Some(&path));
+            path.with_extension(format!(
+                "{}.json",
+                synapse_core::ContentHash::from_bytes(origin.as_bytes())
+            ))
+        });
+        let restored = store
+            .as_deref()
+            .and_then(|path| load_remembered_session(path, &origin));
         Ok(Self {
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -185,7 +205,8 @@ impl InstanceClient {
             return;
         };
         if let Some(token) = guard.as_deref() {
-            let _ = persist_remembered_session(path, token);
+            let _ =
+                persist_remembered_session(path, &self.base.origin().ascii_serialization(), token);
         }
     }
 
@@ -815,43 +836,78 @@ fn opaque_session_token(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
-fn persist_remembered_session(path: &Path, token: &str) -> Result<(), String> {
-    if !opaque_session_token(token) {
-        return Err("invalid session token".to_owned());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|_| "unable to persist session".to_owned())?;
-    }
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|_| "unable to persist session".to_owned())?;
-        file.write_all(token.as_bytes())
-            .map_err(|_| "unable to persist session".to_owned())?;
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, token).map_err(|_| "unable to persist session".to_owned())?;
-    }
-    Ok(())
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RememberedSession {
+    version: u8,
+    origin: String,
+    token: String,
 }
 
-fn load_remembered_session(path: &Path) -> Option<String> {
+fn persist_remembered_session(path: &Path, origin: &str, token: &str) -> Result<(), String> {
+    use std::io::Write;
+    if !opaque_session_token(token) || token != token.trim() {
+        return Err("invalid session token".into());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| "unable to persist session")?;
+    }
+    let bytes = serde_json::to_vec(&RememberedSession {
+        version: 1,
+        origin: origin.to_owned(),
+        token: token.to_owned(),
+    })
+    .map_err(|_| "unable to persist session")?;
+    let temporary = path.with_extension(format!("{}.pending", synapse_core::VaultId::new()));
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary)
+        .map_err(|_| "unable to persist session")?;
+    let result = (|| {
+        file.write_all(&bytes)
+            .and_then(|()| file.sync_all())
+            .map_err(|_| "unable to persist session")?;
+        drop(file);
+        std::fs::rename(&temporary, path).map_err(|_| "unable to persist session")?;
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|_| "unable to persist session")?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn load_remembered_session(path: &Path, origin: &str) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
-    let token = String::from_utf8(bytes).ok()?;
-    let token = token.trim();
-    if !opaque_session_token(token) {
-        forget_remembered_session(Some(path));
+    if bytes.len() > 1024 {
         return None;
     }
-    Some(token.to_owned())
+    let record: RememberedSession = serde_json::from_slice(&bytes).ok()?;
+    if record.version != 1
+        || record.origin != origin
+        || Url::parse(&record.origin)
+            .ok()?
+            .origin()
+            .ascii_serialization()
+            != record.origin
+        || !opaque_session_token(&record.token)
+        || record.token != record.token.trim()
+    {
+        return None;
+    }
+    Some(record.token)
 }
 
 fn forget_remembered_session(path: Option<&Path>) {
@@ -879,20 +935,121 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn remembered_session_never_crosses_an_http_origin() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("remembered-session");
+        let source = InstanceClient::connect_with_session_store(
+            "http://127.0.0.1:13991",
+            Some(path.clone()),
+        )
+        .unwrap();
+        *source.session.lock().unwrap() = Some("synthetic-origin-token".into());
+        source.persist_current_session();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; 4096];
+            let count = stream.read(&mut bytes).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .await
+                .unwrap();
+            String::from_utf8(bytes[..count].to_vec()).unwrap()
+        });
+        let changed = InstanceClient::connect_with_session_store(&target, Some(path)).unwrap();
+        changed
+            .bridge_request(super::SynapseRequest::Session)
+            .await
+            .unwrap();
+        let request = server.await.unwrap();
+        assert!(!request.to_ascii_lowercase().contains("cookie:"));
+    }
+
+    #[test]
+    fn unbound_sessions_and_unsafe_instance_urls_are_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session");
+        std::fs::write(&path, "synthetic-unbound-token").unwrap();
+        let client =
+            InstanceClient::connect_with_session_store("https://example.test", Some(path.clone()))
+                .unwrap();
+        assert!(client.cookie_header().is_none());
+        for value in [
+            "https://user:secret@example.test",
+            "https://example.test/?query=secret",
+            "https://example.test/#secret",
+        ] {
+            assert!(InstanceClient::connect(value).is_err());
+        }
+        let scoped = client.session_store.unwrap();
+        std::fs::write(&scoped, br#"{"version":1,"origin":"https://example.test@evil.test","token":"synthetic-session-token"}"#).unwrap();
+        assert!(load_remembered_session(&scoped, "https://example.test").is_none());
+    }
+
+    #[test]
+    fn delayed_old_origin_logout_preserves_the_new_origin_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session");
+        let old = InstanceClient::connect_with_session_store(
+            "https://old.example.test",
+            Some(path.clone()),
+        )
+        .unwrap();
+        *old.session.lock().unwrap() = Some("old-synthetic-token".into());
+        old.persist_current_session();
+        let next = InstanceClient::connect_with_session_store(
+            "https://new.example.test",
+            Some(path.clone()),
+        )
+        .unwrap();
+        *next.session.lock().unwrap() = Some("new-synthetic-token".into());
+        next.persist_current_session();
+        old.clear_session();
+        let reopened = InstanceClient::connect_with_session_store(
+            "https://new.example.test:443",
+            Some(path.clone()),
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.cookie_header().as_deref(),
+            Some("session=new-synthetic-token")
+        );
+        for url in [
+            "http://127.0.0.1:3001",
+            "https://new.example.test:444",
+            "https://other.example.test",
+        ] {
+            assert!(
+                InstanceClient::connect_with_session_store(url, Some(path.clone()))
+                    .unwrap()
+                    .cookie_header()
+                    .is_none()
+            );
+        }
+    }
+
     #[test]
     fn remembered_native_session_survives_a_new_client() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("remembered-session");
-        persist_remembered_session(&path, "opaque-session-token").expect("persist");
+        let first =
+            InstanceClient::connect_with_session_store("http://127.0.0.1:3000", Some(path.clone()))
+                .unwrap();
+        *first.session.lock().unwrap() = Some("opaque-session-token".into());
+        first.persist_current_session();
         let client =
             InstanceClient::connect_with_session_store("http://127.0.0.1:3000", Some(path.clone()))
-                .expect("client");
+                .unwrap();
+        let path = client.session_store.clone().unwrap();
         assert_eq!(
             client.cookie_header(),
             Some("session=opaque-session-token".to_owned())
         );
         client.clear_session();
-        assert!(load_remembered_session(&path).is_none());
+        assert!(load_remembered_session(&path, "http://127.0.0.1:3000").is_none());
         assert!(!path.exists());
     }
 
@@ -900,7 +1057,8 @@ mod tests {
     fn forgetting_the_device_removes_the_native_session_file() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("remembered-session");
-        persist_remembered_session(&path, "opaque-session-token").expect("persist");
+        persist_remembered_session(&path, "http://127.0.0.1:3000", "opaque-session-token")
+            .expect("persist");
         forget_remembered_session(Some(&path));
         assert!(!path.exists());
         let client =
@@ -913,7 +1071,8 @@ mod tests {
     fn remembered_session_file_is_not_world_readable() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("remembered-session");
-        persist_remembered_session(&path, "opaque-session-token").expect("persist");
+        persist_remembered_session(&path, "http://127.0.0.1:3000", "opaque-session-token")
+            .expect("persist");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -924,7 +1083,10 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         let stored = std::fs::read_to_string(&path).expect("file");
-        assert_eq!(stored, "opaque-session-token");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stored).unwrap()["token"],
+            "opaque-session-token"
+        );
         assert!(!stored.contains("vault"));
     }
 }
