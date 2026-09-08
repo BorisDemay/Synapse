@@ -40,7 +40,7 @@ test("desktop-native runs the maintained native WebDriver smoke on every platfor
     workflow,
     /runner\.os == 'Windows'[\s\S]*?pnpm --filter @synapse\/desktop test:native/u,
   );
-  assert.equal(scripts["test:native"], "node e2e/native-webdriver-smoke.mjs");
+  assert.equal(scripts["test:native"], "node --experimental-strip-types e2e/native-webdriver-smoke.mjs");
   assert.doesNotMatch(scripts["test:native"], /e2e\/native\.mjs/u);
 });
 
@@ -55,4 +55,20 @@ test("NAS deployment health-gates manifest-last activation and keeps rollback", 
   assert.match(script, /sha256sum --check SHA256SUMS/u);
   assert.match(script, /for attempt in \{1\.\.30\}/u);
   assert.match(script, /synapse-windows-x86_64\.exe/u);
+});
+
+test("both native matrices provision isolated Windows PostgreSQL and gate release bundles", async () => {
+  for (const path of [".github/workflows/verify.yml", ".github/workflows/main-release.yml"]) {
+    const workflow = await readFile(path, "utf8");
+    assert.match(workflow, /native-ci-windows\.ps1 -Action start/u);
+    assert.match(workflow, /native-ci-windows\.ps1 -Action stop/u);
+    assert.match(workflow, /always\(\) && runner\.os == 'Windows'/u);
+    assert.match(workflow, /dbus-run-session -- xvfb-run -a pnpm --filter @synapse\/desktop test:native/u);
+    assert.match(workflow, /webkit2gtk-driver xvfb xdotool dbus-x11 openbox/u);
+    assert.match(workflow, /cargo install tauri-driver --locked/u);
+    assert.match(workflow, /Native Tauri recovery/u);
+    if (path.includes("main-release")) {
+      assert.ok(workflow.indexOf("Native Tauri recovery") < workflow.indexOf("Build signed updater bundle"));
+    }
+  }
 });

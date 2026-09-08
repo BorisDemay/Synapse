@@ -87,6 +87,24 @@ jobs:
           $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $config.bundle | Add-Member -Force NoteProperty windows ([pscustomobject]@{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" })
           $config | ConvertTo-Json -Depth 20 | Set-Content apps/desktop/src-tauri/tauri.conf.json
+      - name: Install native recovery prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y patchelf webkit2gtk-driver xvfb xdotool dbus-x11 openbox
+      - name: Install isolated PostgreSQL and matching WebView2 driver
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./infra/scripts/native-ci-windows.ps1 -Action start
+      - run: cargo install tauri-driver --locked
+      - name: Native Tauri recovery
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a pnpm --filter @synapse/desktop test:native
+      - name: Native Tauri recovery
+        if: runner.os == 'Windows'
+        run: pnpm --filter @synapse/desktop test:native
+      - name: Stop isolated Windows PostgreSQL
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: ./infra/scripts/native-ci-windows.ps1 -Action stop
       - name: Build signed updater bundle
         run: pnpm --filter @synapse/desktop tauri build
       - name: Normalize Linux updater artifact
