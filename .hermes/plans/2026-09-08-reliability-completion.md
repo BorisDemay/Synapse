@@ -79,7 +79,12 @@ recorded in the release checklist and relevant operator documentation.
   measured 22,459/1,519/1,870 ms. The performance document explicitly records
   the remaining 650 ms tree-render task, development-build conditions and
   non-comparable historical memory-only measurements.
-- Post-integration native Rust check: 24 tests passed, one opt-in filesystem
+- Native release testing exposed an existing remembered-session origin leak.
+  `7465ea5` fixes it with versioned origin-bound records, rejection of legacy
+  unbound tokens and isolated deletion across origins. The medium reviewer
+  observed seven HTTP/session tests, including a real request proving that a
+  different origin receives no old cookie. ADR 0014 records the boundary.
+- Post-integration native Rust check: 27 tests passed, one opt-in filesystem
   benchmark ignored by the default test command. Workspace formatting and clippy
   passed; seven release-script tests and eleven backup-operation tests passed.
   These do not replace the actual native WebDriver run required by point 7.

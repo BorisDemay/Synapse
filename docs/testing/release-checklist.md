@@ -20,7 +20,8 @@ du job Windows ; une exécution sous WSL2 constitue une observation Linux.
 
 - [ ] `just verify` — suite intégrée sur l’état final de la revue.
 - [x] Format Rust et clippy workspace ; 174 tests Rust de référence avec PostgreSQL réelle.
-- [x] 24 tests Rust natifs, dont 13 tests de réplique dossier.
+- [x] 27 tests Rust natifs, dont 13 tests de réplique dossier et 7 tests de
+  session/transport ; format et clippy natifs passent également.
 - [x] 11 tests Python des opérations de sauvegarde/restauration.
 - [x] Benchmark du client canonique avec 10 000 notes chiffrées et réplique native
   (voir `docs/architecture/performance-budgets.md`). Les anciens benchmarks
