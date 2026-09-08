@@ -1,4 +1,4 @@
-import type { EncryptedPushOperation } from "@synapse/api-client";
+import type { Conflict, EncryptedPushOperation } from "@synapse/api-client";
 
 import {
   noteKey,
@@ -31,6 +31,7 @@ export async function listPendingOperations(
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
     .map(
       ({
+        conflict: _conflict,
         sequence: _sequence,
         userId: _userId,
         attempted: _attempted,
@@ -203,11 +204,12 @@ export async function prepareOperation(
   const tx = db.transaction(["queue", "notes"], "readwrite");
   try {
     const row = await tx.objectStore("queue").get(operationId);
-    if (!row || row.userId !== userId || row.supersededBy) {
+    if (!row || row.userId !== userId || row.supersededBy || row.conflict) {
       await tx.done;
       return null;
     }
     const {
+      conflict: _conflict,
       sequence,
       userId: _userId,
       attempted,
@@ -246,4 +248,24 @@ export async function prepareOperation(
     await tx.done.catch(() => {});
     throw error;
   }
+}
+
+export async function blockConflictedOperation(
+  userId: string,
+  operationId: string,
+  conflict: Conflict | true,
+): Promise<void> {
+  const db = await openOfflineDb();
+  const tx = db.transaction("queue", "readwrite");
+  const row = await tx.store.get(operationId);
+  if (row?.userId === userId && !row.supersededBy)
+    await tx.store.put({ ...row, conflict }, operationId);
+  await tx.done;
+}
+export async function getOperationConflict(
+  userId: string,
+  operationId: string,
+): Promise<Conflict | true | undefined> {
+  const row = await (await openOfflineDb()).get("queue", operationId);
+  return row?.userId === userId ? row.conflict : undefined;
 }

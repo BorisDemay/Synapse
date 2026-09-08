@@ -190,7 +190,7 @@ describe("vault store", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       `/v1/vaults/${vaultId}/operations?limit=100`,
-      { credentials: "include" },
+      expect.objectContaining({ credentials: "include" }),
     );
     expect(vault.notes.get(noteId)?.content).toBe("# Secret note");
     expect(vault.syncStatus).toBe("synced");
@@ -365,7 +365,11 @@ describe("vault store", () => {
     });
 
     expect(vault.markdownExportNotes()).toEqual([
-      { content: "# Journal\n\nSecret line", title: "Journal" },
+      {
+        content: "# Journal\n\nSecret line",
+        path: `${noteId}.md`,
+        title: "Journal",
+      },
     ]);
     expect(fetch).not.toHaveBeenCalled();
   });

@@ -49,6 +49,8 @@ import {
 } from "../crypto/vault-key";
 import {
   clearUserOfflineData,
+  commitPulledPage,
+  getCachedPullCursor,
   deleteAssistantCredential,
   deleteTrustedDevice,
   getAssistantCredential,
@@ -62,11 +64,9 @@ import {
   putAssistantCredential,
   putAssistantConversations,
   putCachedEnvelope,
-  putCachedNote,
   putTrustedDevice,
   getVaultPreferences,
   putVaultPreferences,
-  setCachedHeadRevision,
   setCachedPullCursor,
 } from "../offline/cache";
 import {
@@ -79,6 +79,8 @@ import {
   persistPendingOperation,
   prepareOperation,
   acknowledgeOperation,
+  blockConflictedOperation,
+  getOperationConflict,
   listPendingOperations,
 } from "../offline/queue";
 import { useAuthStore } from "./auth";
@@ -200,7 +202,7 @@ function isDeletedNoteContent(content: string): boolean {
 }
 
 function pathForNote(id: string, existing?: LocalNote): string {
-  return existing?.path || legacyWebNotePath(id);
+  return existing?.path || `${id}.md`;
 }
 
 function applyPlaintext(
@@ -240,7 +242,8 @@ function applyPlaintext(
 
 export const useVaultStore = defineStore("vault", () => {
   let vaultKey: Uint8Array | undefined;
-  let pushController: AbortController | undefined;
+  const syncControllers = new Set<AbortController>();
+  let localEditEpoch = 0;
   const notes = reactive(new Map<string, LocalNote>());
   const attachments = reactive(new Map<string, LocalAttachment>());
   const historyByNote = reactive(
@@ -272,7 +275,7 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   function lock() {
-    pushController?.abort();
+    for (const controller of syncControllers) controller.abort();
     vaultKey?.fill(0);
     vaultKey = undefined;
     isUnlocked.value = false;
@@ -280,6 +283,7 @@ export const useVaultStore = defineStore("vault", () => {
     activeConflict.value = null;
     attachments.clear();
     historyByNote.clear();
+    preferences.value = { ...DEFAULT_VAULT_PREFERENCES };
     pendingNoteIds.value = [];
   }
 
@@ -312,12 +316,19 @@ export const useVaultStore = defineStore("vault", () => {
     if (!vaultKey) {
       return;
     }
+    const key = vaultKey;
     const record = await getVaultPreferences(userId, vaultId);
+    if (
+      vaultKey !== key ||
+      currentVaultId.value !== vaultId ||
+      useAuthStore().userId !== userId
+    )
+      return;
     if (!record) {
       preferences.value = { ...DEFAULT_VAULT_PREFERENCES };
       return;
     }
-    preferences.value = unwrapVaultPreferences(vaultKey, vaultId, record);
+    preferences.value = unwrapVaultPreferences(key, vaultId, record);
   }
 
   async function savePreferences(next: VaultPreferences): Promise<void> {
@@ -502,9 +513,17 @@ export const useVaultStore = defineStore("vault", () => {
     if (!vaultKey) {
       return;
     }
-    historyByNote.clear();
+    const key = vaultKey;
+    const epoch = localEditEpoch;
     for (const noteId of notes.keys()) {
       const records = await listNoteRevisions(userId, vaultId, noteId);
+      if (
+        vaultKey !== key ||
+        useAuthStore().userId !== userId ||
+        currentVaultId.value !== vaultId ||
+        localEditEpoch !== epoch
+      )
+        return;
       const entries: {
         content: string;
         recordedAt: string;
@@ -513,7 +532,7 @@ export const useVaultStore = defineStore("vault", () => {
       for (const record of records) {
         try {
           const plaintext = xchacha20poly1305(
-            vaultKey,
+            key,
             Uint8Array.from(record.nonce),
             aad(record.vaultId, record.noteId, record.baseRevision),
           ).decrypt(Uint8Array.from(record.ciphertext));
@@ -537,12 +556,19 @@ export const useVaultStore = defineStore("vault", () => {
     if (!vaultKey) {
       throw new Error("Vault is locked");
     }
+    const key = vaultKey;
+    const active = () =>
+      vaultKey === key &&
+      currentVaultId.value === vaultId &&
+      useAuthStore().userId === userId;
+    const epoch = localEditEpoch;
+    const cached = await listCachedNotes(userId, vaultId);
+    if (!active() || epoch !== localEditEpoch) return;
     notes.clear();
     attachments.clear();
-    const cached = await listCachedNotes(userId, vaultId);
     for (const record of cached) {
       const plaintext = xchacha20poly1305(
-        vaultKey,
+        key,
         Uint8Array.from(record.nonce),
         aad(record.vaultId, record.noteId, record.revision),
       ).decrypt(Uint8Array.from(record.ciphertext));
@@ -554,10 +580,13 @@ export const useVaultStore = defineStore("vault", () => {
         attachments,
       );
     }
-    headRevision.value = await getCachedHeadRevision(userId, vaultId);
-    syncStatus.value = "offline";
+    const head = await getCachedHeadRevision(userId, vaultId);
+    if (!active()) return;
+    headRevision.value = Math.max(headRevision.value, head);
     await hydrateHistory(userId, vaultId);
+    if (!active()) return;
     await loadPreferences(userId, vaultId);
+    if (!active()) return;
     await refreshPending();
   }
 
@@ -700,14 +729,14 @@ export const useVaultStore = defineStore("vault", () => {
 
   function markdownExportNotes(): {
     content: string;
-    path?: string;
+    path: string;
     title: string;
   }[] {
     return Array.from(notes.entries())
       .filter(([, note]) => !isDeletedNoteContent(note.content))
       .map(([id, note]) => ({
         content: note.content,
-        ...(note.path ? { path: note.path } : {}),
+        path: pathForNote(id, note),
         title: noteExportTitle(note.content, id.slice(0, 8)),
       }));
   }
@@ -780,34 +809,57 @@ export const useVaultStore = defineStore("vault", () => {
     }
   }
 
-  async function loadNotes(vaultId: string) {
-    if (!vaultKey) {
-      throw new Error("Vault is locked");
-    }
+  let loading:
+    | { key: Uint8Array | undefined; vaultId: string; promise: Promise<void> }
+    | undefined;
+  function loadNotes(vaultId: string): Promise<void> {
+    if (loading && loading.key === vaultKey && loading.vaultId === vaultId)
+      return loading.promise;
+    const job = { key: vaultKey, vaultId, promise: Promise.resolve() };
+    job.promise = pullNotes(vaultId).finally(() => {
+      if (loading === job) loading = undefined;
+    });
+    loading = job;
+    return job.promise;
+  }
+  async function pullNotes(vaultId: string): Promise<void> {
+    if (!vaultKey) throw new Error("Vault is locked");
+    const key = vaultKey;
     const userId = requireUserId();
+    const active = () =>
+      vaultKey === key &&
+      currentVaultId.value === vaultId &&
+      useAuthStore().userId === userId;
+    await loadNotesFromCache(userId, vaultId);
+    if (!active()) return;
     if (useAuthStore().isLocalMode) {
-      await loadNotesFromCache(userId, vaultId);
       syncStatus.value = "synced";
       return;
     }
-    let cursor: string | null = null;
-    notes.clear();
-    attachments.clear();
-    let maxBase = 0;
+    let cursor = await getCachedPullCursor(userId, vaultId);
+    const seen = new Set<string>(cursor ? [cursor] : []);
+    let reset = false;
     for (;;) {
-      const path = buildPullOperationsPath(vaultId, { cursor, limit: 100 });
+      if (!active()) return;
+      const epoch = localEditEpoch;
       let response: Response;
       try {
-        response = await fetch(path, { credentials: "include" });
+        response = await syncRequest(
+          buildPullOperationsPath(vaultId, { cursor, limit: 100 }),
+        );
       } catch {
-        await loadNotesFromCache(userId, vaultId);
+        if (active()) {
+          syncStatus.value = "offline";
+          lastError.value = "Hors ligne.";
+        }
         return;
       }
-      if (response.status === 409) {
+      if (!active()) return;
+      if (response.status === 409 && !reset) {
         cursor = null;
-        notes.clear();
-        attachments.clear();
-        maxBase = 0;
+        reset = true;
+        seen.clear();
+        await setCachedPullCursor(userId, vaultId, null);
         continue;
       }
       if (!response.ok) {
@@ -815,41 +867,73 @@ export const useVaultStore = defineStore("vault", () => {
         return;
       }
       const page = (await response.json()) as PullResponse;
+      if (!active()) return;
+      if (
+        page.protocol_version !== 1 ||
+        !Array.isArray(page.operations) ||
+        (page.next_cursor !== null &&
+          (typeof page.next_cursor !== "string" || seen.has(page.next_cursor)))
+      )
+        throw new Error("Invalid sync page");
+      if (page.next_cursor) seen.add(page.next_cursor);
+      const decoded = new Map<string, Uint8Array>();
       for (const operation of page.operations) {
-        maxBase = Math.max(maxBase, operation.base_revision);
+        if (operation.vault_id !== vaultId)
+          throw new Error("Invalid sync page");
+        // Authenticate every item before advancing the durable cursor.
         const plaintext = xchacha20poly1305(
-          vaultKey,
+          key,
           Uint8Array.from(operation.nonce),
-          aad(operation.vault_id, operation.note_id, operation.base_revision),
+          aad(vaultId, operation.note_id, operation.base_revision),
         ).decrypt(Uint8Array.from(operation.ciphertext));
         applyPlaintext(
           operation.note_id,
           plaintext,
           operation.base_revision,
-          notes,
-          attachments,
+          new Map(),
+          new Map(),
         );
-        await putCachedNote(userId, {
-          ciphertext: operation.ciphertext,
-          ciphertextHash: operation.ciphertext_hash,
-          nonce: operation.nonce,
-          noteId: operation.note_id,
-          revision: operation.base_revision,
-          vaultId: operation.vault_id,
-        });
+        decoded.set(operation.operation_id, plaintext);
       }
-      pullCursor.value = page.next_cursor;
-      await setCachedPullCursor(userId, vaultId, page.next_cursor);
+      await commitPulledPage(
+        userId,
+        vaultId,
+        page.operations,
+        page.next_cursor,
+      );
+      if (!active()) return;
+      const pending = new Set(
+        (await listPendingOperations(userId, vaultId)).map(
+          (operation) => operation.note_id,
+        ),
+      );
+      if (!active()) return;
+      if (epoch === localEditEpoch)
+        for (const operation of page.operations) {
+          if (!pending.has(operation.note_id))
+            applyPlaintext(
+              operation.note_id,
+              decoded.get(operation.operation_id)!,
+              operation.base_revision,
+              notes,
+              attachments,
+            );
+        }
+      const head = await getCachedHeadRevision(userId, vaultId);
+      if (!active()) return;
+      headRevision.value = Math.max(headRevision.value, head);
+      await refreshPending();
+      if (!active()) return;
+      cursor = page.next_cursor ?? cursor;
+      pullCursor.value = cursor;
       if (!page.next_cursor) {
-        headRevision.value = notes.size === 0 ? 0 : maxBase + 1;
-        await setCachedHeadRevision(userId, vaultId, headRevision.value);
-        syncStatus.value = "synced";
-        await hydrateHistory(userId, vaultId);
-        await loadPreferences(userId, vaultId);
-        await refreshPending();
+        syncStatus.value = activeConflict.value
+          ? "conflict"
+          : pendingNoteIds.value.length
+            ? "saving"
+            : "synced";
         return;
       }
-      cursor = page.next_cursor;
     }
   }
 
@@ -878,13 +962,23 @@ export const useVaultStore = defineStore("vault", () => {
   ): Promise<EncryptedPushOperation[]> {
     const operations: EncryptedPushOperation[] = [];
     let cursor: string | null = null;
+    const seen = new Set<string>();
     for (;;) {
       const path = buildPullOperationsPath(vaultId, { cursor, limit: 100 });
-      const response = await fetch(path, { credentials: "include" });
+      const response = await syncRequest(path);
       if (!response.ok) {
         throw new Error("Unable to pull conflict variants");
       }
       const page = (await response.json()) as PullResponse;
+      if (
+        page.protocol_version !== 1 ||
+        !Array.isArray(page.operations) ||
+        page.operations.some((item) => item.vault_id !== vaultId)
+      )
+        throw new Error("Invalid sync page");
+      if (page.next_cursor && seen.has(page.next_cursor))
+        throw new Error("Invalid sync cursor");
+      if (page.next_cursor) seen.add(page.next_cursor);
       operations.push(...page.operations);
       if (!page.next_cursor) {
         return operations;
@@ -897,23 +991,54 @@ export const useVaultStore = defineStore("vault", () => {
     operation: EncryptedPushOperation,
     conflict: Conflict,
   ) {
-    const local = decryptOperation(operation);
+    const key = vaultKey;
+    const userId = requireUserId();
     const pulled = await pullAllOperations(operation.vault_id);
-    const byHash = new Map(
-      pulled.map((item) => [item.ciphertext_hash, item] as const),
+    if (
+      vaultKey !== key ||
+      useAuthStore().userId !== userId ||
+      currentVaultId.value !== operation.vault_id
+    )
+      return;
+    // Server conflict hashes identify vault-wide revisions, which may concern a different note.
+    const variants = pulled.filter(
+      (item) =>
+        item.note_id === operation.note_id &&
+        item.vault_id === operation.vault_id,
     );
-    const baseOp = byHash.get(conflict.base_ciphertext_hash);
-    const remoteOp = byHash.get(conflict.remote_ciphertext_hash);
-    if (!baseOp || !remoteOp) {
+    const baseOp = variants
+      .filter((item) => item.base_revision + 1 <= conflict.base_revision)
+      .at(-1);
+    const remoteOp = variants
+      .filter((item) => item.base_revision + 1 <= conflict.remote_revision)
+      .at(-1);
+    const historyThroughRemote = pulled.filter(
+      (item) => item.base_revision < conflict.remote_revision,
+    );
+    const completeHistory =
+      historyThroughRemote.length >= conflict.remote_revision &&
+      historyThroughRemote.every(
+        (item, index) =>
+          item.vault_id === operation.vault_id && item.base_revision === index,
+      );
+    if (
+      ((!baseOp && conflict.base_revision > 0) || !remoteOp) &&
+      !completeHistory
+    )
       throw new Error("Missing conflict ciphertext variants");
-    }
+    const pending = await listPendingOperations(userId, operation.vault_id);
+    if (vaultKey !== key || useAuthStore().userId !== userId) return;
+    const latestLocal =
+      pending.filter((item) => item.note_id === operation.note_id).at(-1) ??
+      operation;
+    const local = decryptOperation(latestLocal);
     activeConflict.value = {
-      base: decryptOperation(baseOp),
+      base: baseOp ? decryptOperation(baseOp) : "",
       conflict,
       local,
       manualDraft: local,
       noteId: conflict.note_id,
-      remote: decryptOperation(remoteOp),
+      remote: remoteOp ? decryptOperation(remoteOp) : "",
     };
     headRevision.value = conflict.remote_revision;
     syncStatus.value = "conflict";
@@ -924,9 +1049,24 @@ export const useVaultStore = defineStore("vault", () => {
     operation: EncryptedPushOperation,
     response: Response,
   ): Promise<boolean> {
-    const body = (await response.json()) as Conflict & {
-      code?: string;
-    };
+    const key = vaultKey;
+    await blockConflictedOperation(
+      requireUserId(),
+      operation.operation_id,
+      true,
+    );
+    if (vaultKey !== key) return true;
+    let body: Conflict & { code?: string };
+    try {
+      body = (await response.json()) as Conflict & { code?: string };
+    } catch {
+      if (vaultKey === key) {
+        syncStatus.value = "conflict";
+        lastError.value = "Réponse de conflit invalide.";
+      }
+      return true;
+    }
+    if (vaultKey !== key) return true;
     if (body.code === "sync_cursor_resnapshot_required") {
       syncStatus.value = "error";
       lastError.value = "Curseur de synchronisation invalide.";
@@ -934,27 +1074,41 @@ export const useVaultStore = defineStore("vault", () => {
     }
     if (
       body.protocol_version !== 1 ||
-      !body.operation_id ||
+      body.base_revision !== operation.base_revision ||
+      body.operation_id !== operation.operation_id ||
+      body.vault_id !== operation.vault_id ||
+      body.note_id !== operation.note_id ||
+      body.local_ciphertext_hash !== operation.ciphertext_hash ||
+      !Number.isSafeInteger(body.remote_revision) ||
+      body.remote_revision <= operation.base_revision ||
       !body.base_ciphertext_hash
     ) {
       syncStatus.value = "conflict";
       lastError.value = "Conflit de révision.";
       return true;
     }
+    await blockConflictedOperation(
+      requireUserId(),
+      operation.operation_id,
+      body,
+    );
+    if (vaultKey !== key) return true;
     try {
       await materializeConflict(operation, body);
     } catch {
+      if (vaultKey !== key) return true;
       syncStatus.value = "conflict";
       lastError.value = "Conflit de révision (variantes indisponibles).";
     }
     return true;
   }
 
-  async function pushOperation(
-    operation: EncryptedPushOperation,
+  async function syncRequest(
+    path: string,
+    init: RequestInit = {},
   ): Promise<Response> {
     const controller = new AbortController();
-    pushController = controller;
+    syncControllers.add(controller);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
       controller.signal.addEventListener(
@@ -966,11 +1120,9 @@ export const useVaultStore = defineStore("vault", () => {
     });
     try {
       return await Promise.race([
-        fetch(`/v1/vaults/${operation.vault_id}/operations`, {
-          body: serializeEncryptedPushOperation(operation),
+        fetch(path, {
           credentials: "include",
-          headers: csrfHeaders(),
-          method: "POST",
+          ...init,
           signal: controller.signal,
         }).then(
           async (response) =>
@@ -983,8 +1135,59 @@ export const useVaultStore = defineStore("vault", () => {
       ]);
     } finally {
       clearTimeout(timer);
-      if (pushController === controller) pushController = undefined;
+      syncControllers.delete(controller);
     }
+  }
+
+  async function pushOperation(
+    operation: EncryptedPushOperation,
+  ): Promise<Response> {
+    return syncRequest(`/v1/vaults/${operation.vault_id}/operations`, {
+      body: serializeEncryptedPushOperation(operation),
+      headers: csrfHeaders(),
+      method: "POST",
+    });
+  }
+
+  let synchronization: Promise<boolean> | undefined;
+  function synchronize(): Promise<boolean> {
+    if (synchronization) return synchronization;
+    synchronization = (async () => {
+      const key = vaultKey;
+      const vaultId = currentVaultId.value;
+      if (!key || !vaultId || useAuthStore().isLocalMode) return true;
+      try {
+        await loadNotes(vaultId);
+        if (
+          vaultKey !== key ||
+          syncStatus.value === "offline" ||
+          syncStatus.value === "error"
+        )
+          return false;
+        if (!activeConflict.value) await flushPendingOperations();
+        return (
+          vaultKey === key &&
+          !(["offline", "error"] as string[]).includes(syncStatus.value)
+        );
+      } catch {
+        if (vaultKey === key) {
+          syncStatus.value = "error";
+          lastError.value = "Synchronisation indisponible.";
+        }
+        return false;
+      }
+    })().finally(() => {
+      synchronization = undefined;
+    });
+    return synchronization;
+  }
+  let requestAutomaticSync: (() => void) | undefined;
+  function setSyncWakeup(wakeup?: () => void) {
+    requestAutomaticSync = wakeup;
+  }
+  function scheduleDelivery() {
+    if (requestAutomaticSync) requestAutomaticSync();
+    else void flushPendingOperations();
   }
 
   let flushInFlight: Promise<void> | undefined;
@@ -1034,7 +1237,29 @@ export const useVaultStore = defineStore("vault", () => {
             };
           },
         );
-        if (!operation || !active()) return;
+        if (!active()) return;
+        if (!operation) {
+          const conflict = await getOperationConflict(
+            userId,
+            queued.operation_id,
+          );
+          if (!active()) return;
+          if (conflict) {
+            syncStatus.value = "conflict";
+            if (conflict !== true && !activeConflict.value) {
+              try {
+                await materializeConflict(queued, conflict);
+              } catch {
+                if (active()) {
+                  syncStatus.value = "conflict";
+                  lastError.value =
+                    "Conflit de révision (variantes indisponibles).";
+                }
+              }
+            }
+          }
+          return;
+        }
         const response = await pushOperation(operation);
         if (!active()) return;
         if (response.status === 409) {
@@ -1084,6 +1309,7 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function saveNote(input: NoteInput, supersedes: string[] = []) {
+    localEditEpoch += 1;
     if (!vaultKey || !currentVaultId.value) {
       lastError.value = "Coffre verrouillé ou absent.";
       syncStatus.value = "error";
@@ -1143,12 +1369,13 @@ export const useVaultStore = defineStore("vault", () => {
     if (useAuthStore().isLocalMode) {
       pendingNoteIds.value = [];
       syncStatus.value = "synced";
-    } else void flushPendingOperations();
+    } else scheduleDelivery();
 
     return operation;
   }
 
   async function pushPlaintext(noteId: string, plaintext: Uint8Array) {
+    localEditEpoch += 1;
     if (!vaultKey || !currentVaultId.value) {
       throw new Error("Vault is locked");
     }
@@ -1191,7 +1418,7 @@ export const useVaultStore = defineStore("vault", () => {
     if (useAuthStore().isLocalMode) {
       pendingNoteIds.value = [];
       syncStatus.value = "synced";
-    } else void flushPendingOperations();
+    } else scheduleDelivery();
     return { operation, revision: baseRevision };
   }
 
@@ -1350,6 +1577,8 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   return {
+    synchronize,
+    setSyncWakeup,
     activeConflict,
     allowTrustedUnlock,
     changePassphrase,

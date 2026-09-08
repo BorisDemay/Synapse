@@ -1,6 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 
-import type { EncryptedPushOperation } from "@synapse/api-client";
+import type { Conflict, EncryptedPushOperation } from "@synapse/api-client";
 
 export interface CachedNoteRecord {
   ciphertext: number[];
@@ -50,6 +50,7 @@ export interface CachedVaultPreferencesRecord {
 
 export type QueuedOperationRecord = EncryptedPushOperation & {
   sequence?: number;
+  conflict?: Conflict | true;
   attempted?: boolean;
   rebaseRevision?: number;
   supersededBy?: string;

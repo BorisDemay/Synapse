@@ -6,6 +6,7 @@ import { initializeTheme, installSynapseUi } from "@synapse/ui";
 import App from "./App.vue";
 import { registerAssetServiceWorker } from "./offline/register-sw";
 import { createAppRouter } from "./router";
+import { startSyncCoordinator } from "./sync/coordinator";
 import { useAuthStore } from "./stores/auth";
 import { useVaultStore } from "./stores/vault";
 import { startWebUpdateChecks } from "./update/web-updates";
@@ -38,6 +39,7 @@ async function bootstrap() {
 
   app.use(createAppRouter(auth, vault));
   app.mount("#app");
+  startSyncCoordinator(auth, vault);
   registerAssetServiceWorker();
   startWebUpdateChecks();
 }

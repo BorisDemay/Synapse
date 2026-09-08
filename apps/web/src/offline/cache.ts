@@ -366,3 +366,61 @@ export async function clearUserUnlockMaterial(userId: string): Promise<void> {
   await tx.objectStore("meta").delete(`session:${userId}`);
   await tx.done;
 }
+
+/** Commit a pulled page and its cursor together, preserving queued local variants. */
+export async function commitPulledPage(
+  userId: string,
+  vaultId: string,
+  operations: import("@synapse/api-client").EncryptedPushOperation[],
+  cursor: string | null,
+): Promise<void> {
+  const db = await openOfflineDb();
+  const tx = db.transaction(["notes", "queue", "meta"], "readwrite");
+  try {
+    const pending = new Set(
+      (await tx.objectStore("queue").getAll())
+        .filter(
+          (row) =>
+            row.userId === userId &&
+            row.vault_id === vaultId &&
+            !row.supersededBy,
+        )
+        .map((row) => row.note_id),
+    );
+    for (const operation of operations) {
+      if (!pending.has(operation.note_id))
+        await tx
+          .objectStore("notes")
+          .put(
+            {
+              userId,
+              vaultId,
+              noteId: operation.note_id,
+              ciphertext: operation.ciphertext,
+              ciphertextHash: operation.ciphertext_hash,
+              nonce: operation.nonce,
+              revision: operation.base_revision,
+            },
+            noteKey(userId, vaultId, operation.note_id),
+          );
+    }
+    const headKey = metaKey(userId, "head", vaultId);
+    const previous = await tx.objectStore("meta").get(headKey);
+    const head = Math.max(
+      typeof previous?.value === "number" ? previous.value : 0,
+      ...operations.map((operation) => operation.base_revision + 1),
+    );
+    await tx.objectStore("meta").put({ key: headKey, value: head }, headKey);
+    if (cursor !== null) {
+      const key = metaKey(userId, "cursor", vaultId);
+      await tx.objectStore("meta").put({ key, value: cursor }, key);
+    }
+    await tx.done;
+  } catch (error) {
+    try {
+      tx.abort();
+    } catch {}
+    await tx.done.catch(() => {});
+    throw error;
+  }
+}
