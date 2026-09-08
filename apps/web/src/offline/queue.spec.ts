@@ -48,15 +48,25 @@ describe("offline queue", () => {
     expect(JSON.stringify(remaining)).not.toContain("# ");
   });
 
-  it("replaces a pending operation for the same note", async () => {
+  it("preserves every pending operation for the same note", async () => {
     const first = sampleOp("0198e5de-aaaa-7bbb-8ccc-ddddeeeefff1");
     const second = sampleOp("0198e5de-aaaa-7bbb-8ccc-ddddeeeefff2");
     second.ciphertext = [9, 9, 9];
     await enqueueOperation(userId, first);
     await enqueueOperation(userId, second);
     const pending = await listPendingOperations(userId, vaultId);
-    expect(pending).toHaveLength(1);
-    expect(pending[0]?.operation_id).toBe(second.operation_id);
-    expect(pending[0]?.ciphertext).toEqual([9, 9, 9]);
+    expect(pending).toHaveLength(2);
+    expect(pending[1]?.operation_id).toBe(second.operation_id);
+    expect(pending[1]?.ciphertext).toEqual([9, 9, 9]);
   });
+});
+
+it("aborts the whole local transaction if the outbox write cannot be stored", async () => {
+  const { persistPendingOperation } = await import("./queue");
+  const { listCachedNotes } = await import("./cache");
+  const operation = sampleOp(null as unknown as string);
+  await expect(
+    persistPendingOperation("atomic-user", operation),
+  ).rejects.toThrow();
+  expect(await listCachedNotes("atomic-user", vaultId)).toHaveLength(0);
 });

@@ -63,7 +63,6 @@ import {
   putAssistantConversations,
   putCachedEnvelope,
   putCachedNote,
-  putNoteRevision,
   putTrustedDevice,
   getVaultPreferences,
   putVaultPreferences,
@@ -77,9 +76,10 @@ import {
   type VaultPreferences,
 } from "../crypto/vault-preferences";
 import {
-  enqueueOperation,
+  persistPendingOperation,
+  prepareOperation,
+  acknowledgeOperation,
   listPendingOperations,
-  removeAckedOperation,
 } from "../offline/queue";
 import { useAuthStore } from "./auth";
 
@@ -240,6 +240,7 @@ function applyPlaintext(
 
 export const useVaultStore = defineStore("vault", () => {
   let vaultKey: Uint8Array | undefined;
+  let pushController: AbortController | undefined;
   const notes = reactive(new Map<string, LocalNote>());
   const attachments = reactive(new Map<string, LocalAttachment>());
   const historyByNote = reactive(
@@ -271,9 +272,12 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   function lock() {
+    pushController?.abort();
     vaultKey?.fill(0);
     vaultKey = undefined;
     isUnlocked.value = false;
+    notes.clear();
+    activeConflict.value = null;
     attachments.clear();
     historyByNote.clear();
     pendingNoteIds.value = [];
@@ -452,22 +456,6 @@ export const useVaultStore = defineStore("vault", () => {
     hasEncryptedVault.value = value;
   }
 
-  async function persistEncryptedNote(
-    userId: string,
-    operation: EncryptedPushOperation,
-    head: number,
-  ) {
-    await putCachedNote(userId, {
-      ciphertext: operation.ciphertext,
-      ciphertextHash: operation.ciphertext_hash,
-      nonce: operation.nonce,
-      noteId: operation.note_id,
-      revision: operation.base_revision,
-      vaultId: operation.vault_id,
-    });
-    await setCachedHeadRevision(userId, operation.vault_id, head);
-  }
-
   async function refreshPending() {
     if (!currentVaultId.value) {
       pendingNoteIds.value = [];
@@ -508,16 +496,6 @@ export const useVaultStore = defineStore("vault", () => {
     const previous = historyByNote.get(operation.note_id) ?? [];
     previous.unshift({ content, recordedAt, revision });
     historyByNote.set(operation.note_id, previous.slice(0, 50));
-    await putNoteRevision({
-      baseRevision: operation.base_revision,
-      ciphertext: operation.ciphertext,
-      nonce: operation.nonce,
-      noteId: operation.note_id,
-      recordedAt,
-      revision,
-      userId,
-      vaultId: operation.vault_id,
-    });
   }
 
   async function hydrateHistory(userId: string, vaultId: string) {
@@ -959,24 +937,89 @@ export const useVaultStore = defineStore("vault", () => {
   async function pushOperation(
     operation: EncryptedPushOperation,
   ): Promise<Response> {
-    return fetch(`/v1/vaults/${operation.vault_id}/operations`, {
-      body: serializeEncryptedPushOperation(operation),
-      credentials: "include",
-      headers: csrfHeaders(),
-      method: "POST",
+    const controller = new AbortController();
+    pushController = controller;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("Sync interrupted")),
+        { once: true },
+      );
+      timer = setTimeout(() => controller.abort(), 15000);
     });
+    try {
+      return await Promise.race([
+        fetch(`/v1/vaults/${operation.vault_id}/operations`, {
+          body: serializeEncryptedPushOperation(operation),
+          credentials: "include",
+          headers: csrfHeaders(),
+          method: "POST",
+          signal: controller.signal,
+        }).then(
+          async (response) =>
+            new Response(await response.text(), {
+              status: response.status,
+              headers: response.headers,
+            }),
+        ),
+        deadline,
+      ]);
+    } finally {
+      clearTimeout(timer);
+      if (pushController === controller) pushController = undefined;
+    }
   }
 
-  async function flushPendingOperations(): Promise<void> {
-    if (!currentVaultId.value) {
-      return;
-    }
+  let flushInFlight: Promise<void> | undefined;
+  function flushPendingOperations(): Promise<void> {
+    if (flushInFlight) return flushInFlight;
+    flushInFlight = flushQueue().finally(() => {
+      flushInFlight = undefined;
+    });
+    return flushInFlight;
+  }
+
+  async function flushQueue(): Promise<void> {
+    if (!currentVaultId.value || !vaultKey) return;
     const userId = requireUserId();
     const vaultId = currentVaultId.value;
+    const key = vaultKey;
+    const active = () =>
+      vaultKey === key &&
+      currentVaultId.value === vaultId &&
+      useAuthStore().userId === userId;
     const pending = await listPendingOperations(userId, vaultId);
-    for (const operation of pending) {
+    for (const queued of pending) {
+      if (!active()) return;
       try {
+        const operation = await prepareOperation(
+          userId,
+          queued.operation_id,
+          (original, revision) => {
+            const plaintext = xchacha20poly1305(
+              key,
+              Uint8Array.from(original.nonce),
+              aad(vaultId, original.note_id, original.base_revision),
+            ).decrypt(Uint8Array.from(original.ciphertext));
+            const nonce = randomNonce();
+            const ciphertext = xchacha20poly1305(
+              key,
+              nonce,
+              aad(vaultId, original.note_id, revision),
+            ).encrypt(plaintext);
+            return {
+              ...original,
+              base_revision: revision,
+              nonce: Array.from(nonce),
+              ciphertext: Array.from(ciphertext),
+              ciphertext_hash: bytesToHex(sha256(ciphertext)),
+            };
+          },
+        );
+        if (!operation || !active()) return;
         const response = await pushOperation(operation);
+        if (!active()) return;
         if (response.status === 409) {
           await handleConflictResponse(operation, response);
           return;
@@ -986,32 +1029,44 @@ export const useVaultStore = defineStore("vault", () => {
           lastError.value = `Enregistrement refusé (${response.status}).`;
           return;
         }
-        const ack = (await response.json()) as { revision: number };
-        headRevision.value = ack.revision;
-        await removeAckedOperation(userId, operation.operation_id);
-        await persistEncryptedNote(userId, operation, ack.revision);
-        const local = notes.get(operation.note_id);
-        if (local) {
-          notes.set(operation.note_id, {
-            content: local.content,
-            path: local.path,
-            revision: ack.revision,
-          });
+        const ack = (await response.json()) as {
+          operation_id?: unknown;
+          revision?: unknown;
+        };
+        if (
+          ack.operation_id !== operation.operation_id ||
+          typeof ack.revision !== "number" ||
+          !Number.isSafeInteger(ack.revision) ||
+          ack.revision <= operation.base_revision
+        ) {
+          syncStatus.value = "error";
+          lastError.value = "Accusé de réception invalide.";
+          return;
         }
+        if (!active()) return;
+        await acknowledgeOperation(userId, operation, ack.revision);
+        if (!active()) return;
+        headRevision.value = Math.max(headRevision.value, ack.revision);
       } catch {
+        if (!active()) return;
         syncStatus.value = "offline";
         lastError.value = "Hors ligne.";
         return;
+      } finally {
+        if (active()) await refreshPending();
       }
     }
-    if (pending.length > 0) {
+    if (active() && (await listPendingOperations(userId, vaultId)).length > 0) {
+      await flushQueue();
+      return;
+    }
+    if (active() && pending.length > 0) {
       syncStatus.value = "synced";
       lastError.value = null;
     }
-    await refreshPending();
   }
 
-  async function saveNote(input: NoteInput) {
+  async function saveNote(input: NoteInput, supersedes: string[] = []) {
     if (!vaultKey || !currentVaultId.value) {
       lastError.value = "Coffre verrouillé ou absent.";
       syncStatus.value = "error";
@@ -1021,13 +1076,6 @@ export const useVaultStore = defineStore("vault", () => {
     const vaultId = currentVaultId.value;
     const baseRevision = headRevision.value;
     const path = input.path ?? pathForNote(input.id, notes.get(input.id));
-    if (!isDeletedNoteContent(input.content)) {
-      notes.set(input.id, {
-        content: input.content,
-        path,
-        revision: baseRevision,
-      });
-    }
     syncStatus.value = "saving";
     lastError.value = null;
 
@@ -1052,38 +1100,29 @@ export const useVaultStore = defineStore("vault", () => {
       vault_id: vaultId,
     };
 
-    await persistEncryptedNote(userId, operation, baseRevision);
-
-    try {
-      const response = await pushOperation(operation);
-      if (response.status === 409) {
-        await handleConflictResponse(operation, response);
-      } else if (!response.ok) {
-        syncStatus.value = "error";
-        lastError.value = `Enregistrement refusé (${response.status}).`;
-      } else {
-        const ack = (await response.json()) as { revision: number };
-        headRevision.value = ack.revision;
-        if (!isDeletedNoteContent(input.content)) {
-          notes.set(input.id, {
-            content: input.content,
-            path,
-            revision: ack.revision,
-          });
-        }
-        await rememberHistory(userId, operation, input.content, ack.revision);
-        await persistEncryptedNote(userId, operation, ack.revision);
-        await removeAckedOperation(userId, operation.operation_id);
-        syncStatus.value = "synced";
-        await refreshPending();
-      }
-    } catch {
-      await enqueueOperation(userId, operation);
-      pendingNoteIds.value = [...new Set([...pendingNoteIds.value, input.id])];
-      await rememberHistory(userId, operation, input.content, baseRevision + 1);
-      syncStatus.value = "offline";
-      lastError.value = "Hors ligne.";
+    const key = vaultKey;
+    const historyRevision = await persistPendingOperation(
+      userId,
+      operation,
+      supersedes,
+    );
+    if (
+      vaultKey !== key ||
+      currentVaultId.value !== vaultId ||
+      useAuthStore().userId !== userId
+    )
+      return operation;
+    if (!isDeletedNoteContent(input.content)) {
+      notes.set(input.id, {
+        content: input.content,
+        path,
+        revision: baseRevision,
+      });
     }
+
+    pendingNoteIds.value = [...new Set([...pendingNoteIds.value, input.id])];
+    await rememberHistory(userId, operation, input.content, historyRevision);
+    void flushPendingOperations();
 
     return operation;
   }
@@ -1114,29 +1153,16 @@ export const useVaultStore = defineStore("vault", () => {
       protocol_version: 1,
       vault_id: vaultId,
     };
-    await persistEncryptedNote(userId, operation, baseRevision);
-    try {
-      const response = await pushOperation(operation);
-      if (response.status === 409) {
-        await handleConflictResponse(operation, response);
-      } else if (!response.ok) {
-        syncStatus.value = "error";
-        lastError.value = `Enregistrement refusé (${response.status}).`;
-      } else {
-        const ack = (await response.json()) as { revision: number };
-        headRevision.value = ack.revision;
-        await persistEncryptedNote(userId, operation, ack.revision);
-        await removeAckedOperation(userId, operation.operation_id);
-        syncStatus.value = "synced";
-        await refreshPending();
-        return { operation, revision: ack.revision };
-      }
-    } catch {
-      await enqueueOperation(userId, operation);
-      pendingNoteIds.value = [...new Set([...pendingNoteIds.value, noteId])];
-      syncStatus.value = "offline";
-      lastError.value = "Hors ligne.";
-    }
+    const key = vaultKey;
+    await persistPendingOperation(userId, operation);
+    if (
+      vaultKey !== key ||
+      currentVaultId.value !== vaultId ||
+      useAuthStore().userId !== userId
+    )
+      return { operation, revision: baseRevision };
+    pendingNoteIds.value = [...new Set([...pendingNoteIds.value, noteId])];
+    void flushPendingOperations();
     return { operation, revision: baseRevision };
   }
 
@@ -1162,13 +1188,9 @@ export const useVaultStore = defineStore("vault", () => {
       kind: "attachment",
       path: input.path,
     });
-    attachments.set(id, {
-      bytes: input.bytes,
-      contentType: input.contentType,
-      path: input.path,
-      revision: headRevision.value,
-    });
+    const key = vaultKey;
     const result = await pushPlaintext(id, plaintext);
+    if (vaultKey !== key) return result.operation;
     attachments.set(id, {
       bytes: input.bytes,
       contentType: input.contentType,
@@ -1235,12 +1257,13 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function deleteNote(id: string) {
-    try {
-      return await saveNote({ content: DELETED_NOTE_SENTINEL, id });
-    } finally {
+    const key = vaultKey;
+    const result = await saveNote({ content: DELETED_NOTE_SENTINEL, id });
+    if (vaultKey === key) {
       notes.delete(id);
       attachments.delete(id);
     }
+    return result;
   }
 
   async function resolveConflict(content: string) {
@@ -1248,21 +1271,24 @@ export const useVaultStore = defineStore("vault", () => {
     if (!current || !vaultKey || !currentVaultId.value) {
       throw new Error("No active conflict");
     }
-    const userId = requireUserId();
     const expected = current.conflict;
-    const vaultId = currentVaultId.value;
     const baseRevision = expected.remote_revision;
     headRevision.value = baseRevision;
-    activeConflict.value = null;
-
-    const pending = await listPendingOperations(userId, vaultId);
-    for (const operation of pending) {
-      if (operation.note_id === current.noteId) {
-        await removeAckedOperation(userId, operation.operation_id);
-      }
-    }
-
-    const result = await saveNote({ content, id: current.noteId });
+    const key = vaultKey;
+    const pending = await listPendingOperations(
+      requireUserId(),
+      currentVaultId.value,
+    );
+    if (vaultKey !== key || activeConflict.value !== current)
+      throw new Error("Vault is locked");
+    const result = await saveNote(
+      { content, id: current.noteId },
+      pending
+        .filter((operation) => operation.note_id === current.noteId)
+        .map((operation) => operation.operation_id),
+    );
+    if (vaultKey === key && activeConflict.value === current)
+      activeConflict.value = null;
     if (
       syncStatus.value === "synced" &&
       result.base_revision === expected.remote_revision &&

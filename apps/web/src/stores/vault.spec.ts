@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetOfflineDbHandle } from "../offline/cache";
+import { closeOfflineDb, resetOfflineDbHandle } from "../offline/cache";
 import { getVaultPreferences } from "../offline/cache";
 import { useAuthStore } from "./auth";
 import { useVaultStore } from "./vault";
@@ -12,9 +12,13 @@ const vaultId = "0198e5de-1111-7222-8333-444455556666";
 const noteId = "0198e5de-7777-7888-8999-aaaabbbbcccc";
 
 describe("vault store", () => {
-  beforeEach(() => {
-    resetOfflineDbHandle();
-    indexedDB.deleteDatabase("synapse-offline-v1");
+  beforeEach(async () => {
+    await closeOfflineDb();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase("synapse-offline-v1");
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
     resetOfflineDbHandle();
     setActivePinia(createPinia());
     useAuthStore().userId = userId;
@@ -25,13 +29,22 @@ describe("vault store", () => {
     });
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(async () => {
+    useVaultStore().lock();
+    await useVaultStore().flushPendingOperations();
+    vi.unstubAllGlobals();
+  });
 
   it("marks encrypted edits as saving then synced after a cookie-authenticated push", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "x", revision: 1 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 1,
+          }),
+          { status: 201 },
+        ),
     );
     const vault = useVaultStore();
     vault.unlock(
@@ -44,6 +57,7 @@ describe("vault store", () => {
       content: "# Private note",
       id: noteId,
     });
+    await vault.flushPendingOperations();
 
     expect(JSON.stringify(result)).not.toContain("# Private note");
     expect(
@@ -197,6 +211,7 @@ describe("vault store", () => {
         content: "local",
         id: noteId,
       });
+      await vault.flushPendingOperations();
       if (status !== "offline") vault.setSyncStatus(status);
 
       expect(vault.syncStatus).toBe(status);
@@ -214,13 +229,19 @@ describe("vault store", () => {
 
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("offline"));
     await vault.saveNote({ content: "# queued", id: noteId });
+    await vault.flushPendingOperations();
     expect(vault.syncStatus).toBe("offline");
     expect(vault.notes.get(noteId)?.content).toBe("# queued");
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ operation_id: "x", revision: 1 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementationOnce(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 1,
+          }),
+          { status: 201 },
+        ),
     );
     await vault.flushPendingOperations();
     expect(vault.syncStatus).toBe("synced");
@@ -233,6 +254,7 @@ describe("vault store", () => {
     vault.unlock(key, vaultId, 0);
     vi.mocked(fetch).mockRejectedValue(new TypeError("offline"));
     await vault.saveNote({ content: "# keep ciphertext", id: noteId });
+    await vault.flushPendingOperations();
     vault.lock();
     expect(vault.isUnlocked).toBe(false);
 
@@ -266,13 +288,19 @@ describe("vault store", () => {
       remote: "remote text",
     };
 
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "x", revision: 3 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 3,
+          }),
+          { status: 201 },
+        ),
     );
 
     const resolution = await vault.resolveConflict("local text");
+    await vault.flushPendingOperations();
     expect(resolution).toEqual({
       conflict_id: "0198e5de-aaaa-7bbb-8ccc-ddddeeeefff9",
       expected_base_hash: "aa".repeat(32),
@@ -379,10 +407,15 @@ describe("vault store", () => {
   });
 
   it("hides a deleted note after pushing an encrypted tombstone", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "x", revision: 1 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 1,
+          }),
+          { status: 201 },
+        ),
     );
     const vault = useVaultStore();
     vault.unlock(
@@ -391,6 +424,7 @@ describe("vault store", () => {
       0,
     );
     await vault.saveNote({ content: "# Keep me secret", id: noteId });
+    await vault.flushPendingOperations();
     expect(vault.notes.get(noteId)?.content).toBe("# Keep me secret");
 
     const result = await vault.deleteNote(noteId);
@@ -465,10 +499,15 @@ describe("vault store", () => {
   });
 
   it("indexes decrypted notes for search, backlinks and history restore", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "x", revision: 1 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 1,
+          }),
+          { status: 201 },
+        ),
     );
     const vault = useVaultStore();
     vault.unlock(
@@ -482,16 +521,23 @@ describe("vault store", () => {
       id: sourceId,
       path: "projets/roadmap.md",
     });
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "y", revision: 2 }), {
-        status: 201,
-      }),
+    await vault.flushPendingOperations();
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 2,
+          }),
+          { status: 201 },
+        ),
     );
     await vault.saveNote({
       content: "# Inbox\n\nHello",
       id: noteId,
       path: "inbox.md",
     });
+    await vault.flushPendingOperations();
 
     expect(vault.searchNotes("tag:projet").map((note) => note.id)).toEqual([
       sourceId,
@@ -501,21 +547,32 @@ describe("vault store", () => {
     ]);
     expect(vault.listedTags()).toEqual(["projet"]);
 
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "z", revision: 3 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 3,
+          }),
+          { status: 201 },
+        ),
     );
     await vault.saveNote({ content: "# Inbox\n\nChanged", id: noteId });
+    await vault.flushPendingOperations();
     await vault.restoreRevision(noteId, 2);
     expect(vault.notes.get(noteId)?.content).toBe("# Inbox\n\nHello");
   });
 
   it("encrypts attachments without putting the filename on the wire", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "x", revision: 1 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 1,
+          }),
+          { status: 201 },
+        ),
     );
     const vault = useVaultStore();
     vault.unlock(
@@ -544,10 +601,15 @@ describe("vault store", () => {
   });
 
   it("renames a note while keeping the same identifier", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "x", revision: 1 }), {
-        status: 201,
-      }),
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 1,
+          }),
+          { status: 201 },
+        ),
     );
     const vault = useVaultStore();
     vault.unlock(
@@ -560,10 +622,16 @@ describe("vault store", () => {
       id: noteId,
       path: "inbox.md",
     });
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ operation_id: "y", revision: 2 }), {
-        status: 201,
-      }),
+    await vault.flushPendingOperations();
+    vi.mocked(fetch).mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            operation_id: JSON.parse(String(init?.body)).operation_id,
+            revision: 2,
+          }),
+          { status: 201 },
+        ),
     );
     await vault.renameNote(noteId, "projets/kept.md");
     expect(vault.notes.get(noteId)?.path).toBe("projets/kept.md");

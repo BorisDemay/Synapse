@@ -49,6 +49,10 @@ export interface CachedVaultPreferencesRecord {
 }
 
 export type QueuedOperationRecord = EncryptedPushOperation & {
+  sequence?: number;
+  attempted?: boolean;
+  rebaseRevision?: number;
+  supersededBy?: string;
   userId: string;
 };
 

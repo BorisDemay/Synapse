@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 
 import {
   clearRememberedSession,
+  clearUserUnlockMaterial,
   getRememberedSessionUser,
   rememberSessionUser,
 } from "../offline/cache";
@@ -136,23 +137,20 @@ export const useAuthStore = defineStore("auth", {
     },
     async logout() {
       const vault = useVaultStore();
-      await vault.clearDeviceData();
-      try {
-        const response = await fetch("/auth/logout", {
-          credentials: "include",
-          headers: csrfHeaders(),
-          method: "POST",
-        });
-        if (!response.ok) {
-          throw new Error("Logout failed");
-        }
-      } finally {
-        this.isAuthenticated = false;
-        this.isOfflineSession = false;
-        this.userId = null;
-        this.email = null;
-        await clearRememberedSession();
-      }
+      vault.lockAndRequirePassphrase();
+      const userId = this.userId;
+      this.isAuthenticated = false;
+      this.isOfflineSession = false;
+      this.userId = null;
+      this.email = null;
+      if (userId) await clearUserUnlockMaterial(userId);
+      await clearRememberedSession();
+      const response = await fetch("/auth/logout", {
+        credentials: "include",
+        headers: csrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Logout failed");
     },
     async changePassword(currentPassword: string, newPassword: string) {
       const response = await fetch("/auth/password", {

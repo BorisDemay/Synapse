@@ -143,6 +143,7 @@ describe("assistant store", () => {
     stubOpenAi(response);
 
     await assistant.send("Reformule cette note.");
+    await useVaultStore().flushPendingOperations();
 
     expect(fetch).toHaveBeenCalledTimes(2);
     const [url, init] =

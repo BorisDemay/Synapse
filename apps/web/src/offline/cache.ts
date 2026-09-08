@@ -349,3 +349,20 @@ export async function clearUserOfflineData(userId: string): Promise<void> {
       .map((key) => db.delete("meta", key)),
   );
 }
+
+/** Logout forgets automatic unlocking, not encrypted user work. */
+export async function clearUserUnlockMaterial(userId: string): Promise<void> {
+  const db = await openOfflineDb();
+  const tx = db.transaction(
+    ["trusted_devices", "ai_credentials", "meta"],
+    "readwrite",
+  );
+  for (const store of ["trusted_devices", "ai_credentials"] as const) {
+    const keys = await tx.objectStore(store).getAllKeys();
+    for (const key of keys)
+      if (String(key).startsWith(`${userId}:`))
+        await tx.objectStore(store).delete(key);
+  }
+  await tx.objectStore("meta").delete(`session:${userId}`);
+  await tx.done;
+}
