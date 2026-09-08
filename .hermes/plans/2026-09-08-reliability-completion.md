@@ -66,6 +66,15 @@ recorded in the release checklist and relevant operator documentation.
   Native end-to-end evidence remains part of point 7. The editor accessibility
   correction `a25d21e` passed 18 component tests after reproducing the hidden
   editor label failure in a real browser.
+- Point 3: `2e6f398` approved by the medium reviewer after independent
+  incremental-pull/coordinator tests, including durable blocked conflicts,
+  missing-base history proof, invalid-cursor reset and cyclic-pagination
+  rejection. `58cc3cc` connects automatic synchronization to the native folder
+  adapter, with four independently observed adapter tests.
+- Post-integration native Rust check: 24 tests passed, one opt-in filesystem
+  benchmark ignored by the default test command. Workspace formatting and clippy
+  passed; seven release-script tests and eleven backup-operation tests passed.
+  These do not replace the actual native WebDriver run required by point 7.
 - Initial actual-client Chromium measurement (synthetic 10,000-note in-memory
   fixture, about 1 KiB/note): search median 10.7 ms, p95 14.5 ms over 20 queries;
   route render 615 ms, 10,000 tree items and 60,101 DOM elements. This is a

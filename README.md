@@ -1,6 +1,6 @@
 # Synapse — base d’un espace de notes Markdown synchronisé
 
-> Un espace de connaissances local-first, chiffrable et auto-hébergeable, inspiré des usages d’Obsidian sans en reprendre le code ni l’identité.
+> Un espace de connaissances local-first, chiffré de bout en bout et auto-hébergeable, inspiré des usages d’Obsidian sans en reprendre le code ni l’identité.
 
 ## Vision
 
@@ -10,7 +10,10 @@ Synapse est un projet **from scratch** visant à offrir une expérience de prise
 - une **interface web** moderne pour accéder aux mêmes contenus depuis un navigateur ;
 - un serveur optionnel, simple à auto-héberger, qui assure la synchronisation temps réel et le partage contrôlé.
 
-Les fichiers Markdown restent l’unité de vérité : ils doivent demeurer lisibles, exportables et utilisables sans enfermement propriétaire. La synchronisation ne doit jamais empêcher le travail local.
+Le client partagé conserve son état canonique dans un cache local chiffré. Le
+desktop en produit une réplique Markdown lisible dans le dossier choisi ;
+l’export reste possible sans serveur. La synchronisation ne doit jamais
+empêcher le travail local (ADR 0011, 0013 et 0016).
 
 ## Objectifs prioritaires
 
@@ -136,6 +139,7 @@ Les frontières de responsabilité du monorepo sont consignées dans les ADR :
 - [ADR 0014 — Session de compte mémorisée](docs/adr/0014-remembered-account-session.md)
 - [ADR 0015 — Mises à jour continues et signées](docs/adr/0015-continuous-signed-updates.md)
 - [ADR 0013 — Réplique dossier desktop et priorité serveur](docs/adr/0013-desktop-folder-replica-and-server-priority.md)
+- [ADR 0016 — Coffres desktop chiffrés sans serveur](docs/adr/0016-standalone-encrypted-desktop-vaults.md)
 - [ADR 0007 — Éditeur Markdown à rendu instantané](docs/adr/0007-vditor-instant-rendering-editor.md)
 - [ADR 0008 — Assistant Codex optionnel côté client](docs/adr/0008-client-side-codex-assistant.md)
 - [ADR 0010 — Item de coffre chiffré](docs/adr/0010-encrypted-vault-item.md)
@@ -167,8 +171,10 @@ opaque : il n'accède jamais au contenu des coffres en clair.
 
 ## État MVP vérifié
 
-Les commandes ci-dessous ont été exécutées avec succès sur le dépôt actuel.
-Ne documenter ici que ce qui a réellement passé.
+La [checklist de préversion](docs/testing/release-checklist.md) distingue les
+résultats observés, les contrôles de CI et les validations encore à exécuter.
+La [revue des sept écarts de fiabilité](.hermes/plans/2026-09-08-reliability-completion.md)
+complète le plan initial.
 
 ### Développement local
 
@@ -249,17 +255,27 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
 
 ### Limites connues du MVP
 
-- Le client Tauri embarque le client web chiffré via un pont Rust fermé. Il ne
-  reçoit aucun accès filesystem ou HTTP générique ; la session native reste en
-  mémoire. En plus du cache IndexedDB chiffré, le desktop réplique le Markdown
-  déchiffré dans un dossier local : à la **première création** de coffre, un
-  dialogue demande de choisir ce dossier ; sinon `Documents/Synapse/<vault_id>`
-  (ou le répertoire de données de l’app). Quand le serveur est joignable, un
-  pull précède le push (priorité web). Un retry d’appareil toutes les 10 s
-  (réglable 3–60 s dans Paramètres → Coffre) reprend la file jusqu’à ack. Le
-  **navigateur** n’affiche jamais ce dialogue de dossier OS : seulement le
-  cache IndexedDB. Les anciens coffres de dossier sont conservés sans
-  suppression implicite pendant leur migration explicite.
+- Le client Tauri embarque le client web chiffré via un pont Rust fermé, sans
+  accès filesystem ou HTTP générique depuis Vue. Le mode local permet de créer
+  et rouvrir un coffre sans compte ni serveur. Un coffre local n’est pas envoyé
+  implicitement lors d’une connexion à un compte : son transfert passe par
+  l’export/import explicite.
+- Le desktop réplique aussi le Markdown **en clair** dans un dossier choisi
+  avec le sélecteur natif, ou dans le dossier proposé par défaut. Verrouiller
+  l’app n’efface pas ces fichiers. Les fichiers inconnus ou modifiés en dehors
+  de Synapse provoquent une erreur visible ; leur import automatique n’est pas
+  implémenté. Le navigateur conserve uniquement son cache IndexedDB chiffré
+  et ne montre aucun sélecteur de dossier natif.
+- Chaque sauvegarde persiste atomiquement le contenu chiffré et son opération
+  avant le transport. La déconnexion conserve ce travail chiffré en attente et
+  purge les secrets locaux. La reconnexion au même compte et le déverrouillage
+  permettent de reprendre la file jusqu’à un acquittement correspondant.
+- Un pull incrémental précède le push. Les notifications WebSocket réveillent
+  le navigateur ; le desktop utilise son transport HTTP authentifié. La
+  reprise automatique suit le délai d’appareil (10 s par défaut, réglable
+  3–60 s), avec temporisation croissante et aléatoire après erreur, plafonnée à
+  60 s. Un conflit conserve ses variantes et bloque l’opération concernée
+  jusqu’à résolution dans le client déverrouillé.
 - Aucun contenu de coffre en clair n’atteint le serveur ; la phrase de
   déchiffrement reste locale.
 - Pas de SaaS obligatoire, pas de télémétrie distante. Un chat Codex
@@ -295,7 +311,8 @@ Budgets mesurés : `docs/architecture/performance-budgets.md`.
 ### Phase 4 — collaboration avancée
 
 - Édition temps réel d’une note, présence et commentaires optionnels.
-- Chiffrement de bout en bout optionnel.
+- Évolution du partage chiffré et de la gestion des clés ; l’E2EE des contenus
+  synchronisés est déjà obligatoire.
 - Extensions/API publique, import/export et écosystème de plugins isolés.
 
 ## Non-objectifs initiaux
@@ -322,7 +339,7 @@ Le projet retient une stack **open source, auto-hébergeable et sans dépendance
 | Temps réel            | WebSocket sécurisé, opérations idempotentes, synchronisation delta                              | Standard ouvert ; protocole applicatif documenté                             |
 | Collaboration avancée | Automerge ou yrs/Yjs, uniquement si les benchmarks le justifient                                | MIT ; CRDT auto-hébergeable, sans service tiers                              |
 | Métadonnées           | **PostgreSQL**                                                                                  | PostgreSQL License ; comptes, droits, index et historique de synchronisation |
-| Index local           | **SQLite** + FTS5 ; Tantivy si une indexation Rust plus poussée est nécessaire                  | Domaine public / MIT ; recherche locale hors ligne                           |
+| Stockage et recherche client | **IndexedDB** chiffré et recherche dans les notes déverrouillées en mémoire ; SQLite/FTS5 reste dans les composants Rust historiques | Stockage local ; aucun index de contenu en clair sur le serveur |
 | Stockage de fichiers  | Système de fichiers local par défaut ; **MinIO** pour le stockage objet S3-compatible distribué | AGPLv3 ; entièrement auto-hébergeable                                        |
 | Proxy et TLS          | **Caddy**                                                                                       | Apache-2.0 ; certificats TLS automatisés et reverse proxy                    |
 | Conteneurs            | Docker Engine + Docker Compose                                                                  | Déploiement reproductible ; possibilité Podman/Compose compatible            |
