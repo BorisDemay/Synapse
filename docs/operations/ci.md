@@ -25,25 +25,19 @@ API et UI Vite ensemble : `just dev` (`http://127.0.0.1:3000` +
 `http://localhost:5173`). Client lourd : `just desktop` (même API +
 fenêtre Tauri, Vite `http://127.0.0.1:1420`).
 
-Le smoke est autonome : `just e2e-smoke` démarre la configuration PostgreSQL de
-test, une API contre `synapse_dev`, puis Vite. Il attend `/health/ready`, utilise
-un répertoire temporaire de mail pour activer son propre compte de test, et
-arrête l’API/efface ses blobs et messages temporaires à la fin. Ne pas lancer
-`just serve` avant cette commande.
+Les tests Playwright sont autonomes. Leur configuration démarre une API sur
+`127.0.0.1:13000` et l’application web construite sur `127.0.0.1:15173`, dans
+une base jetable `synapse_e2e_<identifiant aléatoire>`. Les ports occupés font
+échouer le démarrage ; aucun serveur de développement existant n’est réutilisé.
+`SYNAPSE_E2E_API_PORT` et `SYNAPSE_E2E_UI_PORT` permettent de choisir deux autres
+ports libres.
 
-Équivalent manuel :
-
-```bash
-just db
-export SYNAPSE_BIND_ADDR=127.0.0.1:3000
-export SYNAPSE_DATABASE_URL=postgres://postgres@127.0.0.1:55432/synapse_dev
-export SYNAPSE_STORAGE_PATH=./synapse-blobs
-export SYNAPSE_MAIL_DIRECTORY=./synapse-mail
-export SYNAPSE_ALLOWED_ORIGIN=http://127.0.0.1:5173
-export SYNAPSE_ALLOW_PUBLIC_SIGNUP=true
-export SYNAPSE_COOKIE_SECURE=false
-cargo run -p synapse-server
-```
+Les blobs et messages d’activation vivent dans un répertoire temporaire.
+Le nettoyage arrête l’API, supprime sa base et retire ce répertoire, y compris
+après un échec. Il ne supprime ni `synapse_dev` ni le volume PostgreSQL partagé.
+Les tests d’ouverture hors ligne utilisent le service worker de l’application
+construite ; Vite en mode développement ne constitue pas une preuve de cache
+offline. Il n’est pas nécessaire de lancer `just serve` avant ces tests.
 
 ## Commande unique
 
