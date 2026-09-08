@@ -54,3 +54,13 @@ test PostgreSQL. Earlier analysis passed 337 JavaScript tests, all frontend
 typechecks, 28 crypto/protocol/sync Rust tests and 7 release tests. Those results
 do not validate these seven gaps. Completion needs new tests and observations
 recorded in the release checklist and relevant operator documentation.
+
+- Points 1–2: commit `f0b9492`, approved by the independent medium reviewer
+  after 48 focused tests; developer observed 147 web tests and typecheck green.
+- Point 5: commit `a6f77cc`, approved by the same reviewer; 11 focused Python
+  tests and the real isolated Compose backup/restore scenario passed, including
+  corruption rejection and restoration after volume destruction.
+- Initial actual-client Chromium measurement (synthetic 10,000-note in-memory
+  fixture, about 1 KiB/note): search median 10.7 ms, p95 14.5 ms over 20 queries;
+  route render 615 ms, 10,000 tree items and 60,101 DOM elements. This is a
+  diagnostic baseline, not the encrypted-cache open/reconnect benchmark.

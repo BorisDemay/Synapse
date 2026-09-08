@@ -27,6 +27,22 @@ phrase reste la secours. « Se souvenir de cet appareil » à la connexion
 (ADR 0014) allonge seulement le cookie de session de compte ; cela ne
 persiste pas la clé de coffre.
 
+La déconnexion verrouille immédiatement le coffre et retire les moyens de
+déverrouillage de confiance et les credentials d'assistant de l'appareil. Elle
+conserve le cache, l'enveloppe de clé, l'historique et les opérations en attente
+sous forme chiffrée : une panne réseau au logout ne doit pas effacer le seul
+exemplaire d'une modification. Une connexion ultérieure du même compte permet
+de déverrouiller ce contenu avec la phrase. L'effacement des données de
+l'appareil est une action distincte. Les réponses asynchrones d'une ancienne
+session ne doivent pas repeupler un coffre verrouillé ou un autre compte.
+
+Chaque enregistrement synchronisable persiste dans une transaction IndexedDB
+le ciphertext, l'identité d'opération et l'historique avant le transport. La
+livraison s'exécute en arrière-plan ; erreurs HTTP, timeout et ack invalide
+laissent l'opération récupérable. Un ack doit correspondre à l'opération
+envoyée. Un rejeu après interruption conserve l'identité et le ciphertext déjà
+tentés ; les modifications locales suivantes restent distinctes.
+
 La CSP de `apps/web/index.html` autorise `connect-src` vers `'self'`, `ws:`,
 `wss:`, `https://api.openai.com`, `https://auth.openai.com` et
 `https://chatgpt.com` (assistant Codex optionnel, hors serveur Synapse). Le
