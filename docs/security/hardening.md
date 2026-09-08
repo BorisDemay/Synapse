@@ -63,6 +63,18 @@ restreignantes ; la déconnexion efface ce fichier. CSP fenêtre : `default-src 
 styles/images locaux et `connect-src` OpenAI/ChatGPT pour l’assistant Codex
 optionnel (jamais le serveur Synapse).
 
+Le sélecteur natif de dossier et la réplique utilisent des commandes fermées.
+La réplique conserve un manifeste de propriété et un journal d’écriture ; elle
+refuse d’écraser les fichiers inconnus ou modifiés par un autre outil. Son
+Markdown est en clair sur le disque et reste présent après verrouillage : les
+permissions et la protection du disque relèvent du poste local (ADR 0013).
+Une erreur de réplique est visible et ne supprime jamais la copie chiffrée.
+
+Le mode sans serveur dispose d’un profil local distinct des comptes distants.
+Il ne crée ni session distante ni opération réseau en attente. Les clés et
+phrases suivent les mêmes règles de purge ; seule l’enveloppe chiffrée est
+conservée pour le déverrouillage suivant (ADR 0016).
+
 ## Chemins de coffre
 
 `VaultPath` refuse les traversées `..`, chemins absolus, séparateurs Windows
