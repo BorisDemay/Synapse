@@ -6,7 +6,9 @@ cd "$ROOT"
 
 COMPOSE=(docker compose -f docker-compose.yml --env-file .env.example)
 export COMPOSE_PROJECT_NAME=synapse-backup-test
-BASE_URL="${SYNAPSE_SELFHOST_URL:-http://127.0.0.1:8080}"
+export SYNAPSE_HTTP_PORT="${SYNAPSE_HTTP_PORT:-18089}"
+export SYNAPSE_ALLOWED_ORIGIN="http://127.0.0.1:$SYNAPSE_HTTP_PORT"
+BASE_URL="${SYNAPSE_SELFHOST_URL:-http://127.0.0.1:$SYNAPSE_HTTP_PORT}"
 BACKUP_DIR="$(mktemp -d /tmp/synapse-backup-XXXX)"
 
 cleanup() {
@@ -37,11 +39,18 @@ bash infra/docker/healthcheck.sh "$BASE_URL"
 EMAIL="backup-$(date +%s)@example.test"
 PASSWORD="a secure password"
 curl -fsS --max-time 20 -X POST "$BASE_URL/auth/signup" \
+  -H "Origin: $BASE_URL" \
   -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" -o /dev/null
 
-LOGIN_HEADERS="$(mktemp)"
+# Activation delivery is outside this recovery test. Activate only this synthetic
+# fixture through the isolated test database, with a bound psql variable.
+"${COMPOSE[@]}" exec -T postgres psql -U synapse -d synapse -v ON_ERROR_STOP=1 -v email="$EMAIL" <<'SQL'
+UPDATE users SET activated_at = CURRENT_TIMESTAMP WHERE email = :'email';
+SQL
+LOGIN_HEADERS="$BACKUP_DIR/login-headers"
 curl -fsS --max-time 20 -D "$LOGIN_HEADERS" -o /dev/null -X POST "$BASE_URL/auth/login" \
+  -H "Origin: $BASE_URL" \
   -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
 COOKIE="$(awk -F': ' 'tolower($1)=="set-cookie"{print $2; exit}' "$LOGIN_HEADERS" | cut -d';' -f1)"
@@ -80,8 +89,31 @@ curl -fsS --max-time 20 -X POST "$BASE_URL/v1/vaults/$VAULT_ID/operations" \
 
 echo "==> backup"
 chmod +x infra/scripts/backup.sh infra/scripts/restore.sh infra/scripts/migrate.sh
-bash infra/scripts/backup.sh "$BACKUP_DIR" >/tmp/backup-path.txt
+bash infra/scripts/backup.sh "$BACKUP_DIR" >"$BACKUP_DIR/path.txt"
 test -f "$BACKUP_DIR/latest/postgres.dump" || test -f "$(readlink -f "$BACKUP_DIR/latest")/postgres.dump"
+
+echo "==> reject damaged backups without stopping service"
+for damage in corrupt missing unlisted manifest blob archive; do
+  BROKEN="$BACKUP_DIR/broken-$damage"
+  cp -a "$(readlink -f "$BACKUP_DIR/latest")" "$BROKEN"
+  case "$damage" in
+    corrupt) printf broken >> "$BROKEN/postgres.dump" ;;
+    missing) rm "$BROKEN/postgres.dump" ;;
+    unlisted) printf unexpected > "$BROKEN/blobs/unlisted" ;;
+    manifest) rm "$BROKEN/manifest.sha256" ;;
+    blob) find "$BROKEN/blobs" -type f -delete ;;
+    archive)
+      printf invalid-archive > "$BROKEN/postgres.dump"
+      python3 infra/scripts/backup_manifest.py create "$BROKEN"
+      ;;
+  esac
+  if bash infra/scripts/restore.sh --yes "$BROKEN"; then
+    echo "damaged backup accepted" >&2; exit 1
+  fi
+  bash infra/docker/healthcheck.sh "$BASE_URL"
+done
+# Relative manifests must survive relocation.
+cp -a "$(readlink -f "$BACKUP_DIR/latest")" "$BACKUP_DIR/relocated"
 
 echo "==> destroy volumes"
 "${COMPOSE[@]}" down -v
@@ -90,24 +122,35 @@ bash infra/docker/healthcheck.sh "$BASE_URL"
 
 # Account should be gone before restore.
 if curl -fsS --max-time 20 -o /dev/null -X POST "$BASE_URL/auth/login" \
+  -H "Origin: $BASE_URL" \
   -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"; then
   echo "expected login to fail on empty database" >&2
   exit 1
 fi
 
-echo "==> restore"
-bash infra/scripts/restore.sh --yes "$BACKUP_DIR/latest"
+"${COMPOSE[@]}" down
+echo "==> restore from stopped stack"
+bash infra/scripts/restore.sh --yes "$BACKUP_DIR/relocated"
 "${COMPOSE[@]}" up -d --wait
 bash infra/docker/healthcheck.sh "$BASE_URL"
 
-LOGIN_HEADERS2="$(mktemp)"
+LOGIN_HEADERS2="$BACKUP_DIR/login-headers-restored"
 curl -fsS --max-time 20 -D "$LOGIN_HEADERS2" -o /dev/null -X POST "$BASE_URL/auth/login" \
+  -H "Origin: $BASE_URL" \
   -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
 COOKIE2="$(awk -F': ' 'tolower($1)=="set-cookie"{print $2; exit}' "$LOGIN_HEADERS2" | cut -d';' -f1)"
 OPS="$(curl -fsS --max-time 20 "$BASE_URL/v1/vaults/$VAULT_ID/operations?limit=10" -H "Cookie: $COOKIE2")"
-echo "$OPS" | grep -q "$HASH"
+printf '%s' "$OPS" | python3 -c '
+import hashlib, json, sys
+operations = json.load(sys.stdin)["operations"]
+assert len(operations) == 1
+operation = operations[0]
+assert operation["ciphertext"] == list(range(16))
+assert operation["ciphertext_hash"] == hashlib.sha256(bytes(range(16))).hexdigest()
+assert operation["nonce"] == [1] * 24
+'
 
 # Refuse restore without confirmation.
 if bash infra/scripts/restore.sh "$BACKUP_DIR/latest"; then
