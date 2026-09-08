@@ -23,6 +23,8 @@ directly to developers; the orchestrator integrates and verifies the result.
 4. Desktop folders and standalone use: install the native adapter, real folder
    selection, durable validated Markdown replica, no OS picker in the browser,
    and create/unlock/edit/reopen a local vault without an account or server.
+   [ADR 0016](../../docs/adr/0016-standalone-encrypted-desktop-vaults.md) defines
+   the local authorization/storage boundary; account migration stays explicit.
 5. Recovery: consistent backup, complete manifest verification before destructive
    restore, strict copy/dump/restore errors, corruption and missing-file tests,
    and a real isolated PostgreSQL/Compose restore exercise.
