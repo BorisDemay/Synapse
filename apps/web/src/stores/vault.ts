@@ -562,6 +562,7 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function listVaultIds(): Promise<string[]> {
+    if (useAuthStore().isLocalMode) return listCachedVaultIds(requireUserId());
     try {
       const response = await fetch("/v1/vaults", { credentials: "include" });
       if (!response.ok) {
@@ -579,6 +580,7 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function createVault(): Promise<string> {
+    if (useAuthStore().isLocalMode) return uuidV7();
     const response = await fetch("/vaults", {
       body: "{}",
       credentials: "include",
@@ -594,6 +596,10 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function putEnvelope(vaultId: string, bytes: number[]) {
+    if (useAuthStore().isLocalMode) {
+      await putCachedEnvelope(requireUserId(), vaultId, bytes);
+      return;
+    }
     const response = await fetch(`/v1/vaults/${vaultId}/envelope`, {
       body: JSON.stringify({ bytes }),
       credentials: "include",
@@ -741,6 +747,11 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function fetchEnvelopeBytes(vaultId: string): Promise<number[]> {
+    if (useAuthStore().isLocalMode) {
+      const bytes = await getCachedEnvelope(requireUserId(), vaultId);
+      if (!bytes) throw new Error("Unable to load vault envelope");
+      return bytes;
+    }
     try {
       const response = await fetch(`/v1/vaults/${vaultId}/envelope`, {
         credentials: "include",
@@ -774,6 +785,11 @@ export const useVaultStore = defineStore("vault", () => {
       throw new Error("Vault is locked");
     }
     const userId = requireUserId();
+    if (useAuthStore().isLocalMode) {
+      await loadNotesFromCache(userId, vaultId);
+      syncStatus.value = "synced";
+      return;
+    }
     let cursor: string | null = null;
     notes.clear();
     attachments.clear();
@@ -981,7 +997,8 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function flushQueue(): Promise<void> {
-    if (!currentVaultId.value || !vaultKey) return;
+    if (!currentVaultId.value || !vaultKey || useAuthStore().isLocalMode)
+      return;
     const userId = requireUserId();
     const vaultId = currentVaultId.value;
     const key = vaultKey;
@@ -1105,6 +1122,7 @@ export const useVaultStore = defineStore("vault", () => {
       userId,
       operation,
       supersedes,
+      useAuthStore().isLocalMode,
     );
     if (
       vaultKey !== key ||
@@ -1122,7 +1140,10 @@ export const useVaultStore = defineStore("vault", () => {
 
     pendingNoteIds.value = [...new Set([...pendingNoteIds.value, input.id])];
     await rememberHistory(userId, operation, input.content, historyRevision);
-    void flushPendingOperations();
+    if (useAuthStore().isLocalMode) {
+      pendingNoteIds.value = [];
+      syncStatus.value = "synced";
+    } else void flushPendingOperations();
 
     return operation;
   }
@@ -1154,7 +1175,12 @@ export const useVaultStore = defineStore("vault", () => {
       vault_id: vaultId,
     };
     const key = vaultKey;
-    await persistPendingOperation(userId, operation);
+    await persistPendingOperation(
+      userId,
+      operation,
+      [],
+      useAuthStore().isLocalMode,
+    );
     if (
       vaultKey !== key ||
       currentVaultId.value !== vaultId ||
@@ -1162,7 +1188,10 @@ export const useVaultStore = defineStore("vault", () => {
     )
       return { operation, revision: baseRevision };
     pendingNoteIds.value = [...new Set([...pendingNoteIds.value, noteId])];
-    void flushPendingOperations();
+    if (useAuthStore().isLocalMode) {
+      pendingNoteIds.value = [];
+      syncStatus.value = "synced";
+    } else void flushPendingOperations();
     return { operation, revision: baseRevision };
   }
 

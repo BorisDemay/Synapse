@@ -45,13 +45,29 @@ function jsonCsrfHeaders(): HeadersInit {
 
 export const useAuthStore = defineStore("auth", {
   state: () => ({
+    isLocalMode: false,
     isAuthenticated: false,
     isOfflineSession: false,
     userId: null as string | null,
     email: null as string | null,
   }),
   actions: {
+    async enterLocalMode() {
+      useVaultStore().lockAndRequirePassphrase();
+      this.isLocalMode = true;
+      this.isAuthenticated = false;
+      this.isOfflineSession = true;
+      this.userId = "local-device";
+      this.email = null;
+      await clearRememberedSession();
+      await rememberSessionUser("local-device");
+    },
     async restoreSession() {
+      if ((await getRememberedSessionUser()) === "local-device") {
+        await this.enterLocalMode();
+        return true;
+      }
+
       try {
         const response = await fetch("/v1/session", {
           credentials: "include",
@@ -132,6 +148,8 @@ export const useAuthStore = defineStore("auth", {
       if (!response.ok) {
         throw new Error("Authentication failed");
       }
+      this.isLocalMode = false;
+      await clearRememberedSession();
       this.isAuthenticated = true;
       await this.restoreSession();
     },
@@ -139,12 +157,15 @@ export const useAuthStore = defineStore("auth", {
       const vault = useVaultStore();
       vault.lockAndRequirePassphrase();
       const userId = this.userId;
+      const local = this.isLocalMode;
+      this.isLocalMode = false;
       this.isAuthenticated = false;
       this.isOfflineSession = false;
       this.userId = null;
       this.email = null;
       if (userId) await clearUserUnlockMaterial(userId);
       await clearRememberedSession();
+      if (local) return;
       const response = await fetch("/auth/logout", {
         credentials: "include",
         headers: csrfHeaders(),

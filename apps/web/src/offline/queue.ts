@@ -57,6 +57,7 @@ export async function persistPendingOperation(
   userId: string,
   operation: EncryptedPushOperation,
   supersedes: string[] = [],
+  localOnly = false,
 ): Promise<number> {
   const db = await openOfflineDb();
   const tx = db.transaction(
@@ -83,9 +84,10 @@ export async function persistPendingOperation(
     await tx
       .objectStore("meta")
       .put({ key: sequenceKey, value: sequence }, sequenceKey);
-    await tx
-      .objectStore("queue")
-      .put({ ...operation, userId, sequence }, operation.operation_id);
+    if (!localOnly)
+      await tx
+        .objectStore("queue")
+        .put({ ...operation, userId, sequence }, operation.operation_id);
     const previous = await tx
       .objectStore("note_revisions")
       .getAll(
