@@ -91,11 +91,12 @@ tauri:
       pnpm --filter @synapse/desktop tauri dev
 
 # Format check, clippy, tests, frontend gates, Playwright smoke, cargo-deny, pnpm audit.
-verify: fmt-check clippy test-rust test-js typecheck lint audit-rust audit-js e2e-smoke
+verify: fmt-check clippy test-rust test-native-rust test-js test-harness test-release test-operations typecheck lint audit-rust audit-js e2e-recovery test-recovery
     @echo "just verify: all gates passed"
 
 fmt-check:
     cargo fmt --all -- --check
+    cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 
 fmt:
     cargo fmt --all
@@ -103,12 +104,32 @@ fmt:
 
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
 
 test-rust:
     # Clear server env overrides so unit/integration tests use their defaults
     # (invite-gated signup, Secure cookies, CSRF origin https://synapse.local).
     env -u SYNAPSE_ALLOW_PUBLIC_SIGNUP -u SYNAPSE_COOKIE_SECURE -u SYNAPSE_ALLOWED_ORIGIN \
       cargo nextest run --workspace
+
+test-native-rust:
+    cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+test-harness:
+    node --test tests/harness/*.test.mjs
+
+test-release:
+    node --test tests/release/*.test.mjs
+
+test-operations:
+    python3 -m unittest tests/operations/backup_test.py
+
+test-recovery:
+    bash tests/integration/self_hosted.sh
+    bash tests/integration/backup_restore.sh
+
+e2e-recovery:
+    pnpm exec playwright test tests/e2e/web-register-save.spec.ts tests/e2e/web-offline.spec.ts tests/e2e/reliability.spec.ts tests/e2e/conflict-resolution.spec.ts tests/e2e/full-sync.spec.ts tests/e2e/offline-update.spec.ts
 
 test-js:
     pnpm test

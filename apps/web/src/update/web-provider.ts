@@ -40,6 +40,48 @@ function isWebManifest(value: unknown): value is WebManifest {
   );
 }
 
+async function waitForWorker(
+  worker: ServiceWorker,
+  target: "installed" | "activated",
+): Promise<void> {
+  if (worker.state === target || worker.state === "activated") return;
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      if (worker.state === target || worker.state === "activated") {
+        cleanup();
+        resolve();
+      } else if (worker.state === "redundant") {
+        cleanup();
+        reject(new Error("Web update unavailable"));
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Web update timed out"));
+    }, 15000);
+    const cleanup = () => {
+      clearTimeout(timer);
+      worker.removeEventListener("statechange", finish);
+    };
+    worker.addEventListener("statechange", finish);
+    finish();
+  });
+}
+
+export async function activateWaitingWebUpdate(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  if (!registration) return;
+  await registration.update();
+  if (registration.installing)
+    await waitForWorker(registration.installing, "installed");
+  const waiting = registration.waiting;
+  if (!waiting) return;
+  const activated = waitForWorker(waiting, "activated");
+  waiting.postMessage({ type: "SYNAPSE_ACTIVATE_UPDATE" });
+  await activated;
+}
+
 export function createWebUpdateProvider(
   current: WebBuildIdentity,
   fetcher: typeof fetch = fetch,
@@ -69,6 +111,7 @@ export function createWebUpdateProvider(
       };
     },
     async apply() {
+      await activateWaitingWebUpdate();
       reload();
     },
   };

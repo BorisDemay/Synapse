@@ -35,6 +35,8 @@ jobs:
           node-version: 22.17.1
           cache: pnpm
       - run: node infra/scripts/release/set-version.mjs "$SYNAPSE_VERSION"
+      - name: Install native Rust verification prerequisites
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: cargo install just cargo-nextest cargo-deny --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium

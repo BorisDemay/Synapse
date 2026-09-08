@@ -1,6 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { spawnSync } from "node:child_process";
-import path from "node:path";
 
 import {
   DEFAULT_PASSPHRASE,
@@ -13,12 +11,9 @@ import {
   writeAndSave,
 } from "./fixtures";
 
-const root = path.resolve(__dirname, "../..");
-
 /**
- * Vertical path: client A (desktop stand-in) → server → client B (web) →
+ * Vertical path: client A (browser A) → server → client B (web) →
  * offline conflict → resolve → persistence across reload.
- * Optional Compose backup/restore when SYNAPSE_RUN_BACKUP_E2E=1.
  */
 test("full encrypted sync path survives conflict and reload", async ({
   browser,
@@ -27,14 +22,14 @@ test("full encrypted sync path survives conflict and reload", async ({
   const password = DEFAULT_PASSWORD;
   const passphrase = DEFAULT_PASSPHRASE;
 
-  const desktop = await browser.newContext();
+  const firstClient = await browser.newContext();
   const web = await browser.newContext();
-  const desktopPage = await desktop.newPage();
+  const firstPage = await firstClient.newPage();
   const webPage = await web.newPage();
 
-  await registerAndUnlock(desktopPage, email, password, passphrase, "create");
-  await writeAndSave(desktopPage, "# vertical seed\n\nfrom desktop stand-in");
-  await expectSynced(desktopPage);
+  await registerAndUnlock(firstPage, email, password, passphrase, "create");
+  await writeAndSave(firstPage, "# vertical seed\n\nfrom browser A");
+  await expectSynced(firstPage);
 
   await registerAndUnlock(webPage, email, password, passphrase, "unlock");
   await expect(
@@ -42,64 +37,51 @@ test("full encrypted sync path survives conflict and reload", async ({
   ).toBeVisible({ timeout: 30_000 });
   await webPage.getByRole("treeitem", { name: "vertical seed" }).click();
   await expect(webPage.getByLabel("Éditeur Markdown")).toContainText(
-    "from desktop stand-in",
+    "from browser A",
     { timeout: 30_000 },
   );
 
   await writeAndSave(webPage, "# vertical seed\n\nweb edit online");
   await expectSynced(webPage);
 
-  await desktop.setOffline(true);
-  await writeAndSave(desktopPage, "# vertical seed\n\ndesktop offline edit");
-  await expectOffline(desktopPage);
+  await firstClient.setOffline(true);
+  await writeAndSave(firstPage, "# vertical seed\n\nbrowser A offline edit");
+  await expectOffline(firstPage);
 
   await writeAndSave(webPage, "# vertical seed\n\nweb concurrent edit");
   await expectSynced(webPage);
 
-  await goOnline(desktopPage);
+  await goOnline(firstPage);
   await expect(
-    desktopPage.getByRole("region", { name: "Résolution de conflit" }),
+    firstPage.getByRole("region", { name: "Résolution de conflit" }),
   ).toBeVisible({ timeout: 30_000 });
   await expect(
-    desktopPage.getByLabel("Version locale", { exact: true }),
-  ).toContainText("desktop offline edit");
+    firstPage.getByLabel("Version locale", { exact: true }),
+  ).toContainText("browser A offline edit");
   await expect(
-    desktopPage.getByLabel("Version distante", { exact: true }),
+    firstPage.getByLabel("Version distante", { exact: true }),
   ).toContainText("web concurrent edit");
 
-  desktopPage.once("dialog", (dialog) => dialog.accept());
-  await desktopPage
+  firstPage.once("dialog", (dialog) => dialog.accept());
+  await firstPage
     .getByRole("button", { name: "Garder la version locale" })
     .click();
-  await expectSynced(desktopPage);
-  await expect(desktopPage.getByLabel("Éditeur Markdown")).toContainText(
-    "desktop offline edit",
+  await expectSynced(firstPage);
+  await expect(firstPage.getByLabel("Éditeur Markdown")).toContainText(
+    "browser A offline edit",
   );
 
-  await desktopPage.reload();
-  await registerAndUnlock(desktopPage, email, password, passphrase, "unlock");
+  await firstPage.reload();
+  await registerAndUnlock(firstPage, email, password, passphrase, "unlock");
   await expect(
-    desktopPage.getByRole("treeitem", { name: "vertical seed" }),
+    firstPage.getByRole("treeitem", { name: "vertical seed" }),
   ).toBeVisible({ timeout: 30_000 });
-  await desktopPage.getByRole("treeitem", { name: "vertical seed" }).click();
-  await expect(desktopPage.getByLabel("Éditeur Markdown")).toContainText(
-    "desktop offline edit",
+  await firstPage.getByRole("treeitem", { name: "vertical seed" }).click();
+  await expect(firstPage.getByLabel("Éditeur Markdown")).toContainText(
+    "browser A offline edit",
     { timeout: 30_000 },
   );
 
-  await desktop.close();
+  await firstClient.close();
   await web.close();
-});
-
-test("optional compose backup restore when enabled", async () => {
-  test.skip(
-    process.env.SYNAPSE_RUN_BACKUP_E2E !== "1",
-    "Set SYNAPSE_RUN_BACKUP_E2E=1 to run Compose backup/restore in this suite",
-  );
-  const result = spawnSync("bash", ["tests/integration/backup_restore.sh"], {
-    cwd: root,
-    encoding: "utf8",
-    env: process.env,
-  });
-  expect(result.status, result.stderr || result.stdout).toBe(0);
 });

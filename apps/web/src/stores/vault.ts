@@ -97,6 +97,7 @@ export interface ActiveConflict {
 }
 
 interface NoteInput {
+  baseRevision?: number;
   content: string;
   id: string;
   path?: string;
@@ -1340,7 +1341,9 @@ export const useVaultStore = defineStore("vault", () => {
     }
     const userId = requireUserId();
     const vaultId = currentVaultId.value;
-    const baseRevision = headRevision.value;
+    const baseRevision = input.baseRevision ?? headRevision.value;
+    if (!Number.isSafeInteger(baseRevision) || baseRevision < 0)
+      throw new Error("Invalid base revision");
     const path = input.path ?? pathForNote(input.id, notes.get(input.id));
     syncStatus.value = "saving";
     lastError.value = null;

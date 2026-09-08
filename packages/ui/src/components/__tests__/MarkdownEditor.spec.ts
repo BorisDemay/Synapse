@@ -299,6 +299,18 @@ describe("MarkdownEditor", () => {
     expect(image.getAttribute("src")).toBe("blob:http://local/photo");
   });
 
+  it("cancels the old debounce when a different note replaces the editor value", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "old note" },
+    });
+    vditorMock.options()?.input?.("old unsaved draft");
+    await wrapper.setProps({ modelValue: "different note" });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(wrapper.emitted("save")).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it("destroys the editor and cancels pending saves on unmount", () => {
     const wrapper = mount(MarkdownEditor, {
       props: { modelValue: "" },

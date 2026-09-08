@@ -247,3 +247,18 @@ it("an old deletion finishing after vault switch cannot remove the new vault not
   expect(vault.notes.get(note)?.content).toBe("other vault note");
   write.mockRestore();
 });
+
+it("encrypts an editor draft against its captured base rather than a newer pulled head", async () => {
+  const vault = useVaultStore();
+  vault.headRevision = 5;
+  vault.setSyncWakeup(() => {});
+  const operation = await vault.saveNote({
+    id: note,
+    content: "draft began earlier",
+    baseRevision: 3,
+  });
+  expect(operation.base_revision).toBe(3);
+  await expect(
+    vault.saveNote({ id: note, content: "invalid", baseRevision: -1 }),
+  ).rejects.toThrow("Invalid base revision");
+});

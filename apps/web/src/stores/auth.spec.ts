@@ -133,7 +133,7 @@ describe("auth store", () => {
     expect(vault.notes.size).toBe(0);
   });
 
-  it("registers through the opaque signup endpoint then logs in", async () => {
+  it("registers and waits for email activation before authenticating", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(null, { status: 201 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
@@ -164,7 +164,8 @@ describe("auth store", () => {
       headers: { "content-type": "application/json" },
       method: "POST",
     });
-    expect(auth.isAuthenticated).toBe(true);
+    expect(auth.isAuthenticated).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("registers without an invitation token when public signup is enabled", async () => {

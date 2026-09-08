@@ -34,6 +34,7 @@ function ensureInstance(): Promise<void> {
   const url =
     developmentInstanceUrl ??
     localStorage.getItem(INSTANCE_URL_KEY) ??
+    import.meta.env.VITE_SYNAPSE_INSTANCE_URL ??
     "http://127.0.0.1:3000";
   if (!instanceReady || activeInstanceUrl !== url) {
     activeInstanceUrl = url;

@@ -18,7 +18,9 @@ const router = useRouter();
 const email = ref("");
 const password = ref("");
 const instanceUrl = ref(
-  localStorage.getItem("synapse-instance-url") ?? "http://127.0.0.1:3000",
+  localStorage.getItem("synapse-instance-url") ??
+    import.meta.env.VITE_SYNAPSE_INSTANCE_URL ??
+    "http://127.0.0.1:3000",
 );
 const invitationToken = ref(
   typeof route.query.invitation === "string" ? route.query.invitation : "",

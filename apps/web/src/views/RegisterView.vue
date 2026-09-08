@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
@@ -13,13 +13,13 @@ import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
 const route = useRoute();
-const router = useRouter();
 const email = ref("");
 const password = ref("");
 const invitationToken = ref(
   typeof route.query.invitation === "string" ? route.query.invitation : "",
 );
 const error = ref("");
+const registered = ref(false);
 const publicSignup = ref(false);
 const statusLoaded = ref(false);
 
@@ -42,7 +42,7 @@ async function submit() {
     });
     password.value = "";
     invitationToken.value = "";
-    await router.push("/unlock");
+    registered.value = true;
   } catch {
     password.value = "";
     error.value = "Inscription impossible.";
@@ -76,7 +76,14 @@ async function submit() {
           >
           <ThemeToggle />
         </div>
-        <template v-if="statusLoaded && showForm">
+        <template v-if="registered">
+          <h2>Consultez votre messagerie.</h2>
+          <p role="status">
+            Un lien d’activation a été envoyé. Activez votre compte, puis
+            connectez-vous.
+          </p>
+        </template>
+        <template v-else-if="statusLoaded && showForm">
           <h2>Commencez votre espace.</h2>
           <p class="subtitle">
             Un compte, puis un coffre déverrouillé localement.

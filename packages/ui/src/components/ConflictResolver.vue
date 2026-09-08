@@ -139,6 +139,8 @@ function confirmAction(
 
 <style scoped>
 .conflict-resolver {
+  min-height: 0;
+  overflow: auto;
   display: grid;
   gap: 1.25rem;
   padding: clamp(1rem, 3vw, 1.75rem);

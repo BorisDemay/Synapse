@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 COMPOSE=(docker compose -f docker-compose.yml --env-file .env.example)
-export COMPOSE_PROJECT_NAME=synapse-backup-test
+export COMPOSE_PROJECT_NAME="synapse-backup-test-$$-$RANDOM"
 export SYNAPSE_HTTP_PORT="${SYNAPSE_HTTP_PORT:-18089}"
 export SYNAPSE_ALLOWED_ORIGIN="http://127.0.0.1:$SYNAPSE_HTTP_PORT"
 BASE_URL="${SYNAPSE_SELFHOST_URL:-http://127.0.0.1:$SYNAPSE_HTTP_PORT}"

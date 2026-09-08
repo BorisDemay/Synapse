@@ -404,6 +404,10 @@ function teardownTableInteractions() {
 }
 
 function applyExternalValue(value: string) {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+  }
   currentValue = value;
   editor?.setValue(value, true);
 }

@@ -95,13 +95,12 @@ const attachmentPreview = ref<{
   name: string;
   url: string;
 } | null>(null);
-let pendingSave:
-  | {
-      content: string;
-      noteId: string;
-    }
-  | undefined;
-let saveInFlight: Promise<void> | undefined;
+const draftBaseRevision = ref<number | null>(null);
+const pendingSaves = new Map<
+  string,
+  { content: string; baseRevision: number; noteId: string }
+>();
+let saveInFlight: Promise<boolean> | undefined;
 
 function noteTitle(markdown: string, fallback: string): string {
   const heading = markdown
@@ -263,7 +262,7 @@ const historyEntries = computed(() =>
 
 const restorePoints = computed(() => vault.restorePointsFor(noteId.value));
 
-function selectNote(id: string) {
+async function selectNote(id: string) {
   const attached = vault.attachments.get(id);
   if (attached) {
     const url = blobUrls.value[attached.path];
@@ -284,6 +283,8 @@ function selectNote(id: string) {
     }
     return;
   }
+  if (draftBaseRevision.value !== null && !(await save(content.value))) return;
+  draftBaseRevision.value = null;
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
@@ -338,13 +339,17 @@ async function sendAssistant(prompt: string) {
   }
 }
 
-function showNote(id: string) {
+async function showNote(id: string) {
+  if (draftBaseRevision.value !== null && !(await save(content.value))) return;
+  draftBaseRevision.value = null;
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
 }
 
-function startNewNote(folder?: string) {
+async function startNewNote(folder?: string) {
+  if (draftBaseRevision.value !== null && !(await save(content.value))) return;
+  draftBaseRevision.value = null;
   noteId.value = uuidV7();
   selectedNoteId.value = null;
   content.value = "# Nouvelle note\n\n";
@@ -385,9 +390,7 @@ async function startFromTemplate() {
 }
 
 async function deleteNote(id: string) {
-  if (pendingSave?.noteId === id) {
-    pendingSave = undefined;
-  }
+  pendingSaves.delete(id);
   formError.value = "";
   try {
     await vault.deleteNote(id);
@@ -401,27 +404,57 @@ async function deleteNote(id: string) {
   }
 }
 
+function updateDraft(nextContent: string) {
+  if (nextContent !== content.value && draftBaseRevision.value === null)
+    draftBaseRevision.value = vault.headRevision;
+  content.value = nextContent;
+}
+
+watch(
+  () => vault.notes.get(noteId.value)?.content,
+  (next, previous) => {
+    if (
+      next !== undefined &&
+      previous !== undefined &&
+      draftBaseRevision.value === null &&
+      content.value === previous
+    )
+      content.value = next;
+  },
+);
+
 async function save(nextContent = content.value) {
   if (!vault.notes.has(noteId.value) && isNewNoteDraft(nextContent)) {
-    return;
+    return true;
   }
   content.value = nextContent;
-  pendingSave = { content: nextContent, noteId: noteId.value };
+  pendingSaves.set(noteId.value, {
+    content: nextContent,
+    noteId: noteId.value,
+    baseRevision: draftBaseRevision.value ?? vault.headRevision,
+  });
   if (saveInFlight) {
     return saveInFlight;
   }
 
   saveInFlight = (async () => {
-    while (pendingSave) {
-      const currentSave = pendingSave;
-      pendingSave = undefined;
+    while (pendingSaves.size) {
+      const currentSave = pendingSaves.values().next().value!;
       formError.value = "";
       try {
         await vault.saveNote({
+          baseRevision: currentSave.baseRevision,
           content: currentSave.content,
           id: currentSave.noteId,
           path: vault.notes.get(currentSave.noteId)?.path,
         });
+        if (pendingSaves.get(currentSave.noteId) === currentSave)
+          pendingSaves.delete(currentSave.noteId);
+        if (
+          noteId.value === currentSave.noteId &&
+          content.value === currentSave.content
+        )
+          draftBaseRevision.value = null;
         if (noteId.value === currentSave.noteId) {
           selectedNoteId.value = currentSave.noteId;
         }
@@ -431,8 +464,10 @@ async function save(nextContent = content.value) {
       } catch (error) {
         formError.value =
           error instanceof Error ? error.message : "Enregistrement impossible.";
+        return false;
       }
     }
+    return true;
   })().finally(() => {
     saveInFlight = undefined;
   });
@@ -461,6 +496,11 @@ async function resolveWith(contentChoice: string) {
 }
 
 async function logout() {
+  if (
+    (draftBaseRevision.value !== null || pendingSaves.size) &&
+    !(await save(content.value))
+  )
+    return;
   try {
     await auth.logout();
   } finally {
@@ -501,6 +541,11 @@ async function rememberDevice() {
 }
 
 async function lockVault() {
+  if (
+    (draftBaseRevision.value !== null || pendingSaves.size) &&
+    !(await save(content.value))
+  )
+    return;
   settingsOpen.value = false;
   vault.lockAndRequirePassphrase();
   await router.push("/unlock");
@@ -869,6 +914,9 @@ watch(
       void assistant.restore();
       return;
     }
+    draftBaseRevision.value = null;
+    pendingSaves.clear();
+    content.value = "";
     assistant.lockSession();
   },
 );
@@ -1173,7 +1221,8 @@ watch(settingsOpen, (open) => {
       <template v-else>
         <div class="editor-surface">
           <MarkdownEditor
-            v-model="content"
+            :model-value="content"
+            @update:model-value="updateDraft"
             :attachment-urls="blobUrls"
             :wikilink-suggestions="wikilinkSuggestions"
             @attach-files="attachFiles"

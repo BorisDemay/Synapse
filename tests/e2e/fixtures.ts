@@ -1,4 +1,7 @@
 import { expect, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { persistedMarkdown } from "./durable-cache";
+import { join } from "node:path";
 
 export type UnlockMode = "create" | "unlock";
 
@@ -18,21 +21,46 @@ export async function registerAndUnlock(
   mode: UnlockMode,
 ): Promise<void> {
   if (mode === "create") {
-    await page.goto("/register");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Mot de passe").fill(password);
-    await page.getByRole("button", { name: "S’inscrire" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Créer un coffre" }),
-    ).toBeVisible({ timeout: 30_000 });
-  } else {
+    const signup = await page.request.post("/auth/signup", {
+      data: { email, password },
+    });
+    expect(signup.status()).toBe(201);
+    const mailPath = join(
+      process.env.SYNAPSE_E2E_MAIL_DIRECTORY!,
+      `${email}.eml`,
+    );
+    await expect
+      .poll(async () => readFile(mailPath, "utf8").catch(() => ""), {
+        timeout: 30_000,
+      })
+      .toContain(`To: ${email}`);
+    const mail = await readFile(mailPath, "utf8");
+    const link = mail.match(/https?:\/\/\S+/)?.[0];
+    expect(link).toBeDefined();
+    const token = new URL(link!).searchParams.get("token");
+    expect(
+      (await page.request.post("/auth/activate", { data: { token } })).status(),
+    ).toBe(204);
     await page.goto("/login");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Mot de passe").fill(password);
     await page.getByRole("button", { name: "Se connecter" }).click();
     await expect(
-      page.getByRole("heading", { name: "Déverrouiller le coffre" }),
+      page.getByRole("heading", { name: "Créer un coffre" }),
     ).toBeVisible({ timeout: 30_000 });
+  } else {
+    await page.goto("/login");
+    const login = page.getByRole("button", { name: "Se connecter" });
+    const unlock = page.getByRole("heading", {
+      name: "Déverrouiller le coffre",
+    });
+    await expect(login.or(unlock)).toBeVisible({ timeout: 30000 });
+    if (await login.isVisible()) {
+      await page.getByLabel("Email").fill(email);
+      await page.getByLabel("Mot de passe").fill(password);
+      await login.click();
+    }
+    await expect(unlock).toBeVisible({ timeout: 30000 });
   }
   await page.getByLabel("Phrase de déchiffrement").fill(passphrase);
   await page
@@ -48,21 +76,29 @@ export async function registerAndUnlock(
 }
 
 export async function writeAndSave(page: Page, text: string): Promise<void> {
+  await page.getByRole("button", { name: "Texte brut", exact: true }).click();
   const editor = page.getByLabel("Éditeur Markdown");
   await editor.click();
   await page.keyboard.press("Control+A");
-  await page.keyboard.type(text);
-  await page.getByRole("button", { name: "Enregistrer" }).click();
+  await page.keyboard.press("Backspace");
+  const lines = text.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    if (index) await page.keyboard.press("Enter");
+    await page.keyboard.type(lines[index]!);
+  }
+  await expect
+    .poll(() => persistedMarkdown(page, DEFAULT_PASSPHRASE), { timeout: 30000 })
+    .toContain(text.trim());
 }
 
 export async function expectSynced(page: Page): Promise<void> {
-  await expect(page.getByRole("status")).toHaveText("synced", {
+  await expect(page.locator(".sync-pill")).toHaveText("synced", {
     timeout: 30_000,
   });
 }
 
 export async function expectOffline(page: Page): Promise<void> {
-  await expect(page.getByRole("status")).toHaveText("offline", {
+  await expect(page.locator(".sync-pill")).toHaveText("offline", {
     timeout: 30_000,
   });
 }

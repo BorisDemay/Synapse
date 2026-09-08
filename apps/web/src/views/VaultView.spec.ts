@@ -308,3 +308,132 @@ describe("VaultView notes section", () => {
     );
   });
 });
+
+it("updates the selected clean editor from sync without echo-saving", async () => {
+  const { wrapper, vault } = await mountVault();
+  await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+  const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+  vault.notes.set(noteId, {
+    content: "# remote update",
+    path: "note-epinglee.md",
+    revision: 2,
+  });
+  await flushPromises();
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# remote update",
+  );
+  expect(save).not.toHaveBeenCalled();
+});
+it("keeps an unsaved draft and its original base when remote sync arrives before autosave", async () => {
+  const { wrapper, vault } = await mountVault();
+  vault.headRevision = 4;
+  await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+  const editor = wrapper.findComponent(
+    '[data-test="markdown-editor"]',
+  ) as VueWrapper;
+  editor.vm.$emit("update:modelValue", "# local draft");
+  await flushPromises();
+  vault.headRevision = 5;
+  vault.notes.set(noteId, {
+    content: "# remote update",
+    path: "note-epinglee.md",
+    revision: 5,
+  });
+  await flushPromises();
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# local draft",
+  );
+  const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+  editor.vm.$emit("save", "# local draft");
+  await flushPromises();
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      baseRevision: 4,
+      content: "# local draft",
+      id: noteId,
+    }),
+  );
+});
+
+it("persists a pending draft under its original note before switching notes", async () => {
+  const { wrapper, vault } = await mountVault();
+  await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+  const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+  const editor = wrapper.findComponent(
+    '[data-test="markdown-editor"]',
+  ) as VueWrapper;
+  editor.vm.$emit("update:modelValue", "# original draft");
+  await flushPromises();
+  vault.notes.set("second", { content: "# second", revision: 1 });
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "second");
+  await flushPromises();
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ id: noteId, content: "# original draft" }),
+  );
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe("# second");
+});
+
+it("finishes the current note’s pending drafts before switching during an in-flight save", async () => {
+  const { wrapper, vault } = await mountVault();
+  await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+  let release!: (value: never) => void;
+  const save = vi
+    .spyOn(vault, "saveNote")
+    .mockImplementationOnce(
+      async () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    )
+    .mockResolvedValue({} as never);
+  const editor = wrapper.findComponent(
+    '[data-test="markdown-editor"]',
+  ) as VueWrapper;
+  editor.vm.$emit("update:modelValue", "# first");
+  editor.vm.$emit("save", "# first");
+  await flushPromises();
+  editor.vm.$emit("update:modelValue", "# latest original");
+  editor.vm.$emit("save", "# latest original");
+  await flushPromises();
+  vault.notes.set("second", { content: "# second", revision: 1 });
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "second");
+  await flushPromises();
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# latest original",
+  );
+  release({} as never);
+  await flushPromises();
+  editor.vm.$emit("update:modelValue", "# second edit");
+  editor.vm.$emit("save", "# second edit");
+  await flushPromises();
+  expect(save.mock.calls.map(([input]) => [input.id, input.content])).toEqual([
+    [noteId, "# first"],
+    [noteId, "# latest original"],
+    ["second", "# second edit"],
+  ]);
+});
+
+it("retains a rejected durable draft and blocks logout and note switching", async () => {
+  const { wrapper, vault } = await mountVault();
+  await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+  vi.spyOn(vault, "saveNote").mockRejectedValue(new Error("quota"));
+  const editor = wrapper.findComponent(
+    '[data-test="markdown-editor"]',
+  ) as VueWrapper;
+  editor.vm.$emit("update:modelValue", "# unsaved quota draft");
+  vault.notes.set("second", { content: "# second", revision: 1 });
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "second");
+  await flushPromises();
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# unsaved quota draft",
+  );
+  const lock = vi.spyOn(vault, "lockAndRequirePassphrase");
+  wrapper.findComponent({ name: "SettingsPanel" }).vm.$emit("lock-vault");
+  await flushPromises();
+  expect(lock).not.toHaveBeenCalled();
+  await wrapper.get(".logout-button").trigger("click");
+  await flushPromises();
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# unsaved quota draft",
+  );
+});

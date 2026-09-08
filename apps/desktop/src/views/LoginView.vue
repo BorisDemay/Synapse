@@ -17,7 +17,9 @@ const auth = useAuthStore();
 const vault = useVaultStore();
 const router = useRouter();
 const instanceUrl = ref(
-  localStorage.getItem("synapse-instance-url") ?? "http://127.0.0.1:3000",
+  localStorage.getItem("synapse-instance-url") ??
+    import.meta.env.VITE_SYNAPSE_INSTANCE_URL ??
+    "http://127.0.0.1:3000",
 );
 const email = ref("");
 const password = ref("");

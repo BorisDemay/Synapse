@@ -5,6 +5,7 @@ import {
   type Router,
 } from "vue-router";
 
+import ActivateView from "./views/ActivateView.vue";
 import LoginView from "./views/LoginView.vue";
 import RegisterView from "./views/RegisterView.vue";
 import UnlockVaultView from "./views/UnlockVaultView.vue";
@@ -30,6 +31,7 @@ export function createAppRouter(
     routes: [
       { component: LoginView, path: "/login" },
       { component: RegisterView, path: "/register" },
+      { component: ActivateView, path: "/activate" },
       { component: UnlockVaultView, path: "/unlock" },
       {
         component: VaultView,
@@ -40,6 +42,7 @@ export function createAppRouter(
   });
 
   router.beforeEach((to) => {
+    if (to.path === "/activate") return true;
     if (to.path === "/login" || to.path === "/register") {
       if (auth.isAuthenticated || auth.isLocalMode) {
         return vault.isUnlocked ? "/vault" : "/unlock";

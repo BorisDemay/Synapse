@@ -132,7 +132,7 @@ export const useAuthStore = defineStore("auth", {
       if (!response.ok) {
         throw new Error("Registration failed");
       }
-      await this.login(input.email, input.password);
+      // The account remains inactive until the email link is confirmed.
     },
     async login(email: string, password: string, options: LoginOptions = {}) {
       const credentials: LoginCredentials = { email, password };

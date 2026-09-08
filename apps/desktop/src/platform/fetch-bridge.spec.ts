@@ -116,3 +116,19 @@ describe("desktop Synapse fetch bridge", () => {
     });
   });
 });
+
+it("uses the configured build instance only as the initial default", async () => {
+  vi.stubEnv("VITE_SYNAPSE_INSTANCE_URL", "http://127.0.0.1:13999");
+  localStorage.removeItem("synapse-instance-url");
+  installDesktopFetchBridge();
+  await fetch("/auth/signup");
+  expect(invoke).toHaveBeenCalledWith("set_instance_url", {
+    url: "http://127.0.0.1:13999",
+  });
+  localStorage.setItem("synapse-instance-url", "http://127.0.0.1:13998");
+  await fetch("/auth/signup");
+  expect(invoke).toHaveBeenCalledWith("set_instance_url", {
+    url: "http://127.0.0.1:13998",
+  });
+  vi.unstubAllEnvs();
+});

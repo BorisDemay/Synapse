@@ -419,20 +419,18 @@ export async function commitPulledPage(
     );
     for (const operation of operations) {
       if (!pending.has(operation.note_id))
-        await tx
-          .objectStore("notes")
-          .put(
-            {
-              userId,
-              vaultId,
-              noteId: operation.note_id,
-              ciphertext: operation.ciphertext,
-              ciphertextHash: operation.ciphertext_hash,
-              nonce: operation.nonce,
-              revision: operation.base_revision,
-            },
-            noteKey(userId, vaultId, operation.note_id),
-          );
+        await tx.objectStore("notes").put(
+          {
+            userId,
+            vaultId,
+            noteId: operation.note_id,
+            ciphertext: operation.ciphertext,
+            ciphertextHash: operation.ciphertext_hash,
+            nonce: operation.nonce,
+            revision: operation.base_revision,
+          },
+          noteKey(userId, vaultId, operation.note_id),
+        );
     }
     const headKey = metaKey(userId, "head", vaultId);
     const previous = await tx.objectStore("meta").get(headKey);
