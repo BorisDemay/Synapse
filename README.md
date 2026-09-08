@@ -202,9 +202,10 @@ indisponibilité réseau.
 just verify
 ```
 
-Enchaîne format Rust, clippy (`-D warnings`), `cargo nextest`, Vitest,
-typecheck, Prettier, `cargo deny check`, `pnpm audit --prod` et le smoke
-Playwright `tests/e2e/web-register-save.spec.ts`. Détails : `docs/operations/ci.md`.
+Enchaîne les contrôles Rust et frontend, les audits, les tests du harness et
+des scripts d’exploitation, les parcours Playwright de récupération, puis les
+scénarios Compose de redémarrage et de restauration. Docker et les prérequis
+Rust natifs sont nécessaires. Détails : `docs/operations/ci.md`.
 
 Le client desktop (éditeur local, sync optionnelle) est aussi couvert par :
 
@@ -213,7 +214,7 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 pnpm --filter @synapse/desktop test
 pnpm --filter @synapse/desktop typecheck
 # Linux/WSL sans session graphique :
-xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native
+dbus-run-session -- xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native
 ```
 
 ### Self-hosting Docker Compose
@@ -238,8 +239,7 @@ et 15173 ; un port occupé fait échouer le démarrage. Il ne faut pas démarrer
 Playwright installé.
 
 ```bash
-pnpm playwright test tests/e2e/full-sync.spec.ts
-pnpm playwright test tests/e2e/desktop.spec.ts
+just e2e-recovery
 ```
 
 Checklist de préversion : `docs/testing/release-checklist.md`.
@@ -275,6 +275,9 @@ Mesures, limites et anciens benchmarks Rust/k6 :
   avant le transport. La déconnexion conserve ce travail chiffré en attente et
   purge les secrets locaux. La reconnexion au même compte et le déverrouillage
   permettent de reprendre la file jusqu’à un acquittement correspondant.
+  Si le stockage local refuse l’écriture, le brouillon reste affiché et le
+  changement de note, le verrouillage ou la déconnexion attendent une sauvegarde
+  réussie ; l’interface expose l’erreur.
 - Un pull incrémental précède le push. Les notifications WebSocket réveillent
   le navigateur ; le desktop utilise son transport HTTP authentifié. La
   reprise automatique suit le délai d’appareil (10 s par défaut, réglable

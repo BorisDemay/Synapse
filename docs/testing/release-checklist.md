@@ -18,11 +18,14 @@ du job Windows ; une exécution sous WSL2 constitue une observation Linux.
 
 ## Qualité locale
 
-- [ ] `just verify` — suite intégrée sur l’état final de la revue.
+- [x] `just verify` — suite intégrée sur l’état final de la revue, sortie réelle
+  `just verify: all gates passed`, code de sortie 0.
 - [x] Format Rust et clippy workspace ; 174 tests Rust de référence avec PostgreSQL réelle.
 - [x] 27 tests Rust natifs, dont 13 tests de réplique dossier et 7 tests de
   session/transport ; format et clippy natifs passent également.
 - [x] 11 tests Python des opérations de sauvegarde/restauration.
+- [x] 390 tests JavaScript, 7 tests du harness et 8 tests de publication ;
+  typechecks, formatage, clippy et audits passent.
 - [x] Benchmark du client canonique avec 10 000 notes chiffrées et réplique native
   (voir `docs/architecture/performance-budgets.md`). Les anciens benchmarks
   SQLite/FTS5 ne mesurent pas le parcours Vue/IndexedDB actuel.
@@ -42,11 +45,14 @@ utilisé pour ce scénario.
 
 ## Parcours vertical
 
-- [ ] `pnpm playwright test` — application construite, inscription/activation,
+- [x] `just e2e-recovery` — huit scénarios de l’application construite, inscription/activation,
   sauvegarde automatique, ouverture hors ligne, reprise, conflits et historique.
-- [ ] `xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native` —
+- [x] `dbus-run-session -- xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native` —
   véritable fenêtre Tauri Linux, profil et dossier temporaires, édition et reprise
-  après redémarrage du processus.
+  après redémarrage du processus ; deux exécutions Linux réussies, dont celle
+  du reviewer indépendant. Reconnexion et résolution de conflit suivies jusqu’à
+  acquittement, puis vérification des octets répliqués.
+- [x] Jobs CI natifs Windows/Linux et gate avant build de publication revus.
 - [ ] Job CI natif Windows — mêmes garanties dans le WebView Windows.
 - [ ] Optionnel : `SYNAPSE_RUN_BACKUP_E2E=1 pnpm playwright test tests/e2e/full-sync.spec.ts` (backup déjà couvert par `tests/integration/backup_restore.sh`)
 

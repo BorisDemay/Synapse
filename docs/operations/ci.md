@@ -10,6 +10,10 @@ commande locale unique `just verify`.
 - Outils Rust : `just`, `cargo-nextest`, `cargo-deny` (`cargo install … --locked`)
 - PostgreSQL de test/dev : `just db` (ou `docker compose -f infra/docker/compose.test.yml up -d`)
 - Navigateurs Playwright
+- Python 3 et Docker Compose pour les scénarios de restauration
+- Bibliothèques de développement GTK3/WebKitGTK 4.1 pour les contrôles Rust
+  natifs Linux ; le parcours WebDriver exige aussi `tauri-driver`,
+  `WebKitWebDriver`, Xvfb, `dbus-run-session`, `xdotool` et Openbox
 
 `synapse_test` est réservé aux tests Cargo : ils y font `TRUNCATE` / `DROP SCHEMA`.
 Les comptes utilisés à la main doivent aller dans `synapse_dev`, persisté par un volume
@@ -39,21 +43,59 @@ Les tests d’ouverture hors ligne utilisent le service worker de l’applicatio
 construite ; Vite en mode développement ne constitue pas une preuve de cache
 offline. Il n’est pas nécessaire de lancer `just serve` avant ces tests.
 
+Le scénario de mise à jour utilise deux versions d’assets et deux onglets. Le
+service worker attend l’activation explicite ; les assets des versions
+précédentes restent disponibles aux onglets encore ouverts. Cette conservation
+peut augmenter l’espace de cache des assets lors de mises à jour successives.
+Elle concerne uniquement les fichiers publics de l’application, jamais les
+réponses d’authentification ou les données de coffre.
+
 ## Commande unique
 
 ```bash
 just verify
 ```
 
-Enchaîne : `cargo fmt --check`, `clippy -D warnings`, `cargo nextest` (avec
+Enchaîne les contrôles Rust, y compris le crate Tauri autonome, et
+`cargo nextest` (avec
 `SYNAPSE_ALLOW_PUBLIC_SIGNUP` / `SYNAPSE_COOKIE_SECURE` /
 `SYNAPSE_ALLOWED_ORIGIN` retirés pour respecter les defaults de test), Vitest,
-`pnpm typecheck`, `pnpm lint`, smoke Playwright
-(`tests/e2e/web-register-save.spec.ts`), `cargo deny check`, `pnpm audit --prod`.
+`pnpm typecheck`, `pnpm lint`, les tests Node du harness et de publication,
+les tests Python d’exploitation, `cargo deny check`, `pnpm audit --prod`,
+les parcours Playwright de récupération et les scénarios Compose de
+redémarrage/restauration. Le runner natif s’exécute séparément dans les jobs
+Windows/Linux ; un navigateur Playwright ne valide pas le pont Rust.
 
 Les tests d’intégration `synapse-server` sont sérialisés via
 `.config/nextest.toml` (groupe `server-db`) parce qu’ils partagent une
 PostgreSQL unique.
+
+## Parcours natif isolé
+
+```bash
+dbus-run-session -- xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native
+```
+
+Le runner construit un binaire de test avec un identifiant d’application
+unique, un profil temporaire et une URL d’instance de test. Il ouvre le vrai
+sélecteur OS, vérifie son annulation puis choisit un dossier temporaire. La
+création, la connexion, l’édition, les redémarrages du processus et la résolution
+de conflit passent par l’interface native. La création de pièce jointe et la
+restauration d’historique appellent le store produit depuis WebDriver, puis
+vérifient les octets réellement répliqués sur disque.
+
+Le second parcours utilise une API et une base jetables, une modification
+locale sans réseau, un redémarrage, une version distante chiffrée et une
+résolution suivie jusqu’à l’acquittement. Les processus, profils et données de
+test sont nettoyés. `VITE_SYNAPSE_INSTANCE_URL` fournit uniquement une valeur
+initiale de configuration ; l’instance enregistrée par l’utilisateur reste
+prioritaire et le pont Rust valide toujours l’URL.
+
+Sous Windows, le job prépare une PostgreSQL temporaire sur loopback et un
+WebDriver correspondant au runtime WebView2 installé. Il exécute le même
+runner puis nettoie son cluster dans une étape `always()`. La configuration
+Windows a été revue ; son exécution réelle doit être observée dans le job
+Windows. Les résultats locaux de cette revue sont Linux/WSL2 et Chromium.
 
 ## Workflows GitHub
 

@@ -84,6 +84,29 @@ recorded in the release checklist and relevant operator documentation.
   unbound tokens and isolated deletion across origins. The medium reviewer
   observed seven HTTP/session tests, including a real request proving that a
   different origin receives no old cookie. ADR 0014 records the boundary.
+- Point 7: shared browser recovery `86282bc`, native CI `ca61d92`, conflict
+  workspace regression `8645022` and native runner `3afb543` are independently
+  approved. Eight built-browser scenarios passed together: registration and
+  activation, offline edits, full browser-process offline reopening, failed
+  delivery across logout/relogin, identical lost-ack replay, live propagation,
+  conflict/history recovery and continuity across two application versions.
+  Additional unit tests retain drafts and block leaving when IndexedDB rejects
+  a save, and preserve the revision of a draft during incoming changes.
+  The native runner passed twice on Linux, including the medium reviewer's
+  independent execution: actual OS picker cancellation/selection, UI editing,
+  full process restart, encrypted offline queue recovery, authenticated remote
+  changes, physical conflict-resolution click and matching acknowledgement.
+  Attachment/history store actions additionally verified real replica bytes.
+  Windows/Linux jobs run the native scenario before release builds; Windows
+  configuration is reviewed but Windows execution has not been observed here.
+- Final integrated `just verify` exited 0 with `just verify: all gates passed`:
+  174 workspace Rust tests, 27 native Rust tests, 390 JavaScript tests, seven
+  lifecycle tests, eight release tests, eleven operation tests, all type/format/
+  clippy/audit gates, eight built-browser recovery scenarios and both real
+  isolated Compose restart/backup-restore drills. One opt-in filesystem
+  benchmark is intentionally outside the default Rust test suite and was run
+  explicitly for point 6. All seven requested implementation areas are complete
+  and independently reviewed; Windows runtime evidence remains a CI-only check.
 - Post-integration native Rust check: 27 tests passed, one opt-in filesystem
   benchmark ignored by the default test command. Workspace formatting and clippy
   passed; seven release-script tests and eleven backup-operation tests passed.
