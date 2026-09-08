@@ -48,5 +48,9 @@ Les volumes nommés sont conservés tant que vous n’ajoutez pas `-v`.
 bash tests/integration/self_hosted.sh
 ```
 
-Ce script construit les images, démarre la stack, crée un compte, redémarre et
-vérifie la persistance.
+Ce script construit les images dans un projet Compose jetable, démarre la
+stack sur le port 18090 (surcharge possible via `SYNAPSE_HTTP_PORT`), crée et
+active son compte synthétique, puis vérifie le compte et sa session après
+redémarrage. Un port occupé provoque un échec. Le nettoyage supprime uniquement
+les conteneurs et volumes de ce projet temporaire ; une installation existante
+n’est pas réutilisée.

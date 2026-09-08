@@ -28,7 +28,8 @@ du job Windows ; une exécution sous WSL2 constitue une observation Linux.
 
 ## Self-hosting
 
-- [ ] `bash tests/integration/self_hosted.sh`
+- [x] `bash tests/integration/self_hosted.sh` — projet jetable sur 18090,
+  compte et session persistants après redémarrage, nettoyage observé.
 - [x] `bash tests/integration/backup_restore.sh`
 - [x] `docker compose --env-file .env.example -f docker-compose.yml config --quiet`
 
