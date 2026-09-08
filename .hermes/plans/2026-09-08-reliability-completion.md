@@ -60,6 +60,12 @@ recorded in the release checklist and relevant operator documentation.
 - Point 5: commit `a6f77cc`, approved by the same reviewer; 11 focused Python
   tests and the real isolated Compose backup/restore scenario passed, including
   corruption rejection and restoration after volume destruction.
+- Point 4: shared local mode `9a2f7fd` and desktop folder integration `d7d8cb7`
+  approved by the medium reviewer; 13 native folder tests, 3 adapter tests and
+  fresh-store local reopening without remote authentication were observed.
+  Native end-to-end evidence remains part of point 7. The editor accessibility
+  correction `a25d21e` passed 18 component tests after reproducing the hidden
+  editor label failure in a real browser.
 - Initial actual-client Chromium measurement (synthetic 10,000-note in-memory
   fixture, about 1 KiB/note): search median 10.7 ms, p95 14.5 ms over 20 queries;
   route render 615 ms, 10,000 tree items and 60,101 DOM elements. This is a
