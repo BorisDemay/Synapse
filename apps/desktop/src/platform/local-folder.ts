@@ -41,6 +41,7 @@ export function startDesktopFolderMirroring(
         "renameNote",
         "deleteNote",
         "loadNotes",
+        "synchronize",
         "resolveConflict",
         "restoreRevision",
       ].includes(name)
@@ -52,20 +53,16 @@ export function startDesktopFolderMirroring(
         if (!vaultId || !vault.isUnlocked || vault.currentVaultId !== vaultId)
           return;
         const entries: FolderEntry[] = [
-          ...vault
-            .markdownExportNotes()
-            .map((note) => ({
-              kind: "note" as const,
-              path: note.path!,
-              markdown: note.content,
-            })),
-          ...vault
-            .markdownExportAttachments()
-            .map((file) => ({
-              kind: "attachment" as const,
-              path: file.path,
-              bytes: Array.from(file.bytes),
-            })),
+          ...vault.markdownExportNotes().map((note) => ({
+            kind: "note" as const,
+            path: note.path!,
+            markdown: note.content,
+          })),
+          ...vault.markdownExportAttachments().map((file) => ({
+            kind: "attachment" as const,
+            path: file.path,
+            bytes: Array.from(file.bytes),
+          })),
         ];
         await mirrorVaultSnapshot(vaultId, entries);
       });

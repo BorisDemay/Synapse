@@ -66,3 +66,80 @@ describe("desktop durable folder replica", () => {
     expect(localFolderStatus.error).toContain("cache chiffré");
   });
 });
+
+it("mirrors remote changes pulled by the real store synchronize action", async () => {
+  await import("../../../web/node_modules/fake-indexeddb/auto");
+  const { createPinia, setActivePinia } = await import("pinia");
+  const { useVaultStore } = await import("../../../web/src/stores/vault");
+  const { useAuthStore } = await import("../../../web/src/stores/auth");
+  const { xchacha20poly1305 } = await import("@noble/ciphers/chacha.js");
+  const { encodeNotePlaintext } = await import(
+    "../../../web/src/crypto/vault-item"
+  );
+  const { clearUserOfflineData } = await import(
+    "../../../web/src/offline/cache"
+  );
+  const userId = "mirror-integration";
+  const vaultId = "0198e5de-1111-7222-8333-444455556666";
+  const noteId = "0198e5de-7777-7888-8999-aaaabbbbcccc";
+  await clearUserOfflineData(userId);
+  setActivePinia(createPinia());
+  const auth = useAuthStore();
+  auth.userId = userId;
+  auth.isAuthenticated = true;
+  const vault = useVaultStore();
+  const key = new Uint8Array(32).fill(1);
+  const nonce = new Uint8Array(24).fill(2);
+  const ciphertext = xchacha20poly1305(
+    key,
+    nonce,
+    new TextEncoder().encode(`synapse/aad/1/${vaultId}/${noteId}/0`),
+  ).encrypt(encodeNotePlaintext("remote.md", "remote content"));
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            protocol_version: 1,
+            next_cursor: null,
+            operations: [
+              {
+                protocol_version: 1,
+                operation_id: "0198e5de-aaaa-7bbb-8ccc-ddddeeeefff1",
+                vault_id: vaultId,
+                note_id: noteId,
+                base_revision: 0,
+                revision: 1,
+                nonce: Array.from(nonce),
+                ciphertext: Array.from(ciphertext),
+                ciphertext_hash: "aa".repeat(32),
+                aad_version: 1,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+  );
+  installDesktopLocalFolder();
+  invoke.mockReset().mockResolvedValue("/chosen");
+  vault.unlock(key, vaultId, 0);
+  const stop = startDesktopFolderMirroring(vault);
+  try {
+    await vault.synchronize();
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("mirror_local_vault_folder", {
+        vaultId,
+        entries: [
+          { kind: "note", path: "remote.md", markdown: "remote content" },
+        ],
+      }),
+    );
+  } finally {
+    stop();
+    vault.lock();
+    vi.unstubAllGlobals();
+  }
+});
