@@ -71,6 +71,14 @@ recorded in the release checklist and relevant operator documentation.
   missing-base history proof, invalid-cursor reset and cyclic-pagination
   rejection. `58cc3cc` connects automatic synchronization to the native folder
   adapter, with four independently observed adapter tests.
+- Point 6: `8cf9fe2` approved by the medium reviewer. Actual encrypted 10,000-note
+  client open measured 812 ms after an original >30 s timeout; search p95
+  22.4 ms, durable UI edit including debounce 1,004 ms and a full reload verified.
+  An encrypted incremental delta applied from the persisted cursor in two GETs
+  (1,432 ms, mocked transport). Native temporary-folder creation/unchanged/edit
+  measured 22,459/1,519/1,870 ms. The performance document explicitly records
+  the remaining 650 ms tree-render task, development-build conditions and
+  non-comparable historical memory-only measurements.
 - Post-integration native Rust check: 24 tests passed, one opt-in filesystem
   benchmark ignored by the default test command. Workspace formatting and clippy
   passed; seven release-script tests and eleven backup-operation tests passed.

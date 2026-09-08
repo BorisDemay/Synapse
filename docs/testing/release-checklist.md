@@ -22,7 +22,7 @@ du job Windows ; une exécution sous WSL2 constitue une observation Linux.
 - [x] Format Rust et clippy workspace ; 174 tests Rust de référence avec PostgreSQL réelle.
 - [x] 24 tests Rust natifs, dont 13 tests de réplique dossier.
 - [x] 11 tests Python des opérations de sauvegarde/restauration.
-- [ ] Benchmark du client canonique avec 10 000 notes chiffrées et réplique native
+- [x] Benchmark du client canonique avec 10 000 notes chiffrées et réplique native
   (voir `docs/architecture/performance-budgets.md`). Les anciens benchmarks
   SQLite/FTS5 ne mesurent pas le parcours Vue/IndexedDB actuel.
 
