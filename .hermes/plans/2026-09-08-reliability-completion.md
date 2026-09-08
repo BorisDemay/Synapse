@@ -1,0 +1,54 @@
+# Reliability completion — seven reviewed gaps
+
+Requested on 2026-09-08. This supplements the original implementation plan;
+its E2EE and synchronization invariants remain authoritative.
+
+Development uses GPT-6 Astra at low reasoning effort. Independent review uses
+GPT-6 Astra at medium effort. Reviewers send acceptance or required changes
+directly to developers; the orchestrator integrates and verifies the result.
+
+## Acceptance ledger
+
+1. Durable saves: atomically persist encrypted content and the pending operation
+   before transport. Editing does not wait for the network. HTTP rejection,
+   timeout, interrupted acknowledgement and concurrent saves preserve operations;
+   only matching acknowledgements remove them.
+2. Safe logout: purge in-memory plaintext/keys and trusted unlock credentials,
+   retain encrypted unsynchronized content, and prevent late async work from
+   restoring a locked or previous user's state. Device erasure is explicit.
+3. Automatic sync: shared serialized coordinator, persisted incremental cursor,
+   pull before push, bounded retry with jitter, browser WebSocket wakeups and a
+   closed native transport or polling fallback. No blind same-note rebasing;
+   conflicts retain base, local and remote variants across restart.
+4. Desktop folders and standalone use: install the native adapter, real folder
+   selection, durable validated Markdown replica, no OS picker in the browser,
+   and create/unlock/edit/reopen a local vault without an account or server.
+5. Recovery: consistent backup, complete manifest verification before destructive
+   restore, strict copy/dump/restore errors, corruption and missing-file tests,
+   and a real isolated PostgreSQL/Compose restore exercise.
+6. Actual-client performance: reproducible 10,000-note browser measurements for
+   open/edit/search/reconnect; indexed encrypted cache reads, lazy history and
+   incremental search processing as justified by measurements. Keep plaintext
+   indexes local to the unlocked client and purge them on lock.
+7. Release evidence: isolated test services; browser and real native editing,
+   restart, reconnect, conflict and restoration tests; Windows/Linux CI jobs;
+   documentation distinguishes observed results from CI-only targets.
+
+## Execution constraints
+
+- Unrelated services occupy localhost ports 3000, 5173 and 8080. Use isolated
+  ports and disposable database/project names; do not stop those services or
+  run destructive tests against `synapse_dev`.
+- Existing `.worktrees/` content belongs to earlier work and is left intact.
+- Shared checkout edits have explicit file ownership. Commit only the current
+  task's files after targeted validation and independent review.
+- No deployment or publication is needed for these repository changes.
+- Update ADRs when completing a feature requires a new architecture decision.
+
+## Validation evidence
+
+Initial baseline: `cargo nextest run --workspace` passed 174 tests against the
+test PostgreSQL. Earlier analysis passed 337 JavaScript tests, all frontend
+typechecks, 28 crypto/protocol/sync Rust tests and 7 release tests. Those results
+do not validate these seven gaps. Completion needs new tests and observations
+recorded in the release checklist and relevant operator documentation.

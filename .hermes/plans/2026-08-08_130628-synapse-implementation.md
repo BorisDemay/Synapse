@@ -1,5 +1,9 @@
 # Synapse Implementation Plan
 
+> Complément du 2026-09-08 : les sept écarts de fiabilité relevés lors de la
+> revue sont suivis dans [Reliability completion](2026-09-08-reliability-completion.md).
+> Les cases historiques ci-dessous ne prouvent pas la validation de ces écarts.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Construire un MVP local-first de Synapse permettant d’éditer, indexer et synchroniser de bout en bout des coffres Markdown chiffrés depuis une application Tauri/Vue et une interface web, avec un serveur Rust auto-hébergeable et sécurisé.
