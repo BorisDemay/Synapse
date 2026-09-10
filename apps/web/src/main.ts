@@ -5,6 +5,7 @@ import { initializeTheme, installSynapseUi } from "@synapse/ui";
 
 import App from "./App.vue";
 import { registerAssetServiceWorker } from "./offline/register-sw";
+import { requestPersistentBrowserStorage } from "./offline/storage-health";
 import { createAppRouter } from "./router";
 import { startSyncCoordinator } from "./sync/coordinator";
 import { useAuthStore } from "./stores/auth";
@@ -23,6 +24,9 @@ async function bootstrap() {
   const vault = useVaultStore(pinia);
   await auth.restoreSession().catch(() => false);
   if (auth.isAuthenticated) {
+    void auth.refreshStorageHealth();
+  }
+  if (auth.isAuthenticated) {
     try {
       if (await vault.tryUnlockFromTrustedDevice()) {
         // Session restore can skip the unlock page entirely.
@@ -39,6 +43,7 @@ async function bootstrap() {
 
   app.use(createAppRouter(auth, vault));
   app.mount("#app");
+  void requestPersistentBrowserStorage();
   startSyncCoordinator(auth, vault);
   registerAssetServiceWorker();
   startWebUpdateChecks();

@@ -33,6 +33,9 @@ async function bootstrap() {
   const vault = useVaultStore(pinia);
   startDesktopFolderMirroring(vault);
   await auth.restoreSession().catch(() => false);
+  if (auth.isAuthenticated) {
+    void auth.refreshStorageHealth();
+  }
   if (auth.isAuthenticated || auth.isLocalMode) {
     try {
       if (!(await vault.tryUnlockFromTrustedDevice())) {

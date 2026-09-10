@@ -44,9 +44,14 @@ async fn main() -> Result<(), StartupError> {
             .await
             .map_err(|_| StartupError::Configuration)?;
     }
+    if synapse_server::http::security::is_production() {
+        synapse_server::auth::ensure_no_dev_fixture(&pool)
+            .await
+            .map_err(|_| StartupError::Configuration)?;
+    }
     synapse_server::auth::seed_dev_fixture_user(
         &pool,
-        !synapse_server::http::security::is_production(),
+        std::env::var("SYNAPSE_DEV_FIXTURE").as_deref() == Ok("true"),
     )
     .await
     .map_err(|_| StartupError::Configuration)?;
@@ -56,7 +61,10 @@ async fn main() -> Result<(), StartupError> {
         .map_err(|_| StartupError::Bind)?;
     tracing::info!(%bind, "API listening");
 
-    axum::serve(listener, router(Some(pool)))
-        .await
-        .map_err(|_| StartupError::Serve)
+    axum::serve(
+        listener,
+        router(Some(pool)).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .map_err(|_| StartupError::Serve)
 }

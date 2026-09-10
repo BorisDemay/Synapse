@@ -6,6 +6,12 @@ use uuid::Uuid;
 
 const CURSOR_LIFETIME_SQL: &str = "CURRENT_TIMESTAMP + INTERVAL '30 days'";
 const PROTOCOL_VERSION: u8 = 1;
+/// Keep the serialized response comfortably below the proxy and browser
+/// buffering limits. Ciphertext is encoded as a JSON byte array, so account
+/// for up to four bytes per input byte plus framing overhead.
+pub const MAX_PULL_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+const JSON_BYTES_PER_CIPHERTEXT_BYTE: usize = 4;
+const OPERATION_JSON_OVERHEAD: usize = 16 * 1024;
 
 #[derive(Debug)]
 pub enum PullError {
@@ -60,10 +66,12 @@ pub async fn pull(
         return Err(PullError::CursorResnapshotRequired);
     }
 
-    let rows = sqlx::query_as::<_, (String, String, i64, String, Vec<u8>, Vec<u8>, String, i64)>(
+    // Read only metadata first. Fetching ciphertext in the initial query made
+    // the operation-count limit a memory limit of roughly one gigabyte.
+    let metadata = sqlx::query_as::<_, (String, String, i64, String, i64, i64)>(
         "SELECT operations.id::text, operations.vault_id::text, operations.base_revision, \
-                operations.note_id::text, operations.ciphertext, operations.nonce, \
-                encode(operations.ciphertext_hash, 'hex'), revisions.revision \
+                operations.note_id::text, octet_length(operations.ciphertext)::bigint, \
+                revisions.revision \
          FROM revisions \
          JOIN operations ON operations.id = revisions.operation_id \
          WHERE revisions.vault_id = $1::uuid AND revisions.revision > $2 \
@@ -76,6 +84,45 @@ pub async fn pull(
     .fetch_all(pool)
     .await
     .map_err(|_| PullError::Database)?;
+
+    let mut selected = Vec::with_capacity(metadata.len());
+    let mut estimated_bytes = 2usize;
+    for row in metadata {
+        let ciphertext_bytes = usize::try_from(row.4).map_err(|_| PullError::Database)?;
+        let operation_bytes = ciphertext_bytes
+            .saturating_mul(JSON_BYTES_PER_CIPHERTEXT_BYTE)
+            .saturating_add(OPERATION_JSON_OVERHEAD);
+        if !selected.is_empty()
+            && estimated_bytes.saturating_add(operation_bytes) > MAX_PULL_RESPONSE_BYTES
+        {
+            break;
+        }
+        // A valid operation is bounded by MAX_CIPHERTEXT_BYTES and therefore
+        // always fits on its own. Keeping the first row also guarantees that
+        // a cursor can make progress if the database contains old data.
+        selected.push(row);
+        estimated_bytes = estimated_bytes.saturating_add(operation_bytes);
+    }
+
+    let revision_ids = selected.iter().map(|row| row.5).collect::<Vec<_>>();
+    let rows = if revision_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, (String, String, i64, String, Vec<u8>, Vec<u8>, String, i64)>(
+            "SELECT operations.id::text, operations.vault_id::text, operations.base_revision, \
+                    operations.note_id::text, operations.ciphertext, operations.nonce, \
+                    encode(operations.ciphertext_hash, 'hex'), revisions.revision \
+             FROM revisions \
+             JOIN operations ON operations.id = revisions.operation_id \
+             WHERE revisions.vault_id = $1::uuid AND revisions.revision = ANY($2) \
+             ORDER BY revisions.revision ASC",
+        )
+        .bind(vault_id.to_string())
+        .bind(&revision_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|_| PullError::Database)?
+    };
 
     let last_revision = rows.last().map(|row| row.7);
     let operations = rows

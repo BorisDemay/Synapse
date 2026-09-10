@@ -11,6 +11,8 @@
 - Corps de push plafonné (`DefaultBodyLimit` sur `/operations`).
 - Rate limiting Tower Governor sur `POST /auth/signup`, `POST /auth/login`,
   `POST /auth/activate`, `POST /auth/password` et `POST /auth/account/delete`.
+  La clé utilise l’adresse de transport ; `X-Forwarded-For` n’est pris en
+  compte que lorsque cette adresse appartient à `SYNAPSE_TRUSTED_PROXIES`.
   `GET /auth/signup` n’expose que le booléen `public_signup` pour l’interface ;
   il n’est pas soumis au même limiteur.
   Changer le mot de passe exige le mot de passe actuel, un CSRF `Origin` et
@@ -43,10 +45,12 @@ laissent l'opération récupérable. Un ack doit correspondre à l'opération
 envoyée. Un rejeu après interruption conserve l'identité et le ciphertext déjà
 tentés ; les modifications locales suivantes restent distinctes.
 
-La CSP de `apps/web/index.html` autorise `connect-src` vers `'self'`, `ws:`,
-`wss:`, `https://api.openai.com`, `https://auth.openai.com` et
-`https://chatgpt.com` (assistant Codex optionnel, hors serveur Synapse). Le
-jeton d’assistant n’est jamais en `localStorage` : il est enveloppé avec la
+La CSP de `apps/web/index.html` limite `connect-src` à `'self'`,
+`https://api.openai.com`, `https://auth.openai.com` et `https://chatgpt.com`
+(assistant Codex optionnel, hors serveur Synapse). Les WebSockets utilisent
+l’origine de l’application ; aucune permission générique `ws:` ou `wss:` n’est
+accordée. Les en-têtes CSP de Nginx et Caddy ajoutent `frame-ancestors 'none'`.
+Le jeton d’assistant n’est jamais en `localStorage` : il est enveloppé avec la
 clé de coffre. La connexion par abonnement utilise le code d’appareil
 officiel Codex ; elle n’ouvre pas d’iframe ChatGPT.
 
@@ -86,9 +90,18 @@ résolvent les liens symboliques et refusent une sortie de racine.
 
 ## Opérateur
 
-Exiger HTTPS devant le serveur en production (Caddy). Ne jamais activer
-`SYNAPSE_COOKIE_SECURE=false` ni `SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` hors
-environnements de développement contrôlés. Lorsque `SYNAPSE_ENV` n’est pas
-`production`, le serveur ensemence un identifiant local `test` / `test`,
-déjà activé, hors politique de mot de passe et sans mail. Ce compte ne doit
-pas exister en production.
+Exiger HTTPS devant le serveur en production (Caddy). La configuration
+`.env.example` utilise `SYNAPSE_ENV=production`, des cookies Secure et une
+inscription fermée ; `SYNAPSE_ENV` accepte uniquement `development` ou
+`production`. Ne jamais activer `SYNAPSE_COOKIE_SECURE=false` ni
+`SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` hors développement contrôlé.
+Le compte local `test` / `test` n’est créé que lorsque
+`SYNAPSE_ENV=development` et `SYNAPSE_DEV_FIXTURE=true` sont définis
+explicitement. Le serveur refuse de démarrer en production si ce compte est
+encore présent.
+Les pulls et pushes sont bornés par taille, concurrence et délai ; chaque
+compte dispose d’un quota de stockage chiffré. `/health/storage` expose la
+capacité restante, la file d’opérations et le dernier horodatage de sauvegarde
+fourni par l’opérateur.
+Les imports ZIP vérifient les tailles déclarées avant inflation et exécutent la
+décompression bornée dans un worker annulable afin de ne pas bloquer l’interface.

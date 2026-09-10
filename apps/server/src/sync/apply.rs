@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::blob::{BlobStore, CiphertextHash};
 
 pub const MAX_CIPHERTEXT_BYTES: usize = 10 * 1024 * 1024 + 256;
+pub const ACCOUNT_STORAGE_QUOTA_BYTES: i64 = 1024 * 1024 * 1024;
 const NONCE_BYTES: usize = 24;
 const MIN_CIPHERTEXT_BYTES: usize = 16;
 const PROTOCOL_VERSION: u8 = 1;
@@ -64,6 +65,7 @@ pub enum ApplyError {
     Database,
     Invalid,
     NotFound,
+    QuotaExceeded,
     Storage,
 }
 
@@ -75,6 +77,7 @@ impl fmt::Display for ApplyError {
             Self::Database => "sync database operation failed",
             Self::Invalid => "encrypted push operation is invalid",
             Self::NotFound => "vault is not available",
+            Self::QuotaExceeded => "account storage quota exceeded",
             Self::Storage => "ciphertext storage operation failed",
         })
     }
@@ -104,29 +107,50 @@ pub async fn apply(
     .map_err(|_| ApplyError::Database)?
     .ok_or(ApplyError::NotFound)?;
 
-    let existing = sqlx::query_as::<_, (String, Option<i64>)>(
-        "SELECT vault_id::text, applied_revision FROM operations WHERE id = $1::uuid",
-    )
-    .bind(operation_id.to_string())
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(|_| ApplyError::Database)?;
-    if let Some((existing_vault_id, Some(revision))) = existing {
-        if existing_vault_id == vault_id.to_string() {
-            transaction
-                .commit()
-                .await
-                .map_err(|_| ApplyError::Database)?;
-            return Ok(PushAck {
-                operation_id,
-                revision,
-                new_revision: false,
-            });
+    let existing =
+        sqlx::query_as::<_, (String, Option<i64>, String, i64, Vec<u8>, Vec<u8>, Vec<u8>)>(
+            "SELECT vault_id::text, applied_revision, note_id::text, base_revision, \
+                ciphertext, nonce, ciphertext_hash \
+             FROM operations WHERE id = $1::uuid",
+        )
+        .bind(operation_id.to_string())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| ApplyError::Database)?;
+    if let Some((
+        existing_vault_id,
+        applied_revision,
+        existing_note_id,
+        existing_base_revision,
+        existing_ciphertext,
+        existing_nonce,
+        existing_hash,
+    )) = existing
+    {
+        let Some(revision) = applied_revision else {
+            return Err(ApplyError::Database);
+        };
+        if existing_vault_id != vault_id.to_string() {
+            return Err(ApplyError::NotFound);
         }
-        return Err(ApplyError::NotFound);
-    }
-    if existing.is_some() {
-        return Err(ApplyError::Database);
+        let same_payload = existing_note_id == operation.note_id
+            && existing_base_revision
+                == i64::try_from(operation.base_revision).map_err(|_| ApplyError::Invalid)?
+            && existing_ciphertext == operation.ciphertext
+            && existing_nonce == operation.nonce
+            && existing_hash == ciphertext_hash.as_bytes();
+        if !same_payload {
+            return Err(ApplyError::Invalid);
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApplyError::Database)?;
+        return Ok(PushAck {
+            operation_id,
+            revision,
+            new_revision: false,
+        });
     }
 
     if operation.base_revision
@@ -159,6 +183,37 @@ pub async fn apply(
             remote_ciphertext_hash: hex_hash(&remote_hash),
         })));
     }
+
+    // Serialize quota checks across all vaults owned by this account. Without
+    // an account-scoped lock, concurrent pushes to separate vaults could each
+    // observe spare capacity and exceed the quota together.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApplyError::Database)?;
+    let used_bytes = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(SUM(octet_length(operations.ciphertext) + octet_length(operations.nonce)), 0)::bigint \
+         FROM operations \
+         JOIN vaults ON vaults.id = operations.vault_id \
+         WHERE vaults.owner_user_id = $1::uuid",
+    )
+    .bind(user_id.to_string())
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|_| ApplyError::Database)?;
+    let incoming_bytes = i64::try_from(operation.ciphertext.len())
+        .ok()
+        .and_then(|ciphertext| {
+            i64::try_from(operation.nonce.len())
+                .ok()
+                .and_then(|nonce| ciphertext.checked_add(nonce))
+        })
+        .ok_or(ApplyError::Invalid)?;
+    if used_bytes > ACCOUNT_STORAGE_QUOTA_BYTES.saturating_sub(incoming_bytes) {
+        return Err(ApplyError::QuotaExceeded);
+    }
+
     let next_revision = current_revision
         .checked_add(1)
         .ok_or(ApplyError::Database)?;

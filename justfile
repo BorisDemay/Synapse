@@ -33,6 +33,7 @@ serve: db
     SYNAPSE_ALLOWED_ORIGIN="${SYNAPSE_ALLOWED_ORIGIN:-http://127.0.0.1:5173}" \
     SYNAPSE_ALLOW_PUBLIC_SIGNUP="${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}" \
     SYNAPSE_COOKIE_SECURE="${SYNAPSE_COOKIE_SECURE:-false}" \
+    SYNAPSE_DEV_FIXTURE="${SYNAPSE_DEV_FIXTURE:-true}" \
     SYNAPSE_ENV="${SYNAPSE_ENV:-development}" \
       cargo run -p synapse-server
 
@@ -77,6 +78,7 @@ desktop-serve: db
     SYNAPSE_ALLOWED_ORIGIN="${SYNAPSE_ALLOWED_ORIGIN:-http://127.0.0.1:3000}" \
     SYNAPSE_ALLOW_PUBLIC_SIGNUP="${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}" \
     SYNAPSE_COOKIE_SECURE="${SYNAPSE_COOKIE_SECURE:-false}" \
+    SYNAPSE_DEV_FIXTURE="${SYNAPSE_DEV_FIXTURE:-true}" \
     SYNAPSE_ENV="${SYNAPSE_ENV:-development}" \
       cargo run -p synapse-server
 
@@ -91,7 +93,7 @@ tauri:
       pnpm --filter @synapse/desktop tauri dev
 
 # Format check, clippy, tests, frontend gates, Playwright smoke, cargo-deny, pnpm audit.
-verify: fmt-check clippy test-rust test-native-rust test-js test-harness test-release test-operations typecheck lint audit-rust audit-js e2e-recovery test-recovery
+verify: fmt-check clippy test-rust test-native-rust test-js test-harness test-release test-security test-operations typecheck lint audit-rust audit-js e2e-recovery test-recovery
     @echo "just verify: all gates passed"
 
 fmt-check:
@@ -121,6 +123,11 @@ test-harness:
 test-release:
     node --test tests/release/*.test.mjs
 
+# Bounded HTTP, browser and WebSocket penetration regression against an owned
+# disposable database. Any finding fails the verification gate.
+test-security:
+    node tests/security/local-penetration.mjs
+
 test-operations:
     python3 -m unittest tests/operations/backup_test.py
 
@@ -145,7 +152,7 @@ audit-rust:
     cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml check
 
 audit-js:
-    pnpm audit --prod
+    pnpm audit
 
 # Targeted Playwright smoke. Its Playwright global setup starts PostgreSQL, the
 # API and Vite with bounded readiness checks, then removes its temporary data.

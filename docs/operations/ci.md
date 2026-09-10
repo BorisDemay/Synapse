@@ -61,9 +61,13 @@ Enchaîne les contrôles Rust, y compris le crate Tauri autonome, et
 `SYNAPSE_ALLOW_PUBLIC_SIGNUP` / `SYNAPSE_COOKIE_SECURE` /
 `SYNAPSE_ALLOWED_ORIGIN` retirés pour respecter les defaults de test), Vitest,
 `pnpm typecheck`, `pnpm lint`, les tests Node du harness et de publication,
-les tests Python d’exploitation, `cargo deny check`, `pnpm audit --prod`,
+les tests Python d’exploitation, `cargo deny check`, `pnpm audit` (graphe complet),
 les parcours Playwright de récupération et les scénarios Compose de
-redémarrage/restauration. Le runner natif s’exécute séparément dans les jobs
+redémarrage/restauration. La régression de sécurité bornée
+`tests/security/local-penetration.mjs` lance aussi un serveur et une base
+jetables, teste les limites d’authentification, les origines WebSocket, la
+révocation et les autorisations, puis échoue au moindre constat. Le runner
+natif s’exécute séparément dans les jobs
 Windows/Linux ; un navigateur Playwright ne valide pas le pont Rust.
 
 Les tests d’intégration `synapse-server` sont sérialisés via
@@ -131,4 +135,5 @@ sont des artefacts de release uniquement (répertoire `target/` ignoré par Git)
   dépendances distinctes compatibles avec l’AGPLv3.
 - La licence permissive `0BSD` est autorisée uniquement comme dépendance
   transitive de `quoted_printable`, utilisée par le client SMTP `lettre`.
-- L’audit npm ne couvre que les dépendances de production (`pnpm audit --prod`).
+- L’audit npm couvre le graphe complet, y compris les outils de développement
+  (`pnpm audit`).

@@ -344,6 +344,43 @@ async fn account_deletion_requires_password_csrf_and_removes_owned_vaults() {
     );
 }
 
+#[tokio::test]
+async fn storage_health_is_cookie_bound_and_reports_opaque_quota_state() {
+    let _guard = settings_test_lock().await;
+    let (app, _pool, _email, cookie) = signed_in_account().await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/health/storage")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(payload["available_bytes"], 1024 * 1024 * 1024i64);
+    assert_eq!(payload["quota_bytes"], 1024 * 1024 * 1024i64);
+    assert_eq!(payload["used_bytes"], 0);
+    assert_eq!(payload["pending_operation_count"], 0);
+    assert!(payload["last_successful_backup"].is_null());
+
+    let unauthorized = app
+        .oneshot(
+            Request::builder()
+                .uri("/health/storage")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+}
+
 async fn signed_in_account() -> (axum::Router, sqlx::PgPool, String, String) {
     let pool = PgPoolOptions::new()
         .max_connections(5)

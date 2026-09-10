@@ -32,6 +32,23 @@ describe("desktop Synapse fetch bridge", () => {
     await expect(response.json()).resolves.toEqual({ user_id: "user-1" });
   });
 
+  it("maps storage health to the allowlisted Tauri command", async () => {
+    invoke.mockResolvedValue({
+      body: { available_bytes: 1024, pending_operation_count: 1 },
+      status: 200,
+    });
+
+    const response = await fetch("/health/storage", { credentials: "include" });
+
+    expect(invoke).toHaveBeenLastCalledWith("synapse_request", {
+      request: { kind: "storage-health" },
+    });
+    await expect(response.json()).resolves.toEqual({
+      available_bytes: 1024,
+      pending_operation_count: 1,
+    });
+  });
+
   it("uses the development instance instead of a stale remembered URL", async () => {
     localStorage.setItem("synapse-instance-url", "https://old.example.test");
     invoke.mockResolvedValue({ body: { user_id: "user-1" }, status: 200 });

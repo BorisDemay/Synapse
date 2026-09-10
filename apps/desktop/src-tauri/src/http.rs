@@ -44,6 +44,7 @@ pub struct SessionList {
 pub enum SynapseRequest {
     Session,
     PublicSignup,
+    StorageHealth,
     Signup {
         body: SignupBody,
     },
@@ -354,6 +355,10 @@ impl InstanceClient {
             }
             SynapseRequest::PublicSignup => {
                 self.relay(reqwest::Method::GET, "auth/signup", None, false, false)
+                    .await
+            }
+            SynapseRequest::StorageHealth => {
+                self.relay(reqwest::Method::GET, "health/storage", None, false, false)
                     .await
             }
             SynapseRequest::Signup { body } => {

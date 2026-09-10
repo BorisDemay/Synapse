@@ -14,6 +14,7 @@ test("main release is serialized, parity gated, and deploys before publishing", 
   );
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/u);
   assert.match(workflow, /WINDOWS_CERTIFICATE_PFX_BASE64/u);
+  assert.match(workflow, /timestampUrl\s*=\s*"https:\/\/timestamp\.digicert\.com"/u);
 });
 
 test("pull requests retain verification without publication", async () => {
@@ -23,6 +24,18 @@ test("pull requests retain verification without publication", async () => {
   assert.match(workflow, /test:native/u);
   assert.match(workflow, /ubuntu-latest, windows-latest/u);
   assert.doesNotMatch(workflow, /gh release create|synapse-deploy/u);
+});
+
+test("release workflows pin every third-party action to an immutable commit", async () => {
+  for (const path of [".github/workflows/verify.yml", ".github/workflows/main-release.yml"]) {
+    const workflow = await readFile(path, "utf8");
+    assert.doesNotMatch(workflow, /uses:\s*[^\s@]+@(?:v|stable|main|master)/u);
+    for (const line of workflow.split("\n")) {
+      if (line.includes("uses:")) {
+        assert.match(line, /uses:\s*[^\s@]+@[0-9a-f]{40}\b/u, line);
+      }
+    }
+  }
 });
 
 test("desktop-native runs the maintained native WebDriver smoke on every platform", async () => {

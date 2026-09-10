@@ -72,7 +72,7 @@ async fn websocket_handshake(
     stream
         .write_all(
             format!(
-                "GET /v1/vaults/{vault_id}/ws HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{cookie}\r\n"
+                "GET /v1/vaults/{vault_id}/ws HTTP/1.1\r\nHost: {address}\r\nOrigin: https://synapse.local\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{cookie}\r\n"
             )
             .as_bytes(),
         )

@@ -2,16 +2,26 @@
 
 ## Prérequis
 
-- Docker Engine avec le plugin Compose v2
-- Ports libres : `8080` (HTTP via Caddy) par défaut
+- Docker Compose et le plugin Compose v2
+- En production, un DNS qui pointe `SYNAPSE_PUBLIC_HOST` vers la machine et les
+  ports 80/443 disponibles pour Caddy ; le port HTTP de gestion reste lié à
+  loopback par défaut
 
 ## Démarrage minimal
 
 ```bash
 cp .env.example .env
-# Ajuster SYNAPSE_ALLOWED_ORIGIN et les secrets PostgreSQL
+# Ajuster SYNAPSE_PUBLIC_HOST, SYNAPSE_ALLOWED_ORIGIN et les secrets PostgreSQL
 docker compose up --build -d --wait
-bash infra/docker/healthcheck.sh http://127.0.0.1:8080
+curl --fail https://notes.example.com/health/ready
+```
+
+Pour une vérification locale jetable, utilisez explicitement la configuration
+de développement :
+
+```bash
+docker compose -p synapse-dev --env-file .env.development.example up --build -d --wait
+bash infra/docker/healthcheck.sh http://127.0.0.1:18090
 ```
 
 Services démarrés : PostgreSQL, API Rust, UI web (nginx), Caddy. Les blobs
@@ -22,8 +32,10 @@ Le chemin `SYNAPSE_RELEASES_PATH` est monté en lecture seule dans nginx et sert
 `/mnt/nas1/synapse/releases`. Le répertoire `stable/<version>` est immuable ;
 seuls `stable/latest.json` et `stable/web.json` sont remplacés atomiquement.
 
-Inscription publique locale : `SYNAPSE_ALLOW_PUBLIC_SIGNUP=true` dans `.env`.
-En production, désactivez-la et utilisez des invitations / un admin bootstrap.
+L’inscription publique est désactivée dans `.env.example`. En production,
+utilisez les invitations ou un admin bootstrap. Le compte fixture `test` / `test`
+n’est créé que lorsque `SYNAPSE_ENV=development` et
+`SYNAPSE_DEV_FIXTURE=true` sont définis explicitement.
 
 ## Profil observabilité (optionnel)
 

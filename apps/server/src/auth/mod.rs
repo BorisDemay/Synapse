@@ -56,8 +56,7 @@ pub async fn seed_dev_fixture_user(pool: &PgPool, enabled: bool) -> Result<(), B
         "INSERT INTO users (id, email, password_hash, is_admin, activated_at) \
          SELECT $1::uuid, $2, $3, FALSE, CURRENT_TIMESTAMP \
          ON CONFLICT (email) DO UPDATE SET \
-             password_hash = EXCLUDED.password_hash, \
-             activated_at = COALESCE(users.activated_at, EXCLUDED.activated_at)",
+             is_admin = FALSE, activated_at = COALESCE(users.activated_at, CURRENT_TIMESTAMP)",
     )
     .bind(Uuid::new_v4().to_string())
     .bind(DEV_FIXTURE_LOGIN)
@@ -65,5 +64,22 @@ pub async fn seed_dev_fixture_user(pool: &PgPool, enabled: bool) -> Result<(), B
     .execute(pool)
     .await
     .map_err(|_| BootstrapError::Database)?;
+    Ok(())
+}
+
+/// Production must never start while the development-only fixture account is
+/// still present. This is deliberately a hard failure so an operator cannot
+/// expose a known credential by mistake.
+pub async fn ensure_no_dev_fixture(pool: &PgPool) -> Result<(), BootstrapError> {
+    let present = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower($1))",
+    )
+    .bind(DEV_FIXTURE_LOGIN)
+    .fetch_one(pool)
+    .await
+    .map_err(|_| BootstrapError::Database)?;
+    if present {
+        return Err(BootstrapError::InvalidCredential);
+    }
     Ok(())
 }

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type SynapseRequest =
   | { kind: "session" }
   | { kind: "public-signup" }
+  | { kind: "storage-health" }
   | { body: Record<string, unknown>; kind: "signup" }
   | { body: Record<string, unknown>; kind: "login" }
   | { kind: "logout" }
@@ -110,6 +111,8 @@ async function mapRequest(
     return { kind: "session" };
   if (url.pathname === "/auth/signup" && method === "GET")
     return { kind: "public-signup" };
+  if (url.pathname === "/health/storage" && method === "GET")
+    return { kind: "storage-health" };
   if (url.pathname === "/auth/signup" && method === "POST" && json)
     return { body: json, kind: "signup" };
   if (url.pathname === "/auth/login" && method === "POST" && json)

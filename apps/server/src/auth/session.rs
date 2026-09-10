@@ -7,6 +7,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 const TOKEN_BYTES: usize = 32;
@@ -23,6 +24,7 @@ impl Clock for SystemClock {
     }
 }
 
+#[derive(Clone)]
 pub struct SessionToken([u8; TOKEN_BYTES]);
 
 impl SessionToken {
@@ -122,6 +124,27 @@ pub async fn create_with_lifetime(
     Ok(token)
 }
 
+/// Creates a session as part of a caller-owned transaction. Authentication
+/// uses this variant so a password change and session creation serialize on the
+/// same user row and cannot race with one another.
+pub async fn create_with_lifetime_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    now: SystemTime,
+    lifetime: SessionLifetime,
+) -> Result<SessionToken, SessionError> {
+    let token = SessionToken::generate();
+    sqlx::query(lifetime.expiry_sql())
+        .bind(Uuid::new_v4().to_string())
+        .bind(user_id.to_string())
+        .bind(token.hash())
+        .bind(unix_seconds(now)?)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|_| SessionError::Database)?;
+    Ok(token)
+}
+
 pub async fn user_for(
     pool: &PgPool,
     token: &SessionToken,
@@ -185,14 +208,16 @@ pub async fn revoke_id(
     pool: &PgPool,
     user_id: Uuid,
     session_id: Uuid,
-) -> Result<bool, SessionError> {
-    let result = sqlx::query("DELETE FROM sessions WHERE id = $1::uuid AND user_id = $2::uuid")
-        .bind(session_id.to_string())
-        .bind(user_id.to_string())
-        .execute(pool)
-        .await
-        .map_err(|_| SessionError::Database)?;
-    Ok(result.rows_affected() > 0)
+) -> Result<Option<Vec<u8>>, SessionError> {
+    let result = sqlx::query_scalar::<_, Vec<u8>>(
+        "DELETE FROM sessions WHERE id = $1::uuid AND user_id = $2::uuid RETURNING token_hash",
+    )
+    .bind(session_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| SessionError::Database)?;
+    Ok(result)
 }
 
 pub async fn revoke_others(
@@ -204,6 +229,20 @@ pub async fn revoke_others(
         .bind(user_id.to_string())
         .bind(current.hash())
         .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|_| SessionError::Database)
+}
+
+pub async fn revoke_others_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    current: &SessionToken,
+) -> Result<(), SessionError> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = $1::uuid AND token_hash <> $2")
+        .bind(user_id.to_string())
+        .bind(current.hash())
+        .execute(&mut **transaction)
         .await
         .map(|_| ())
         .map_err(|_| SessionError::Database)

@@ -120,6 +120,7 @@ async fn replaying_an_operation_returns_its_durable_ack_without_a_second_revisio
         FilesystemBlobStore::open(&storage.path).expect("blob storage opens"),
     );
     let operation_id = uuid_v7(2);
+    let note_id = Uuid::new_v4();
     let ciphertext = vec![91_u8; 16];
     let ciphertext_hash = hex(Sha256::digest(&ciphertext));
     let first = app
@@ -128,7 +129,7 @@ async fn replaying_an_operation_returns_its_durable_ack_without_a_second_revisio
             vault_id,
             &session.cookie_value(),
             operation_id,
-            Uuid::new_v4(),
+            note_id,
             &ciphertext,
             &ciphertext_hash,
         ))
@@ -145,7 +146,7 @@ async fn replaying_an_operation_returns_its_durable_ack_without_a_second_revisio
             vault_id,
             &session.cookie_value(),
             operation_id,
-            Uuid::new_v4(),
+            note_id,
             &ciphertext,
             &ciphertext_hash,
         ))
@@ -161,6 +162,73 @@ async fn replaying_an_operation_returns_its_durable_ack_without_a_second_revisio
             .expect("replay body")
             .to_bytes(),
         first_body
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM revisions WHERE vault_id = $1::uuid")
+            .bind(vault_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("revision count"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn reusing_an_operation_id_with_a_changed_payload_is_rejected() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+    let owner_id = create_user(&pool, "owner@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+    let storage = TestStorage::new();
+    let app = synapse_server::router_with_blob_store(
+        Some(pool.clone()),
+        FilesystemBlobStore::open(&storage.path).expect("blob storage opens"),
+    );
+    let operation_id = uuid_v7(8);
+    let note_id = Uuid::new_v4();
+    let original = vec![101_u8; 16];
+    let original_hash = hex(Sha256::digest(&original));
+    let first = app
+        .clone()
+        .oneshot(push_request(
+            vault_id,
+            &session.cookie_value(),
+            operation_id,
+            note_id,
+            &original,
+            &original_hash,
+        ))
+        .await
+        .expect("first response");
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let changed = vec![102_u8; 16];
+    let changed_response = app
+        .oneshot(push_request(
+            vault_id,
+            &session.cookie_value(),
+            operation_id,
+            note_id,
+            &changed,
+            &hex(Sha256::digest(&changed)),
+        ))
+        .await
+        .expect("changed replay response");
+    assert_eq!(changed_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<u8>>("SELECT ciphertext FROM operations WHERE id = $1::uuid")
+            .bind(operation_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("stored ciphertext"),
+        original
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM revisions WHERE vault_id = $1::uuid")
@@ -452,6 +520,7 @@ fn push_payload_request(vault_id: Uuid, session: &str, payload: String) -> Reque
         .method("POST")
         .uri(format!("/v1/vaults/{vault_id}/operations"))
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ORIGIN, "https://synapse.local")
         .header(header::COOKIE, format!("session={session}"))
         .body(Body::from(payload))
         .expect("request is valid")

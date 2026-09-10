@@ -150,6 +150,7 @@ fn push_request(
         .method("POST")
         .uri(format!("/v1/vaults/{vault_id}/operations"))
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ORIGIN, "https://synapse.local")
         .header(header::COOKIE, format!("session={session}"))
         .body(Body::from(format!(
             r#"{{"protocol_version":1,"operation_id":"{operation_id}","vault_id":"{vault_id}","note_id":"{note_id}","base_revision":{base_revision},"ciphertext":[{ciphertext}],"nonce":[{nonce}],"aad_version":1,"ciphertext_hash":"{ciphertext_hash}"}}"#

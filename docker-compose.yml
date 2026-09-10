@@ -31,10 +31,14 @@ services:
       SYNAPSE_BIND_ADDR: 0.0.0.0:3000
       SYNAPSE_DATABASE_URL: postgres://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@postgres:5432/${POSTGRES_DB:-synapse}
       SYNAPSE_STORAGE_PATH: /var/lib/synapse/blobs
-      SYNAPSE_ALLOWED_ORIGIN: ${SYNAPSE_ALLOWED_ORIGIN:-http://127.0.0.1:8080}
-      SYNAPSE_ALLOW_PUBLIC_SIGNUP: ${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-true}
-      SYNAPSE_COOKIE_SECURE: ${SYNAPSE_COOKIE_SECURE:-false}
-      SYNAPSE_ENV: ${SYNAPSE_ENV:-development}
+      SYNAPSE_ALLOWED_ORIGIN: ${SYNAPSE_ALLOWED_ORIGIN:-https://notes.example.com}
+      SYNAPSE_ALLOW_PUBLIC_SIGNUP: ${SYNAPSE_ALLOW_PUBLIC_SIGNUP:-false}
+      SYNAPSE_COOKIE_SECURE: ${SYNAPSE_COOKIE_SECURE:-true}
+      SYNAPSE_ENV: ${SYNAPSE_ENV:-production}
+      SYNAPSE_DEV_FIXTURE: ${SYNAPSE_DEV_FIXTURE:-false}
+      SYNAPSE_TRUSTED_PROXIES: ${SYNAPSE_TRUSTED_PROXIES:-}
+      SYNAPSE_PUBLIC_HOST: ${SYNAPSE_PUBLIC_HOST:-notes.example.com}
+      SYNAPSE_LAST_BACKUP_AT: ${SYNAPSE_LAST_BACKUP_AT:-}
       SYNAPSE_BOOTSTRAP_ADMIN_EMAIL: ${SYNAPSE_BOOTSTRAP_ADMIN_EMAIL:-}
       SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD: ${SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD:-}
       RUST_LOG: ${RUST_LOG:-info}
@@ -76,14 +80,19 @@ services:
     depends_on:
       - web
       - server
+    environment:
+      SYNAPSE_PUBLIC_HOST: ${SYNAPSE_PUBLIC_HOST:-notes.example.com}
     ports:
-      - "${SYNAPSE_HTTP_PORT:-8080}:80"
+      # HTTP is loopback-only by default. Caddy serves the public certificate
+      # on 443 when SYNAPSE_PUBLIC_HOST is configured.
+      - "${SYNAPSE_HTTP_BIND:-127.0.0.1}:${SYNAPSE_HTTP_PORT:-8080}:80"
+      - "${SYNAPSE_HTTPS_BIND:-0.0.0.0}:${SYNAPSE_HTTPS_PORT:-8443}:443"
     volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/${SYNAPSE_CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/health/live"]
+      test: ["CMD", "wget", "-qO-", "http://server:3000/health/live"]
       interval: 5s
       timeout: 3s
       retries: 20

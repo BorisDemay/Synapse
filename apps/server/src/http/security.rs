@@ -11,10 +11,7 @@ const API_CSP: &str = "default-src 'none'; frame-ancestors 'none'; base-uri 'non
 const HSTS: &str = "max-age=31536000; includeSubDomains";
 
 pub fn is_production() -> bool {
-    matches!(
-        std::env::var("SYNAPSE_ENV").as_deref(),
-        Ok("production") | Ok("prod")
-    )
+    !matches!(std::env::var("SYNAPSE_ENV").as_deref(), Ok("development"))
 }
 
 pub fn expand_allowed_origins(primary: &str) -> Vec<String> {
@@ -27,6 +24,18 @@ pub fn expand_allowed_origins(primary: &str) -> Vec<String> {
 
 pub fn origin_allowed(allowed_origins: &[String], origin: &str) -> bool {
     allowed_origins.iter().any(|allowed| allowed == origin)
+}
+
+/// Cookie-authenticated mutations must carry an allowlisted Origin. Native
+/// clients use the same instance origin when sending these requests.
+pub fn required_origin_allowed(
+    headers: &axum::http::HeaderMap,
+    allowed_origins: &[String],
+) -> bool {
+    headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|origin| origin_allowed(allowed_origins, origin))
 }
 
 fn localhost_loopback_alias(origin: &str) -> Option<String> {

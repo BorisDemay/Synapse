@@ -1199,7 +1199,7 @@ git commit -m "feat(ui): add non destructive conflict resolution"
 
 **Step 2: TDD CSRF** sur chaque mutation cookie-authentifiée.
 
-**Step 3: TDD limites** body, upload, profondeur JSON, timeout, connexions WebSocket et rate limiting.
+**Step 3: TDD limites** body, upload, profondeur JSON, timeout, connexions WebSocket et rate limiting. Les rejeux d’un `operation_id` doivent aussi vérifier que le payload opaque est identique ; une réutilisation avec un payload différent est rejetée.
 
 **Step 4: TDD traversal/symlink** avec corpus Linux et Windows.
 

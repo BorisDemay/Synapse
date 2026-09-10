@@ -18,11 +18,14 @@ use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},
 };
+use ipnet::IpNet;
 use sqlx::PgPool;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::KeyExtractor};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ClientKeyExtractor;
+#[derive(Clone, Debug)]
+struct ClientKeyExtractor {
+    trusted_proxies: Arc<[IpNet]>,
+}
 
 impl KeyExtractor for ClientKeyExtractor {
     type Key = String;
@@ -31,22 +34,61 @@ impl KeyExtractor for ClientKeyExtractor {
         &self,
         request: &axum::http::Request<T>,
     ) -> Result<Self::Key, tower_governor::GovernorError> {
-        Ok(request
-            .headers()
-            .get("x-forwarded-for")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
-            .map(str::trim)
-            .and_then(|value| value.parse::<IpAddr>().ok())
-            .map(|value| value.to_string())
-            .or_else(|| {
-                request
-                    .extensions()
-                    .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                    .map(|info| info.0.ip().to_string())
-            })
-            .unwrap_or_else(|| "unknown-client".to_owned()))
+        let peer = request
+            .extensions()
+            .get::<axum::extract::ConnectInfo<SocketAddr>>()
+            .map(|info| info.0.ip());
+        let client = match peer {
+            Some(peer)
+                if self
+                    .trusted_proxies
+                    .iter()
+                    .any(|network| network.contains(&peer)) =>
+            {
+                forwarded_client(request, &self.trusted_proxies).unwrap_or(peer)
+            }
+            Some(peer) => peer,
+            // Requests without transport metadata are treated as one local
+            // client. Never trust a forwarding header when the peer address is
+            // unavailable; production listeners install ConnectInfo in main.
+            None => IpAddr::from([0, 0, 0, 0]),
+        };
+        Ok(client.to_string())
     }
+}
+
+fn forwarded_client<T>(
+    request: &axum::http::Request<T>,
+    trusted_proxies: &[IpNet],
+) -> Option<IpAddr> {
+    request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .split(',')
+                .rev()
+                .filter_map(|candidate| candidate.trim().parse::<IpAddr>().ok())
+                .find(|candidate| {
+                    !trusted_proxies
+                        .iter()
+                        .any(|network| network.contains(candidate))
+                })
+        })
+}
+
+fn configured_trusted_proxies() -> Arc<[IpNet]> {
+    std::env::var("SYNAPSE_TRUSTED_PROXIES")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|entry| entry.trim().parse::<IpNet>().ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+        .into()
 }
 
 #[derive(Clone)]
@@ -140,28 +182,38 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
         notifications: http::ws::NotificationHub::new(),
     };
 
-    let mut rate_limit_config = GovernorConfigBuilder::default().key_extractor(ClientKeyExtractor);
-    rate_limit_config.per_second(1).burst_size(5);
-    let rate_limit_config = rate_limit_config
-        .finish()
-        .expect("a non-zero auth rate limit configuration is valid");
+    let trusted_proxies = configured_trusted_proxies();
+    let rate_limit_config = || {
+        let mut config = GovernorConfigBuilder::default().key_extractor(ClientKeyExtractor {
+            trusted_proxies: trusted_proxies.clone(),
+        });
+        config.per_second(1).burst_size(5);
+        config
+            .finish()
+            .expect("a non-zero auth rate limit configuration is valid")
+    };
 
+    let credential_routes = Router::new()
+        .route("/signup", post(http::auth::signup))
+        .route("/login", post(http::auth::login))
+        .layer(DefaultBodyLimit::max(128 * 1024))
+        .layer(GovernorLayer::new(rate_limit_config()));
+    let account_routes = Router::new()
+        .route("/activate", post(http::auth::activate))
+        .route("/password", post(http::auth::change_password))
+        .route("/account/delete", post(http::auth::delete_account))
+        .layer(DefaultBodyLimit::max(128 * 1024))
+        .layer(GovernorLayer::new(rate_limit_config()));
     let auth_routes = Router::new()
         .route("/signup", get(http::auth::signup_status))
-        .merge(
-            Router::new()
-                .route("/signup", post(http::auth::signup))
-                .route("/login", post(http::auth::login))
-                .route("/activate", post(http::auth::activate))
-                .route("/password", post(http::auth::change_password))
-                .route("/account/delete", post(http::auth::delete_account))
-                .layer(GovernorLayer::new(rate_limit_config)),
-        );
+        .merge(credential_routes)
+        .merge(account_routes);
 
     Router::new()
         .route("/health/live", get(http::health::live))
         .route("/health/ready", get(http::health::ready))
         .route("/health/version", get(http::health::version))
+        .route("/health/storage", get(http::storage::status))
         .route("/metrics", get(metrics::render))
         .route("/auth/logout", post(http::auth::logout))
         .route("/auth/sessions", get(http::auth::list_sessions))
@@ -186,6 +238,7 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
             "/v1/vaults/{vault_id}/operations",
             post(http::sync::push)
                 .get(http::sync::pull)
+                .layer::<_, std::convert::Infallible>(axum::middleware::from_fn(http::sync::limits))
                 .layer(DefaultBodyLimit::max(http::sync::MAX_REQUEST_BYTES)),
         )
         .nest("/auth", auth_routes)
@@ -239,4 +292,45 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await
     .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::ConnectInfo;
+    use axum::http::Request;
+
+    #[test]
+    fn rate_limit_key_ignores_forwarded_headers_from_direct_peers() {
+        let extractor = ClientKeyExtractor {
+            trusted_proxies: Arc::from(
+                vec!["10.0.0.0/8".parse::<IpNet>().expect("network")].into_boxed_slice(),
+            ),
+        };
+        let mut request = Request::new(());
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 1], 443))));
+        request
+            .headers_mut()
+            .insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
+        assert_eq!(extractor.extract(&request).unwrap(), "192.0.2.1");
+    }
+
+    #[test]
+    fn trusted_proxy_forwarding_selects_the_first_untrusted_hop() {
+        let extractor = ClientKeyExtractor {
+            trusted_proxies: Arc::from(
+                vec!["10.0.0.0/8".parse::<IpNet>().expect("network")].into_boxed_slice(),
+            ),
+        };
+        let mut request = Request::new(());
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([10, 0, 0, 2], 443))));
+        request
+            .headers_mut()
+            .insert("x-forwarded-for", "198.51.100.7, 10.0.0.3".parse().unwrap());
+        assert_eq!(extractor.extract(&request).unwrap(), "198.51.100.7");
+    }
 }

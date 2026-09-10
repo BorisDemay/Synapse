@@ -34,6 +34,9 @@ pub async fn create(
     headers: HeaderMap,
     Json(_request): Json<CreateVaultRequest>,
 ) -> Result<(StatusCode, Json<CreateVaultResponse>), StatusCode> {
+    if !crate::http::security::required_origin_allowed(&headers, &state.allowed_origins) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     let pool = state.pool.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let token = session_token(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let user_id = session::user_for(&pool, &token, state.clock.now())
@@ -142,11 +145,7 @@ pub async fn write_envelope(
     Path(vault_id): Path<String>,
     payload: Result<Json<EnvelopeRequest>, axum::extract::rejection::JsonRejection>,
 ) -> StatusCode {
-    if !headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|origin| crate::http::security::origin_allowed(&state.allowed_origins, origin))
-    {
+    if !crate::http::security::required_origin_allowed(&headers, &state.allowed_origins) {
         return StatusCode::FORBIDDEN;
     }
     let Ok(Json(payload)) = payload else {

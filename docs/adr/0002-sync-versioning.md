@@ -14,7 +14,10 @@ serveur ne peut pas fusionner des contenus chiffrés.
 Chaque mutation porte un `operation_id` UUIDv7 globalement unique, un
 `vault_id`, une `base_revision` strictement positive et un payload chiffré.
 L’application d’une opération est idempotente : un rejeu retourne le résultat
-durable initial et ne crée pas de révision supplémentaire.
+durable initial et ne crée pas de révision supplémentaire. Un rejeu avec le
+même identifiant mais un coffre, une note, une base, un ciphertext, un nonce ou
+une empreinte différents est rejeté ; l’identifiant d’opération ne peut pas
+être réutilisé pour faire acquitter un autre payload.
 
 Chaque coffre a une suite de révisions croissantes. Le contenu est adressé par
 la somme SHA-256 des octets de ciphertext, et non par une empreinte de contenu

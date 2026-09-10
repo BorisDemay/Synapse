@@ -130,6 +130,7 @@ export async function startTestBackend({
           SYNAPSE_ALLOW_PUBLIC_SIGNUP: "true",
           SYNAPSE_COOKIE_SECURE: "false",
           SYNAPSE_ENV: "development",
+          SYNAPSE_DEV_FIXTURE: "true",
           SYNAPSE_STORAGE_PATH: join(directory, "blobs"),
           SYNAPSE_MAIL_DIRECTORY: mailDirectory,
         },

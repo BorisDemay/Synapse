@@ -35,16 +35,28 @@ describe("markdown folder importer", () => {
     ]);
   });
 
-  it("reads a portable ZIP", () => {
+  it("reads a portable ZIP", async () => {
     const zip = buildMarkdownZip(
       [{ content: "# Inbox", path: "Inbox.md", title: "Inbox" }],
       [{ bytes: strToU8("safe"), path: "attachments/file.txt" }],
     );
-    const plan = planZipImport(zip);
+    const plan = await planZipImport(zip);
     expect(plan.notes.map((note) => note.path)).toEqual(["Inbox.md"]);
     expect(plan.attachments.map((file) => file.path)).toEqual([
       "attachments/file.txt",
     ]);
     expect(plan.ignored).toEqual([]);
+  });
+
+  it("rejects an oversized entry before it is inflated into an import plan", async () => {
+    const zip = buildMarkdownZip([
+      {
+        content: "x".repeat(10 * 1024 * 1024 + 1),
+        path: "oversized.md",
+        title: "Oversized",
+      },
+    ]);
+
+    await expect(planZipImport(zip)).rejects.toThrow("Import is too large");
   });
 });

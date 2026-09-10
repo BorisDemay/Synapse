@@ -1,7 +1,8 @@
 # Local penetration assessment — 2026-09-10
 
 Assessed product commit: `6a82954e9cdafb68c555f1ed32f449c39b2ca954`.
-No product remediation is included in this assessment.
+The findings below are the historical baseline. The remediation regression run
+against the current source is kept in `target/security/local-penetration.json`.
 
 ## Scope and method
 
@@ -20,8 +21,8 @@ afterward. No credentials or session values appear in the report.
 Final run: **29 checks: 20 PASS, 5 FINDING, 4 OBSERVATION**. The five failing
 checks represent **three distinct vulnerabilities**, with raw HTTP/WebSocket
 and browser tests providing overlapping evidence. All seven existing harness
-lifecycle tests also passed. Exit status 0 from the assessment means execution
-completed, not that the application passed every security check.
+lifecycle tests also passed. The historical run was report-only; the regression
+script now exits non-zero when any finding is present.
 
 ## Confirmed vulnerabilities
 
@@ -115,6 +116,11 @@ node tests/security/local-penetration.mjs
 node --test tests/harness/*.test.mjs
 ```
 
+The remediation regression run against the current source reports 31 checks
+with zero findings and returns exit status 0. It covers the three historical
+vulnerabilities plus missing and hostile Origin requests, bounded sync inputs,
+and replay behavior.
+
 Machine-readable observations: `target/security/local-penetration.json`
 (generated, not committed). The script accepts no external target URL and caps
 its explicit HTTP probes at 90. Browser and WebSocket probes are a fixed small
@@ -128,9 +134,10 @@ penetration test. It did not test production TLS/Caddy, Windows/Tauri exploitati
 dependency vulnerabilities, Markdown XSS, browser storage extraction, session
 expiry, password-change races, SMTP, restore attacks, or cryptographic attacks.
 No brute-force password search, volume exhaustion, high-concurrency load,
-destructive fuzzing or live third-party calls were performed. Large-pull memory
-amplification remains a source-review concern, not a demonstrated DoS result.
+destructive fuzzing or live third-party calls were performed. The current source
+has bounded pull responses, ZIP inflation and synchronization concurrency, but
+those limits still need a production-like load test.
 
-Prioritize proxy-aware throttling, WebSocket Origin validation and live session
-revocation. Retest the same scenarios after fixes, then expand to rendering,
-cross-tab secret lifecycle, bounded resource exhaustion and deployment controls.
+Next tests should cover rendering, cross-tab secret lifecycle, bounded resource
+exhaustion under load, production deployment controls, and the outstanding
+Windows signing and rollback scenarios in the release checklist.

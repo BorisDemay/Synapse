@@ -407,14 +407,15 @@ async fn development_fixture_user_can_log_in_without_mail_or_password_policy() {
         .await
         .expect("fixture is an activated ordinary user")
     );
-    let refreshed_hash =
+    let preserved_hash =
         sqlx::query_scalar::<_, Vec<u8>>("SELECT password_hash FROM users WHERE email = $1")
             .bind(synapse_server::auth::DEV_FIXTURE_LOGIN)
             .fetch_one(&pool)
             .await
             .expect("fixture password hash");
-    let refreshed_hash = String::from_utf8(refreshed_hash).expect("fixture hash is utf8");
-    assert!(synapse_server::auth::password::verify("test", &refreshed_hash).is_ok());
+    let preserved_hash = String::from_utf8(preserved_hash).expect("fixture hash is utf8");
+    assert!(synapse_server::auth::password::verify("an old password", &preserved_hash).is_ok());
+    assert!(synapse_server::auth::password::verify("test", &preserved_hash).is_err());
 
     let mailer = Arc::new(RecordingMailer::default());
     let mut settings = test_settings(Some(pool.clone()), mailer.clone());
@@ -437,7 +438,7 @@ async fn development_fixture_user_can_log_in_without_mail_or_password_policy() {
     let login = app
         .oneshot(request_json(
             "/auth/login",
-            r#"{"email":"test","password":"test"}"#,
+            r#"{"email":"test","password":"an old password"}"#,
         ))
         .await
         .expect("response");
@@ -918,7 +919,10 @@ async fn concurrent_signup_consumes_an_invitation_only_once() {
         .execute(&pool)
         .await
         .expect("invitation is stored");
-    let app = synapse_server::router(Some(pool.clone()));
+    let app = synapse_server::router_with_settings(test_settings(
+        Some(pool.clone()),
+        Arc::new(RecordingMailer::default()),
+    ));
 
     let first = tokio::spawn({
         let app = app.clone();
@@ -1020,7 +1024,7 @@ async fn auth_rate_limit_rejects_excess_without_affecting_health() {
 }
 
 #[tokio::test]
-async fn auth_rate_limit_isolated_by_forwarded_client_address() {
+async fn auth_rate_limit_ignores_untrusted_forwarded_client_address() {
     let app = synapse_server::router(None);
     for _ in 0..5 {
         let response = app
@@ -1055,7 +1059,7 @@ async fn auth_rate_limit_isolated_by_forwarded_client_address() {
         )
         .await
         .expect("response");
-    assert_eq!(different_client.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(different_client.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
 fn request_json(uri: &str, body: &'static str) -> Request<Body> {

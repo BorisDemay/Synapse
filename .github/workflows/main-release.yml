@@ -23,14 +23,14 @@ jobs:
       SYNAPSE_DATABASE_URL: postgres://postgres@127.0.0.1:55432/synapse_test
       SYNAPSE_STORAGE_PATH: ${{ github.workspace }}/.ci-blobs
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@f40ffcd9367d9f12939873eb1018b921a783ffaa # stable
         with:
           components: rustfmt, clippy
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
         with:
           version: 11.20.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22.17.1
           cache: pnpm
@@ -58,12 +58,12 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       SYNAPSE_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@f40ffcd9367d9f12939873eb1018b921a783ffaa # stable
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
         with:
           version: 11.20.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22.17.1
           cache: pnpm
@@ -85,7 +85,7 @@ jobs:
           $secure = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secure
           $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          $config.bundle | Add-Member -Force NoteProperty windows ([pscustomobject]@{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" })
+          $config.bundle | Add-Member -Force NoteProperty windows ([pscustomobject]@{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "https://timestamp.digicert.com" })
           $config | ConvertTo-Json -Depth 20 | Set-Content apps/desktop/src-tauri/tauri.conf.json
       - name: Install native recovery prerequisites
         if: runner.os == 'Linux'
@@ -127,7 +127,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item $artifact.FullName release-desktop/synapse-windows-x86_64.exe
           Copy-Item "$($artifact.FullName).sig" release-desktop/synapse-windows-x86_64.exe.sig
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-${{ runner.os }}
           path: release-desktop/
@@ -138,12 +138,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@f40ffcd9367d9f12939873eb1018b921a783ffaa # stable
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
         with:
           version: 11.20.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22.17.1
           cache: pnpm
@@ -155,7 +155,7 @@ jobs:
       - run: docker build --build-arg SYNAPSE_VERSION --build-arg SYNAPSE_COMMIT_SHA -f apps/web/Dockerfile -t "synapse-web:$SYNAPSE_VERSION" .
       - run: docker save "synapse-server:$SYNAPSE_VERSION" -o "synapse-server-$SYNAPSE_VERSION.tar"
       - run: docker save "synapse-web:$SYNAPSE_VERSION" -o "synapse-web-$SYNAPSE_VERSION.tar"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: server-web
           path: |
@@ -170,8 +170,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: downloaded
           merge-multiple: true
@@ -191,7 +191,7 @@ jobs:
           cp infra/scripts/release/validate-release.mjs payload/
           sha256sum migrations/*.sql > payload/migrations.sha256
           (cd payload && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-      - uses: tailscale/github-action@v4
+      - uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}

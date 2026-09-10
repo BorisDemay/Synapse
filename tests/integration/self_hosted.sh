@@ -5,8 +5,12 @@ cd "$ROOT"
 export COMPOSE_PROJECT_NAME="synapse-selfhost-$$-$RANDOM"
 export SYNAPSE_HTTP_PORT="${SYNAPSE_HTTP_PORT:-18090}"
 export SYNAPSE_ALLOWED_ORIGIN="http://127.0.0.1:$SYNAPSE_HTTP_PORT"
+export SYNAPSE_ENV=development
+export SYNAPSE_ALLOW_PUBLIC_SIGNUP=true
+export SYNAPSE_COOKIE_SECURE=false
+export SYNAPSE_DEV_FIXTURE=true
 BASE_URL="$SYNAPSE_ALLOWED_ORIGIN"
-COMPOSE=(docker compose -f docker-compose.yml --env-file .env.example)
+COMPOSE=(docker compose -f docker-compose.yml --env-file .env.development.example)
 WORKDIR="$(mktemp -d /tmp/synapse-selfhost-XXXXXX)"
 started=false
 cleanup() {

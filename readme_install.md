@@ -52,10 +52,16 @@ chmod 600 .env
 ```
 
 Éditer ensuite `.env`. Pour une instance accessible en HTTPS à
-`https://synapse.example.net`, les valeurs importantes sont :
+`https://synapse.example.net`, conserver le Caddyfile de production et définir
+au minimum :
 
 ```dotenv
-SYNAPSE_HTTP_PORT=8080
+SYNAPSE_HTTP_PORT=80
+SYNAPSE_HTTP_BIND=0.0.0.0
+SYNAPSE_HTTPS_PORT=443
+SYNAPSE_HTTPS_BIND=0.0.0.0
+SYNAPSE_PUBLIC_HOST=synapse.example.net
+SYNAPSE_CADDYFILE=Caddyfile
 SYNAPSE_ALLOWED_ORIGIN=https://synapse.example.net
 SYNAPSE_ALLOW_PUBLIC_SIGNUP=false
 SYNAPSE_COOKIE_SECURE=true
@@ -70,17 +76,17 @@ SYNAPSE_BOOTSTRAP_ADMIN_EMAIL=admin@exemple.net
 SYNAPSE_BOOTSTRAP_ADMIN_PASSWORD=remplacer-par-un-mot-de-passe-aleatoire-long
 ```
 
-Pour un test uniquement sur le réseau local, utiliser à la place l'URL réelle
-du NAS, par exemple `http://192.168.1.50:8080`, mettre cette même valeur dans
-`SYNAPSE_ALLOWED_ORIGIN` et conserver `SYNAPSE_COOKIE_SECURE=false`. Cette
-configuration HTTP ne doit pas être publiée sur Internet.
+Pour une vérification locale uniquement, remplacez `.env` par
+`.env.development.example` et utilisez le port `18090`. Ce profil active
+explicitement le fixture `test` / `test` et des cookies non Secure pour le
+loopback ; il ne doit jamais être publié.
 
 Démarrer la stack et attendre les contrôles de santé :
 
 ```bash
-docker compose up --build -d --wait
+docker compose --env-file .env up --build -d --wait
 docker compose ps
-curl -fsS http://127.0.0.1:8080/health/ready
+curl -fsS https://synapse.example.net/health/ready
 ```
 
 La sortie de la dernière commande doit indiquer que le service est prêt. En cas
@@ -97,21 +103,20 @@ Docker nommés ; `docker compose down` les conserve. Ne pas lancer
 
 ## HTTPS et exposition réseau
 
-La configuration Caddy incluse écoute en HTTP sur le port publié ; elle est
-adaptée au développement et au réseau local. Pour une exposition Internet,
-placer un proxy inverse TLS du NAS (ou un Caddy/Nginx séparé) devant
-`http://127.0.0.1:8080`, publier uniquement le port HTTPS et définir :
+Le Caddyfile de production gère le certificat et redirige HTTP vers HTTPS.
+Publier les ports 80 et 443 (ou relayer ces deux ports depuis le proxy du NAS)
+et définir :
 
 ```dotenv
 SYNAPSE_ALLOWED_ORIGIN=https://synapse.example.net
 SYNAPSE_COOKIE_SECURE=true
 SYNAPSE_ENV=production
+SYNAPSE_CADDYFILE=Caddyfile
 ```
 
 Le proxy doit transmettre les routes `/auth/`, `/v1/`, `/vaults`, `/health/`
 et l'interface web. La configuration Caddy du projet les sert déjà toutes sur
-le même port ; le proxy externe peut donc relayer l'intégralité du site vers
-le port 8080.
+les mêmes ports.
 
 ## Connecter le client Windows
 
@@ -122,13 +127,13 @@ l'instance :
 https://synapse.example.net
 ```
 
-Pour un test local, saisir par exemple `http://192.168.1.50:8080`. Ne pas
-utiliser `http://127.0.0.1:3000` : cette adresse désigne le PC Windows, pas le
-NAS.
+Pour un test de développement, saisir par exemple
+`http://192.168.1.50:18090`. Ne pas utiliser `http://127.0.0.1:3000` : cette
+adresse désigne le PC Windows, pas le NAS.
 
 Se connecter avec le compte d'administration bootstrapé. Si l'inscription
-publique est volontairement activée, créer un compte depuis le client puis la
-désactiver dans `.env` et redémarrer :
+publique est volontairement activée en développement, créer un compte depuis le
+client puis la désactiver dans `.env` et redémarrer :
 
 ```bash
 docker compose up -d

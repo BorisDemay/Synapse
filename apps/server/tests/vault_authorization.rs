@@ -31,6 +31,7 @@ async fn authenticated_user_creates_an_opaque_private_vault_as_its_only_owner() 
                 .method("POST")
                 .uri("/vaults")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "https://synapse.local")
                 .header(
                     header::COOKIE,
                     format!("session={}", session.cookie_value()),
@@ -290,6 +291,7 @@ async fn vault_inputs_are_validated_and_database_rejects_orphaned_or_multiple_ow
                 .method("POST")
                 .uri("/vaults")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "https://synapse.local")
                 .header(header::COOKIE, format!("session={session}"))
                 .body(Body::from(r#"{"title":"plaintext is forbidden"}"#))
                 .expect("request is valid"),

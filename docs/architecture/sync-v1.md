@@ -23,7 +23,10 @@ pending -> rejected
 ```
 
 `accepted` confirme l'application idempotente de l'opération. Le rejeu du même
-`operation_id` retourne le même résultat sans créer une nouvelle révision.
+`operation_id` avec le même payload retourne le même résultat sans créer une
+nouvelle révision. Si le payload associé à l'identifiant diffère, le serveur
+rejette le push afin qu'un client ne puisse pas acquitter par erreur une autre
+mutation sous une identité déjà consommée.
 `conflict` signale une `base_revision` obsolète et expose uniquement les
 références aux ciphertexts base, local et distant. Un client déverrouillé peut
 les déchiffrer et effectuer une fusion trois voies uniquement pour des hunks

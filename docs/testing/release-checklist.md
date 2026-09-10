@@ -24,8 +24,11 @@ du job Windows ; une exécution sous WSL2 constitue une observation Linux.
 - [x] 27 tests Rust natifs, dont 13 tests de réplique dossier et 7 tests de
   session/transport ; format et clippy natifs passent également.
 - [x] 11 tests Python des opérations de sauvegarde/restauration.
-- [x] 390 tests JavaScript, 7 tests du harness et 8 tests de publication ;
-  typechecks, formatage, clippy et audits passent.
+- [x] 392 tests JavaScript, 7 tests du harness et 9 tests de publication ;
+  typechecks, formatage, clippy et audits passent, y compris l’audit npm du
+  graphe complet.
+- [x] Régression de sécurité locale bornée : 31 contrôles HTTP, navigateur et
+  WebSocket, zéro finding.
 - [x] Benchmark du client canonique avec 10 000 notes chiffrées et réplique native
   (voir `docs/architecture/performance-budgets.md`). Les anciens benchmarks
   SQLite/FTS5 ne mesurent pas le parcours Vue/IndexedDB actuel.

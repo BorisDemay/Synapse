@@ -1,5 +1,5 @@
-// Local-only, bounded security assessment. Exit 0 means the assessment completed,
-// NOT that its security checks passed. Findings are explicit in the JSON report.
+// Local-only, bounded security regression assessment. Any finding fails the
+// command so this remains useful as a release gate.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -25,16 +25,17 @@ assert.equal(new URL(origin).hostname, "127.0.0.1");
 const sockets = [];
 let browser, hostileServer;
 let requests = 0;
-async function request(path, { cookie, ip, hostile = false, method = "GET", body, contentType = "application/json" } = {}) {
+async function request(path, { cookie, ip, hostile = false, omitOrigin = false, method = "GET", body, contentType = "application/json" } = {}) {
   assert.ok(++requests <= 90, "bounded request budget");
+  const headers = {
+    ...(omitOrigin ? {} : { Origin: hostile ? "https://hostile.example.test" : origin }),
+    ...(cookie ? { Cookie: cookie } : {}),
+    ...(ip ? { "X-Forwarded-For": ip } : {}),
+    ...(body !== undefined ? { "Content-Type": contentType } : {}),
+  };
   const response = await fetch(`${origin}${path}`, {
     method,
-    headers: {
-      Origin: hostile ? "https://hostile.example.test" : origin,
-      ...(cookie ? { Cookie: cookie } : {}),
-      ...(ip ? { "X-Forwarded-For": ip } : {}),
-      ...(body !== undefined ? { "Content-Type": contentType } : {}),
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     redirect: "error",
     signal: AbortSignal.timeout(5000),
@@ -110,9 +111,13 @@ try {
   check("Envelope mutation rejects hostile Origin", wrongOriginEnvelope.status === 403, { status: wrongOriginEnvelope.status });
   const wrongOriginCreate = await request("/vaults", { method: "POST", cookie: owner, hostile: true, body: {} });
   check("Vault creation rejects hostile Origin", wrongOriginCreate.status === 403, { status: wrongOriginCreate.status, browserExploitProven: false }, "OBSERVATION");
+  const missingOriginCreate = await request("/vaults", { method: "POST", cookie: owner, omitOrigin: true, body: {} });
+  check("Vault creation requires an Origin", missingOriginCreate.status === 403, { status: missingOriginCreate.status });
   const op = operation(vaultId);
   const wrongOriginPush = await request(`${route}/operations`, { method: "POST", cookie: owner, hostile: true, body: op });
   check("Sync push rejects hostile Origin", wrongOriginPush.status === 403, { status: wrongOriginPush.status, browserExploitProven: false }, "OBSERVATION");
+  const missingOriginPush = await request(`${route}/operations`, { method: "POST", cookie: owner, omitOrigin: true, body: operation(vaultId) });
+  check("Sync push requires an Origin", missingOriginPush.status === 403, { status: missingOriginPush.status });
   let revision = wrongOriginPush.status === 201 ? JSON.parse(wrongOriginPush.text).revision : 0;
   if (!revision) {
     const legitimate = await request(`${route}/operations`, { method: "POST", cookie: owner, body: op });
@@ -130,7 +135,7 @@ try {
   const afterReplay = await request(`${route}/operations?limit=100`, { cookie: owner });
   assert.equal(afterReplay.status, 200);
   const stored = JSON.parse(afterReplay.text).operations.find((item) => item.operation_id === op.operation_id);
-  check("Operation identity reused with changed payload rejected", [400, 409].includes(tamperReplay.status), { status: tamperReplay.status, originalPreserved: JSON.stringify(stored.nonce) === JSON.stringify(op.nonce), classification: "hardening opportunity: ADR 0002 returns original durable ack; no overwrite demonstrated" }, "OBSERVATION");
+  check("Operation identity reused with changed payload rejected", [400, 409].includes(tamperReplay.status), { status: tamperReplay.status, originalPreserved: JSON.stringify(stored.nonce) === JSON.stringify(op.nonce) });
   const badHash = { ...operation(vaultId, revision), ciphertext_hash: "0".repeat(64) };
   const tamper = await request(`${route}/operations`, { method: "POST", cookie: owner, body: badHash });
   check("Ciphertext hash mismatch rejected", tamper.status === 400, { status: tamper.status });
@@ -202,3 +207,4 @@ const report = { completed: true, requests, findings: results.filter((r) => r.ou
 await mkdir("target/security", { recursive: true });
 await writeFile("target/security/local-penetration.json", `${JSON.stringify(report, null, 2)}\n`);
 console.log(`Assessment completed: ${results.length} checks, ${report.findings} findings. Report: target/security/local-penetration.json`);
+process.exitCode = report.findings === 0 ? 0 : 1;

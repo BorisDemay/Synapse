@@ -6,6 +6,10 @@ import {
   getRememberedSessionUser,
   rememberSessionUser,
 } from "../offline/cache";
+import {
+  readBrowserStorageHealth,
+  type BrowserStorageHealth,
+} from "../offline/storage-health";
 import { useVaultStore } from "./vault";
 
 interface LoginCredentials {
@@ -50,6 +54,7 @@ export const useAuthStore = defineStore("auth", {
     isOfflineSession: false,
     userId: null as string | null,
     email: null as string | null,
+    storageHealth: null as BrowserStorageHealth | null,
   }),
   actions: {
     async enterLocalMode() {
@@ -59,6 +64,7 @@ export const useAuthStore = defineStore("auth", {
       this.isOfflineSession = true;
       this.userId = "local-device";
       this.email = null;
+      this.storageHealth = null;
       await clearRememberedSession();
       await rememberSessionUser("local-device");
     },
@@ -77,6 +83,7 @@ export const useAuthStore = defineStore("auth", {
           this.isOfflineSession = false;
           this.userId = null;
           this.email = null;
+          this.storageHealth = null;
           return false;
         }
         const body = (await response.json()) as { user_id: string };
@@ -92,6 +99,7 @@ export const useAuthStore = defineStore("auth", {
           this.isOfflineSession = false;
           this.userId = null;
           this.email = null;
+          this.storageHealth = null;
           return false;
         }
         this.isAuthenticated = true;
@@ -99,6 +107,37 @@ export const useAuthStore = defineStore("auth", {
         this.userId = remembered;
         this.email = null;
         return true;
+      }
+    },
+    async refreshStorageHealth() {
+      const userId = this.userId;
+      if (!userId || this.isLocalMode) {
+        this.storageHealth = null;
+        return null;
+      }
+      try {
+        const health = await readBrowserStorageHealth(userId);
+        // A logout or account switch may have happened while IndexedDB and the
+        // authenticated health request were in flight. Never let an older
+        // response repopulate state for the current account.
+        if (
+          this.userId !== userId ||
+          !this.isAuthenticated ||
+          this.isLocalMode
+        ) {
+          return null;
+        }
+        this.storageHealth = health;
+        return health;
+      } catch {
+        if (
+          this.userId === userId &&
+          this.isAuthenticated &&
+          !this.isLocalMode
+        ) {
+          this.storageHealth = null;
+        }
+        return null;
       }
     },
     async fetchPublicSignup() {
@@ -163,6 +202,7 @@ export const useAuthStore = defineStore("auth", {
       this.isOfflineSession = false;
       this.userId = null;
       this.email = null;
+      this.storageHealth = null;
       if (userId) await clearUserUnlockMaterial(userId);
       await clearRememberedSession();
       if (local) return;
@@ -257,6 +297,7 @@ export const useAuthStore = defineStore("auth", {
       this.isOfflineSession = false;
       this.userId = null;
       this.email = null;
+      this.storageHealth = null;
       await clearRememberedSession();
     },
   },

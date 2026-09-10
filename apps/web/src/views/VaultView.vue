@@ -102,6 +102,20 @@ const pendingSaves = new Map<
 >();
 let saveInFlight: Promise<boolean> | undefined;
 
+const storageHealthMessage = computed(() => {
+  const health = auth.storageHealth;
+  if (!health) return "";
+  const available =
+    health.availableBytes === null
+      ? "inconnue"
+      : `${Math.round(health.availableBytes / 1024 / 1024)} MiB disponibles`;
+  const pending = `${health.pendingOperationCount} opération${health.pendingOperationCount === 1 ? "" : "s"} en attente`;
+  const backup = health.lastSuccessfulBackup
+    ? ` · sauvegarde ${health.lastSuccessfulBackup}`
+    : "";
+  return `${available} · ${pending}${backup}`;
+});
+
 function noteTitle(markdown: string, fallback: string): string {
   const heading = markdown
     .split("\n")
@@ -644,7 +658,7 @@ async function previewImport(event: Event) {
   }
   try {
     if (files.length === 1 && files[0]?.name.toLowerCase().endsWith(".zip")) {
-      importPlan.value = planZipImport(
+      importPlan.value = await planZipImport(
         new Uint8Array(await files[0].arrayBuffer()),
       );
       return;
@@ -897,6 +911,7 @@ onMounted(() => {
   if (vault.isUnlocked) {
     void assistant.restore();
   }
+  void auth.refreshStorageHealth();
   void refreshDeviceTrust();
 });
 
@@ -964,6 +979,9 @@ watch(settingsOpen, (open) => {
             {{ vault.syncStatus }}
           </span>
         </div>
+        <p v-if="storageHealthMessage" class="storage-health" role="status">
+          {{ storageHealthMessage }}
+        </p>
         <VaultExplorerToolbar
           show-import
           show-import-folder
@@ -1659,6 +1677,13 @@ watch(settingsOpen, (open) => {
   border-radius: 50%;
   background: currentColor;
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.storage-health {
+  margin: -0.35rem 0 0;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
 }
 
 .tag-filter {

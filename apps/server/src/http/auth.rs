@@ -124,6 +124,15 @@ fn signup_error() -> StatusCode {
     StatusCode::BAD_REQUEST
 }
 
+fn password_hash_status(error: password::PasswordError) -> StatusCode {
+    match error {
+        password::PasswordError::Invalid => StatusCode::BAD_REQUEST,
+        password::PasswordError::Busy | password::PasswordError::Hashing => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+    }
+}
+
 pub async fn signup_status(State(state): State<AppState>) -> Json<SignupStatusResponse> {
     Json(SignupStatusResponse {
         public_signup: state.allow_public_signup,
@@ -140,8 +149,24 @@ pub async fn signup(
     let Some(email) = normalized_email(&request.email) else {
         return signup_error();
     };
-    let Ok(password_hash) = password::hash(&request.password) else {
-        return signup_error();
+    if !state.allow_public_signup {
+        let Some(invitation_token) = request.invitation_token.as_deref() else {
+            return signup_error();
+        };
+        let eligible = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM invites WHERE token_hash = $1 AND lower(email) = $2 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP)",
+        )
+            .bind(opaque_hash(invitation_token))
+            .bind(&email)
+            .fetch_one(&pool)
+            .await;
+        if !matches!(eligible, Ok(true)) {
+            return signup_error();
+        }
+    }
+    let password_hash = match password::hash_async(request.password.clone()).await {
+        Ok(hash) => hash,
+        Err(error) => return password_hash_status(error),
     };
 
     let mut transaction = match pool.begin().await {
@@ -265,8 +290,14 @@ pub async fn login(
     let Ok(hash) = String::from_utf8(user.get::<Vec<u8>, _>("password_hash")) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if password::verify(&request.password, &hash).is_err() {
-        return StatusCode::UNAUTHORIZED.into_response();
+    match password::verify_async(request.password.clone(), hash.clone()).await {
+        Ok(()) => {}
+        Err(password::PasswordError::Busy | password::PasswordError::Hashing) => {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+        Err(password::PasswordError::Invalid) => {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
     }
     if !user.get::<bool, _>("activated") {
         return StatusCode::FORBIDDEN.into_response();
@@ -276,11 +307,36 @@ pub async fn login(
     } else {
         session::SessionLifetime::Standard
     };
-    let Ok(token) =
-        session::create_with_lifetime(&pool, user_id, state.clock.now(), lifetime).await
+    let mut transaction = match pool.begin().await {
+        Ok(transaction) => transaction,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    };
+    let current = sqlx::query(
+        "SELECT password_hash, (activated_at IS NOT NULL) AS activated FROM users WHERE id = $1::uuid FOR UPDATE",
+    )
+    .bind(user_id.to_string())
+    .fetch_optional(&mut *transaction)
+    .await;
+    let Ok(Some(current)) = current else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let current_hash = current.get::<Vec<u8>, _>("password_hash");
+    if current_hash != hash.as_bytes() || !current.get::<bool, _>("activated") {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Ok(token) = session::create_with_lifetime_in_transaction(
+        &mut transaction,
+        user_id,
+        state.clock.now(),
+        lifetime,
+    )
+    .await
     else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    if transaction.commit().await.is_err() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     session_cookie_response(
         StatusCode::NO_CONTENT,
         Some(&token),
@@ -303,7 +359,10 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl I
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
     match session::revoke(pool, &token).await {
-        Ok(()) => session_cookie_response(StatusCode::NO_CONTENT, None, state.cookie_secure, 0),
+        Ok(()) => {
+            state.notifications.revoke_session(&token);
+            session_cookie_response(StatusCode::NO_CONTENT, None, state.cookie_secure, 0)
+        }
         Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
@@ -374,9 +433,6 @@ pub async fn change_password(
     if request.current_password == request.new_password {
         return StatusCode::BAD_REQUEST;
     }
-    let Ok(new_hash) = password::hash(&request.new_password) else {
-        return StatusCode::BAD_REQUEST;
-    };
     let stored =
         sqlx::query_scalar::<_, Vec<u8>>("SELECT password_hash FROM users WHERE id = $1::uuid")
             .bind(user_id.to_string())
@@ -388,22 +444,53 @@ pub async fn change_password(
     let Ok(hash) = String::from_utf8(stored) else {
         return StatusCode::UNAUTHORIZED;
     };
-    if password::verify(&request.current_password, &hash).is_err() {
+    match password::verify_async(request.current_password.clone(), hash.clone()).await {
+        Ok(()) => {}
+        Err(password::PasswordError::Busy | password::PasswordError::Hashing) => {
+            return StatusCode::SERVICE_UNAVAILABLE;
+        }
+        Err(password::PasswordError::Invalid) => return StatusCode::UNAUTHORIZED,
+    }
+    let new_hash = match password::hash_async(request.new_password.clone()).await {
+        Ok(hash) => hash,
+        Err(error) => return password_hash_status(error),
+    };
+    let mut transaction = match pool.begin().await {
+        Ok(transaction) => transaction,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
+    };
+    let locked = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_hash FROM users WHERE id = $1::uuid FOR UPDATE",
+    )
+    .bind(user_id.to_string())
+    .fetch_optional(&mut *transaction)
+    .await;
+    let Ok(Some(locked)) = locked else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    if locked != hash.as_bytes() {
         return StatusCode::UNAUTHORIZED;
     }
     if sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2::uuid")
         .bind(new_hash.as_bytes())
         .bind(user_id.to_string())
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .is_err()
     {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
-    match session::revoke_others(pool, user_id, &token).await {
-        Ok(()) => StatusCode::NO_CONTENT,
-        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    if session::revoke_others_in_transaction(&mut transaction, user_id, &token)
+        .await
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE;
     }
+    if transaction.commit().await.is_err() {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+    state.notifications.revoke_user_except(user_id, &token);
+    StatusCode::NO_CONTENT
 }
 
 pub async fn revoke_other_sessions(
@@ -423,7 +510,10 @@ pub async fn revoke_other_sessions(
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
     };
     match session::revoke_others(pool, user_id, &token).await {
-        Ok(()) => StatusCode::NO_CONTENT,
+        Ok(()) => {
+            state.notifications.revoke_user_except(user_id, &token);
+            StatusCode::NO_CONTENT
+        }
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
@@ -449,8 +539,11 @@ pub async fn revoke_session(
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
     };
     match session::revoke_id(pool, user_id, session_id).await {
-        Ok(true) => StatusCode::NO_CONTENT,
-        Ok(false) => StatusCode::NOT_FOUND,
+        Ok(Some(token_hash)) => {
+            state.notifications.revoke_token_hash(token_hash);
+            StatusCode::NO_CONTENT
+        }
+        Ok(None) => StatusCode::NOT_FOUND,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
@@ -483,11 +576,18 @@ pub async fn delete_account(
     let Ok(hash) = String::from_utf8(stored) else {
         return StatusCode::UNAUTHORIZED;
     };
-    if password::verify(&request.password, &hash).is_err() {
-        return StatusCode::UNAUTHORIZED;
+    match password::verify_async(request.password.clone(), hash).await {
+        Ok(()) => {}
+        Err(password::PasswordError::Busy | password::PasswordError::Hashing) => {
+            return StatusCode::SERVICE_UNAVAILABLE;
+        }
+        Err(password::PasswordError::Invalid) => return StatusCode::UNAUTHORIZED,
     }
     match session::delete_account(pool, user_id).await {
-        Ok(()) => StatusCode::NO_CONTENT,
+        Ok(()) => {
+            state.notifications.revoke_user(user_id);
+            StatusCode::NO_CONTENT
+        }
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
