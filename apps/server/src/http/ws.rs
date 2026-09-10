@@ -21,7 +21,6 @@ use uuid::Uuid;
 
 use crate::{AppState, auth::session, http::vaults, sync::pull};
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_CONNECTIONS: usize = 128;
 const MAX_CONNECTIONS_PER_USER: usize = 8;
 const NOTIFICATION_BUFFER: usize = 64;
@@ -180,13 +179,10 @@ pub async fn connect(
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, StatusCode> {
-    // This endpoint is used by browsers, which always send Origin during the
-    // WebSocket handshake. Require it instead of treating an omitted value as
-    // a native-client compatibility case; desktop synchronization uses HTTP.
-    if !headers
+    if let Some(origin) = headers
         .get(axum::http::header::ORIGIN)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|origin| crate::http::security::origin_allowed(&state.allowed_origins, origin))
+        && !crate::http::security::origin_allowed(&state.allowed_origins, origin)
     {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -214,6 +210,7 @@ pub async fn connect(
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let token_for_socket = token.clone();
     let clock = state.clock.clone();
+    let heartbeat_interval = state.websocket_heartbeat_interval;
     Ok(websocket
         .max_message_size(4 * 1024)
         .max_frame_size(4 * 1024)
@@ -225,6 +222,7 @@ pub async fn connect(
                 user_id,
                 token_for_socket,
                 clock,
+                heartbeat_interval,
                 notifications,
                 revocations,
                 guard,
@@ -240,18 +238,23 @@ async fn serve(
     user_id: Uuid,
     token: session::SessionToken,
     clock: Arc<dyn session::Clock>,
+    heartbeat_interval: Duration,
     mut notifications: broadcast::Receiver<RevisionNotice>,
     mut revocations: broadcast::Receiver<Vec<u8>>,
     _guard: ConnectionGuard,
 ) {
     let token_hash = token.hash();
-    let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+    let mut heartbeat = tokio::time::interval(heartbeat_interval);
     heartbeat.tick().await;
     loop {
         tokio::select! {
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
                 Some(Ok(Message::Ping(payload))) => {
+                    if !session_and_membership_active(&pool, &token, &clock, user_id, vault_id).await {
+                        let _ = socket.send(Message::Close(None)).await;
+                        return;
+                    }
                     if socket.send(Message::Pong(payload)).await.is_err() {
                         return;
                     }
@@ -261,38 +264,46 @@ async fn serve(
             notice = notifications.recv() => match notice {
                 Ok(notice) => {
                     if !session_and_membership_active(&pool, &token, &clock, user_id, vault_id).await {
+                        let _ = socket.send(Message::Close(None)).await;
                         return;
                     }
                     if notice.vault_id != vault_id {
                         continue;
                     }
                     let Ok(cursor) = pull::issue_cursor(&pool, vault_id, user_id, notice.revision).await else {
+                        let _ = socket.send(Message::Close(None)).await;
                         return;
                     };
                     let Ok(signal) = serde_json::to_string(&WakeSignal {
                         vault_id: vault_id.to_string(),
                         cursor: cursor.as_str().to_owned(),
                     }) else {
+                        let _ = socket.send(Message::Close(None)).await;
                         return;
                     };
                     if socket.send(Message::Text(signal.into())).await.is_err() {
                         return;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) | Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Lagged(_)) | Err(broadcast::error::RecvError::Closed) => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
             },
             revoked = revocations.recv() => match revoked {
-                Ok(hash) if hash == token_hash => return,
-                Ok(_) => {}
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if !session_and_membership_active(&pool, &token, &clock, user_id, vault_id).await {
-                        return;
-                    }
+                Ok(hash) if hash == token_hash => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
                 }
-                Err(broadcast::error::RecvError::Closed) => return,
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(_)) | Err(broadcast::error::RecvError::Closed) => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
             },
             _ = heartbeat.tick() => {
                 if !session_and_membership_active(&pool, &token, &clock, user_id, vault_id).await {
+                    let _ = socket.send(Message::Close(None)).await;
                     return;
                 }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() {

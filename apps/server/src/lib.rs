@@ -11,6 +11,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 
 use axum::{
@@ -103,6 +104,7 @@ pub struct AppState {
     pub(crate) mailer: Arc<dyn auth::mail::Mailer>,
     pub(crate) public_origin: String,
     pub(crate) notifications: http::ws::NotificationHub,
+    pub(crate) websocket_heartbeat_interval: Duration,
 }
 
 pub fn router(pool: Option<PgPool>) -> Router {
@@ -110,6 +112,19 @@ pub fn router(pool: Option<PgPool>) -> Router {
         pool,
         Arc::new(auth::session::SystemClock),
         default_blob_store(),
+    )
+}
+
+/// Builds a router with a test-only WebSocket heartbeat cadence.
+pub fn router_with_websocket_heartbeat(
+    pool: Option<PgPool>,
+    websocket_heartbeat_interval: Duration,
+) -> Router {
+    router_with_clock_and_blob_store_and_heartbeat(
+        pool,
+        Arc::new(auth::session::SystemClock),
+        default_blob_store(),
+        websocket_heartbeat_interval,
     )
 }
 
@@ -133,25 +148,37 @@ fn router_with_clock_and_blob_store(
     clock: Arc<dyn auth::session::Clock>,
     blob_store: Option<Arc<dyn blob::BlobStore>>,
 ) -> Router {
-    router_with_settings(RouterSettings {
-        allow_public_signup: matches!(
-            std::env::var("SYNAPSE_ALLOW_PUBLIC_SIGNUP").as_deref(),
-            Ok("true")
-        ),
-        blob_store,
-        clock,
-        cookie_secure: !matches!(
-            std::env::var("SYNAPSE_COOKIE_SECURE").as_deref(),
-            Ok("false")
-        ),
-        csrf_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
-            .unwrap_or_else(|_| "https://synapse.local".to_owned()),
-        enable_hsts: http::security::is_production(),
-        mailer: auth::mail::mailer_from_env(),
-        pool,
-        public_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
-            .unwrap_or_else(|_| "https://synapse.local".to_owned()),
-    })
+    router_with_clock_and_blob_store_and_heartbeat(pool, clock, blob_store, Duration::from_secs(30))
+}
+
+fn router_with_clock_and_blob_store_and_heartbeat(
+    pool: Option<PgPool>,
+    clock: Arc<dyn auth::session::Clock>,
+    blob_store: Option<Arc<dyn blob::BlobStore>>,
+    websocket_heartbeat_interval: Duration,
+) -> Router {
+    router_with_settings_and_heartbeat(
+        RouterSettings {
+            allow_public_signup: matches!(
+                std::env::var("SYNAPSE_ALLOW_PUBLIC_SIGNUP").as_deref(),
+                Ok("true")
+            ),
+            blob_store,
+            clock,
+            cookie_secure: !matches!(
+                std::env::var("SYNAPSE_COOKIE_SECURE").as_deref(),
+                Ok("false")
+            ),
+            csrf_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
+                .unwrap_or_else(|_| "https://synapse.local".to_owned()),
+            enable_hsts: http::security::is_production(),
+            mailer: auth::mail::mailer_from_env(),
+            pool,
+            public_origin: std::env::var("SYNAPSE_ALLOWED_ORIGIN")
+                .unwrap_or_else(|_| "https://synapse.local".to_owned()),
+        },
+        websocket_heartbeat_interval,
+    )
 }
 
 pub struct RouterSettings {
@@ -167,6 +194,13 @@ pub struct RouterSettings {
 }
 
 pub fn router_with_settings(settings: RouterSettings) -> Router {
+    router_with_settings_and_heartbeat(settings, Duration::from_secs(30))
+}
+
+fn router_with_settings_and_heartbeat(
+    settings: RouterSettings,
+    websocket_heartbeat_interval: Duration,
+) -> Router {
     let allowed_origins =
         Arc::from(http::security::expand_allowed_origins(&settings.csrf_origin).into_boxed_slice());
     let state = AppState {
@@ -180,6 +214,7 @@ pub fn router_with_settings(settings: RouterSettings) -> Router {
         mailer: settings.mailer,
         public_origin: settings.public_origin,
         notifications: http::ws::NotificationHub::new(),
+        websocket_heartbeat_interval,
     };
 
     let trusted_proxies = configured_trusted_proxies();
