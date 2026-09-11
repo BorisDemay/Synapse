@@ -173,11 +173,27 @@ function visibleNodesInRange(start: number, end: number): VisibleTreeNode[] {
   return result;
 }
 
+function findVisibleNodeIndex(id: string): number {
+  let index = 0;
+
+  function visit(nodes: VaultTreeNode[]): number | undefined {
+    for (const node of nodes) {
+      if (node.id === id) return index;
+      index++;
+      if (hasExpandedChildren(node)) {
+        const childIndex = visit(node.children);
+        if (childIndex !== undefined) return childIndex;
+      }
+    }
+    return undefined;
+  }
+
+  return visit(props.nodes) ?? -1;
+}
+
 const activeIndex = computed(() => {
   if (!activeId.value) return 0;
-  const index = visibleNodesInRange(0, visibleNodeCount.value).findIndex(
-    (entry) => entry.node.id === activeId.value,
-  );
+  const index = findVisibleNodeIndex(activeId.value);
   return index === -1 ? 0 : index;
 });
 

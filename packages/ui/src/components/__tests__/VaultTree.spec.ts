@@ -43,6 +43,36 @@ describe("VaultTree", () => {
     expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(80);
   });
 
+  it("sélectionne une feuille virtualisée sans lire les branches hors fenêtre", async () => {
+    const nestedNodes = Array.from({ length: 100 }, (_, folderIndex) => ({
+      children: Array.from({ length: 100 }, (_, noteIndex) => ({
+        id: `folder-${folderIndex}/note-${noteIndex}`,
+        kind: "note" as const,
+        label: `Note ${folderIndex}-${noteIndex}`,
+      })),
+      id: `folder:${folderIndex}`,
+      kind: "folder" as const,
+      label: `Dossier ${folderIndex}`,
+    }));
+    let offscreenBranchReads = 0;
+    const offscreenChildren = nestedNodes[99].children;
+    Object.defineProperty(nestedNodes[99], "children", {
+      get() {
+        offscreenBranchReads++;
+        return offscreenChildren;
+      },
+    });
+    const wrapper = mount(VaultTree, { props: { nodes: nestedNodes } });
+
+    offscreenBranchReads = 0;
+    await wrapper.get('[data-tree-index="1"]').trigger("click");
+
+    expect(
+      wrapper.get('[data-tree-index="1"]').attributes("aria-selected"),
+    ).toBe("true");
+    expect(offscreenBranchReads).toBe(0);
+  });
+
   it("replie un dossier sans matérialiser ses descendants", async () => {
     const wrapper = mount(VaultTree, {
       props: {
