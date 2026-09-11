@@ -8,7 +8,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::{
@@ -57,7 +57,35 @@ pub struct DeleteAccountRequest {
 
 #[derive(Serialize)]
 pub struct SessionResponse {
+    email: String,
+    is_admin: bool,
     user_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvitationRequest {
+    email: String,
+}
+
+#[derive(Serialize)]
+pub struct UserListItem {
+    created_at: String,
+    email: String,
+    is_admin: bool,
+    activated: bool,
+}
+
+#[derive(Serialize)]
+pub struct UserListResponse {
+    users: Vec<UserListItem>,
+}
+
+#[derive(Serialize)]
+pub struct InvitationResponse {
+    email: String,
+    expires_at: String,
+    token: String,
 }
 
 #[derive(Serialize)]
@@ -377,9 +405,92 @@ pub async fn session_info(
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
+    let account = sqlx::query("SELECT email, is_admin FROM users WHERE id = $1::uuid")
+        .bind(user_id.to_string())
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     Ok(Json(SessionResponse {
+        email: account.get("email"),
+        is_admin: account.get("is_admin"),
         user_id: user_id.to_string(),
     }))
+}
+
+async fn authenticated_admin(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<(PgPool, Uuid), StatusCode> {
+    let (pool, token) = authenticated_user(headers, state)?;
+    let user_id = session::user_for(pool, &token, state.clock.now())
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let is_admin = sqlx::query_scalar::<_, bool>("SELECT is_admin FROM users WHERE id = $1::uuid")
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    if !is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok((pool.clone(), user_id))
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<UserListResponse>, StatusCode> {
+    let (pool, _) = authenticated_admin(&headers, &state).await?;
+    let users = sqlx::query(
+        "SELECT email, is_admin, (activated_at IS NOT NULL) AS activated, created_at::text AS created_at FROM users ORDER BY created_at ASC, email ASC",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    Ok(Json(UserListResponse {
+        users: users
+            .into_iter()
+            .map(|user| UserListItem {
+                created_at: user.get("created_at"),
+                email: user.get("email"),
+                is_admin: user.get("is_admin"),
+                activated: user.get("activated"),
+            })
+            .collect(),
+    }))
+}
+
+pub async fn create_invitation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<InvitationRequest>,
+) -> Result<(StatusCode, Json<InvitationResponse>), StatusCode> {
+    if !csrf_origin_allowed(&headers, &state.allowed_origins) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let (pool, _) = authenticated_admin(&headers, &state).await?;
+    let email = normalized_email(&request.email).ok_or(StatusCode::BAD_REQUEST)?;
+    let token = random_token();
+    let expires_at = sqlx::query_scalar::<_, String>(
+        "INSERT INTO invites (id, email, token_hash, expires_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours') RETURNING expires_at::text",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&email)
+    .bind(opaque_hash(&token))
+    .fetch_one(&pool)
+    .await
+    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(InvitationResponse {
+            email,
+            expires_at,
+            token,
+        }),
+    ))
 }
 
 pub async fn list_sessions(

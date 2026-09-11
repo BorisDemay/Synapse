@@ -51,6 +51,54 @@ describe("auth store", () => {
     expect(auth.userId).toBe("0198e5de-1111-7222-8333-444455556666");
   });
 
+  it("restores the account role without persisting it or any session secret", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          email: "admin@example.test",
+          is_admin: true,
+          user_id: "0198e5de-1111-7222-8333-444455556666",
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      ),
+    );
+
+    const auth = useAuthStore();
+    await expect(auth.restoreSession()).resolves.toBe(true);
+
+    expect(auth.email).toBe("admin@example.test");
+    expect(auth.isAdmin).toBe(true);
+    expect(JSON.stringify(auth.$state)).not.toContain("session=");
+  });
+
+  it("creates an invitation with the browser origin and keeps the token transient", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          email: "invitee@example.test",
+          expires_at: "2026-09-12T00:00:00+00:00",
+          token: "one-time-invitation-token",
+        }),
+        { headers: { "content-type": "application/json" }, status: 201 },
+      ),
+    );
+
+    const invitation = await useAuthStore().createInvitation(
+      "invitee@example.test",
+    );
+
+    expect(fetch).toHaveBeenCalledWith("/auth/invitations", {
+      body: JSON.stringify({ email: "invitee@example.test" }),
+      credentials: "include",
+      headers: {
+        Origin: "https://synapse.local",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    expect(invitation.token).toBe("one-time-invitation-token");
+  });
+
   it("asks the server to remember this device without storing secrets", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(null, { status: 204 }))

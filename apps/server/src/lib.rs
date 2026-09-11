@@ -252,6 +252,8 @@ fn router_with_settings_and_heartbeat(
         .route("/metrics", get(metrics::render))
         .route("/auth/logout", post(http::auth::logout))
         .route("/auth/sessions", get(http::auth::list_sessions))
+        .route("/auth/users", get(http::auth::list_users))
+        .route("/auth/invitations", post(http::auth::create_invitation))
         .route(
             "/auth/sessions/revoke-others",
             post(http::auth::revoke_other_sessions),

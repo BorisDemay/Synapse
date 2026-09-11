@@ -64,7 +64,10 @@ export { isNewNoteDraft, NEW_NOTE_DRAFT } from "./vault/draft";
 export type { TreeSource } from "./vault/tree";
 export { renderTemplate } from "./vault/templates";
 export type { TemplateContext } from "./vault/templates";
-export type { SettingsSession } from "./components/SettingsPanel.vue";
+export type {
+  SettingsSession,
+  SettingsUser,
+} from "./components/SettingsPanel.vue";
 export type { VaultTreeNode } from "./components/VaultTree.vue";
 export { installSynapseUi } from "./plugin";
 export { initializeTheme, resetThemeState, useTheme } from "./theme";

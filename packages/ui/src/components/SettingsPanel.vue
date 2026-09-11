@@ -15,7 +15,19 @@ export interface SettingsSession {
   id: string;
 }
 
-type SettingsCategoryId = "appearance" | "vault" | "device" | "account";
+export interface SettingsUser {
+  activated: boolean;
+  createdAt: string;
+  email: string;
+  isAdmin: boolean;
+}
+
+type SettingsCategoryId =
+  | "appearance"
+  | "vault"
+  | "device"
+  | "account"
+  | "users";
 
 interface SettingsCategory {
   id: SettingsCategoryId;
@@ -25,6 +37,7 @@ interface SettingsCategory {
 const props = withDefaults(
   defineProps<{
     accountEmail?: string;
+    admin?: boolean;
     deviceSupported: boolean;
     deviceTrusted: boolean;
     errorMessage?: string;
@@ -32,6 +45,8 @@ const props = withDefaults(
     offline?: boolean;
     open: boolean;
     sessions?: SettingsSession[];
+    users?: SettingsUser[];
+    invitationLink?: string;
     statusMessage?: string;
     templatesPath?: string;
   }>(),
@@ -41,6 +56,8 @@ const props = withDefaults(
     exportSupported: true,
     offline: false,
     sessions: () => [],
+    users: () => [],
+    invitationLink: "",
     statusMessage: "",
     templatesPath: "Templates",
   },
@@ -58,6 +75,7 @@ const emit = defineEmits<{
   revokeOtherSessions: [];
   revokeSession: [id: string];
   saveVaultPreferences: [templatesPath: string];
+  createInvitation: [email: string];
 }>();
 
 const currentPassword = ref("");
@@ -70,6 +88,7 @@ const deletePassword = ref("");
 const deleteConfirmation = ref("");
 const formError = ref("");
 const templatesPath = ref(props.templatesPath);
+const invitationEmail = ref("");
 
 const { preference, setPreference } = useTheme();
 const { collapsed, compact, setCollapsed, setCompact } = useSidebarLayout();
@@ -103,6 +122,9 @@ const categories = computed<SettingsCategory[]>(() => {
   }
   if (!props.offline) {
     items.push({ id: "account", label: "Compte" });
+  }
+  if (props.admin && !props.offline) {
+    items.push({ id: "users", label: "Utilisateurs" });
   }
   return items;
 });
@@ -190,6 +212,21 @@ function submitVaultPreferences() {
     return;
   }
   emit("saveVaultPreferences", templatesPath.value.trim());
+}
+
+function submitInvitation() {
+  const email = invitationEmail.value.trim();
+  if (!email) {
+    formError.value = "L’adresse e-mail est requise.";
+    return;
+  }
+  formError.value = "";
+  emit("createInvitation", email);
+  invitationEmail.value = "";
+}
+
+function selectInvitationLink(event: Event) {
+  (event.target as HTMLInputElement).select();
 }
 </script>
 
@@ -644,6 +681,74 @@ function submitVaultPreferences() {
               </form>
             </section>
           </template>
+
+          <section
+            v-if="activeCategory === 'users' && admin && !offline"
+            class="settings-section"
+            aria-labelledby="settings-users"
+          >
+            <h3 id="settings-users" class="settings-section-title">
+              Utilisateurs
+            </h3>
+            <p>
+              Seuls les administrateurs peuvent voir cette section et créer des
+              invitations. Les liens expirent après 24 heures.
+            </p>
+            <form
+              class="settings-form"
+              data-form="user-invitation"
+              @submit.prevent="submitInvitation"
+            >
+              <label class="settings-field">
+                Adresse e-mail à inviter
+                <input
+                  v-model="invitationEmail"
+                  name="invitation-email"
+                  type="email"
+                  autocomplete="email"
+                  required
+                />
+              </label>
+              <button class="settings-action" type="submit">
+                Générer un lien d’invitation
+              </button>
+            </form>
+            <div
+              v-if="invitationLink"
+              class="settings-invitation"
+              role="status"
+            >
+              <label class="settings-field">
+                Lien à transmettre
+                <input
+                  :value="invitationLink"
+                  readonly
+                  type="text"
+                  @focus="selectInvitationLink"
+                />
+              </label>
+              <p>
+                Ce lien contient le jeton secret. Il ne sera plus affiché après
+                fermeture des paramètres.
+              </p>
+            </div>
+            <ul
+              class="settings-sessions"
+              aria-label="Utilisateurs de l’instance"
+            >
+              <li v-for="user in users" :key="user.email">
+                <div>
+                  <strong>{{ user.email }}</strong>
+                  <span
+                    >{{ user.isAdmin ? "Administrateur" : "Utilisateur" }} ·
+                    {{
+                      user.activated ? "Activé" : "En attente d’activation"
+                    }}</span
+                  >
+                </div>
+              </li>
+            </ul>
+          </section>
         </div>
       </div>
     </section>

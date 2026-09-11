@@ -34,6 +34,7 @@ import {
   type PaletteCommand,
   type QueryNote,
   type SettingsSession,
+  type SettingsUser,
   type VaultTreeNode,
 } from "@synapse/ui";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -85,6 +86,8 @@ const settingsError = ref("");
 const settingsStatus = ref("");
 const accountEmail = ref("");
 const sessions = ref<SettingsSession[]>([]);
+const users = ref<SettingsUser[]>([]);
+const invitationLink = ref("");
 const importInput = ref<HTMLInputElement>();
 const importFolderInput = ref<HTMLInputElement>();
 const importPlan = ref<MarkdownImportPlan | null>(null);
@@ -574,8 +577,22 @@ async function loadAccountSettings() {
     const listed = await auth.listSessions();
     accountEmail.value = listed.email;
     sessions.value = listed.sessions;
+    if (auth.isAdmin) users.value = await auth.listUsers();
   } catch {
     settingsError.value = "Impossible de charger les sessions.";
+  }
+}
+
+async function createInvitation(email: string) {
+  settingsError.value = "";
+  settingsStatus.value = "";
+  try {
+    const invitation = await auth.createInvitation(email);
+    invitationLink.value = `${window.location.origin}/register?invitation=${encodeURIComponent(invitation.token)}`;
+    settingsStatus.value = `Invitation créée pour ${invitation.email}.`;
+    users.value = await auth.listUsers();
+  } catch {
+    settingsError.value = "Impossible de créer l’invitation.";
   }
 }
 
@@ -943,6 +960,7 @@ watch(
 
 watch(settingsOpen, (open) => {
   if (!open) {
+    invitationLink.value = "";
     return;
   }
   settingsStatus.value = "";
@@ -1328,6 +1346,7 @@ watch(settingsOpen, (open) => {
   </AppShell>
   <LocalFolderPanel />
   <SettingsPanel
+    :admin="auth.isAdmin"
     :account-email="accountEmail"
     :device-supported="deviceSupported"
     :device-trusted="deviceTrusted"
@@ -1335,11 +1354,14 @@ watch(settingsOpen, (open) => {
     :offline="auth.isOfflineSession || auth.isLocalMode"
     :open="settingsOpen"
     :sessions="sessions"
+    :users="users"
+    :invitation-link="invitationLink"
     :status-message="settingsStatus"
     :templates-path="vault.preferences.templatesPath"
     @change-passphrase="changePassphrase"
     @change-password="changePassword"
     @close="settingsOpen = false"
+    @create-invitation="createInvitation"
     @delete-account="deleteAccount"
     @export-notes="exportNotes"
     @forget-device="forgetDevice"

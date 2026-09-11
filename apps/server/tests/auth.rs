@@ -684,7 +684,7 @@ async fn signup_login_session_revocation_expiration_and_csrf_are_enforced() {
 }
 
 #[tokio::test]
-async fn authenticated_session_introspection_returns_only_its_opaque_user_id() {
+async fn authenticated_session_introspection_returns_account_role_without_secrets() {
     let _guard = auth_test_lock().await;
     let pool = test_pool().await;
     reset_auth_tables(&pool).await;
@@ -723,7 +723,7 @@ async fn authenticated_session_introspection_returns_only_its_opaque_user_id() {
             .await
             .expect("body is readable")
             .to_bytes(),
-        format!(r#"{{"user_id":"{user_id}"}}"#)
+        format!(r#"{{"email":"session@example.test","is_admin":false,"user_id":"{user_id}"}}"#)
     );
     assert_eq!(
         app.oneshot(
@@ -736,6 +736,143 @@ async fn authenticated_session_introspection_returns_only_its_opaque_user_id() {
         .expect("response")
         .status(),
         StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn only_admins_can_list_users_and_create_email_bound_invitations() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let admin_id = Uuid::new_v4();
+    let member_id = Uuid::new_v4();
+    for (id, email, is_admin) in [
+        (admin_id, "admin@example.test", true),
+        (member_id, "member@example.test", false),
+    ] {
+        sqlx::query(
+            "INSERT INTO users (id, email, password_hash, is_admin, activated_at) VALUES ($1::uuid, $2, $3, $4, CURRENT_TIMESTAMP)",
+        )
+        .bind(id.to_string())
+        .bind(email)
+        .bind(b"not-used-by-this-test".as_slice())
+        .bind(is_admin)
+        .execute(&pool)
+        .await
+        .expect("user is stored");
+    }
+    let admin_session = synapse_server::auth::session::create(&pool, admin_id, SystemTime::now())
+        .await
+        .expect("admin session is created");
+    let member_session = synapse_server::auth::session::create(&pool, member_id, SystemTime::now())
+        .await
+        .expect("member session is created");
+    let app = synapse_server::router_with_settings(test_settings(
+        Some(pool.clone()),
+        Arc::new(RecordingMailer::default()),
+    ));
+
+    let users = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/users")
+                .header(
+                    header::COOKIE,
+                    format!("session={}", admin_session.cookie_value()),
+                )
+                .body(Body::empty())
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(users.status(), StatusCode::OK);
+    let users_body: serde_json::Value = serde_json::from_slice(
+        &users
+            .into_body()
+            .collect()
+            .await
+            .expect("body is readable")
+            .to_bytes(),
+    )
+    .expect("users are json");
+    assert_eq!(users_body["users"].as_array().unwrap().len(), 2);
+
+    let forbidden = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/users")
+                .header(
+                    header::COOKIE,
+                    format!("session={}", member_session.cookie_value()),
+                )
+                .body(Body::empty())
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    let no_csrf = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/invitations")
+                .header("content-type", "application/json")
+                .header(
+                    header::COOKIE,
+                    format!("session={}", admin_session.cookie_value()),
+                )
+                .body(Body::from(r#"{"email":"demayboris@gmail.com"}"#))
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(no_csrf.status(), StatusCode::FORBIDDEN);
+
+    let created = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/invitations")
+                .header("content-type", "application/json")
+                .header(header::ORIGIN, "https://synapse.local")
+                .header(
+                    header::COOKIE,
+                    format!("session={}", admin_session.cookie_value()),
+                )
+                .body(Body::from(r#"{"email":"demayboris@gmail.com"}"#))
+                .expect("request is valid"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let invitation: serde_json::Value = serde_json::from_slice(
+        &created
+            .into_body()
+            .collect()
+            .await
+            .expect("body is readable")
+            .to_bytes(),
+    )
+    .expect("invitation is json");
+    let token = invitation["token"].as_str().expect("token is returned");
+    assert!(!token.is_empty());
+    assert_ne!(
+        sqlx::query_scalar::<_, Vec<u8>>("SELECT token_hash FROM invites")
+            .fetch_one(&pool)
+            .await
+            .expect("invitation hash"),
+        token.as_bytes()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT email FROM invites")
+            .fetch_one(&pool)
+            .await
+            .expect("invitation email"),
+        "demayboris@gmail.com"
     );
 }
 

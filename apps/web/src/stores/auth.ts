@@ -34,6 +34,19 @@ export interface AuthSession {
   id: string;
 }
 
+export interface ManagedUser {
+  activated: boolean;
+  createdAt: string;
+  email: string;
+  isAdmin: boolean;
+}
+
+export interface Invitation {
+  email: string;
+  expiresAt: string;
+  token: string;
+}
+
 function csrfHeaders(): HeadersInit {
   return {
     Origin: window.location.origin,
@@ -54,6 +67,7 @@ export const useAuthStore = defineStore("auth", {
     isOfflineSession: false,
     userId: null as string | null,
     email: null as string | null,
+    isAdmin: false,
     storageHealth: null as BrowserStorageHealth | null,
   }),
   actions: {
@@ -64,6 +78,7 @@ export const useAuthStore = defineStore("auth", {
       this.isOfflineSession = true;
       this.userId = "local-device";
       this.email = null;
+      this.isAdmin = false;
       this.storageHealth = null;
       await clearRememberedSession();
       await rememberSessionUser("local-device");
@@ -83,13 +98,20 @@ export const useAuthStore = defineStore("auth", {
           this.isOfflineSession = false;
           this.userId = null;
           this.email = null;
+          this.isAdmin = false;
           this.storageHealth = null;
           return false;
         }
-        const body = (await response.json()) as { user_id: string };
+        const body = (await response.json()) as {
+          email?: string;
+          is_admin?: boolean;
+          user_id: string;
+        };
         this.isAuthenticated = true;
         this.isOfflineSession = false;
         this.userId = body.user_id;
+        this.email = body.email ?? null;
+        this.isAdmin = body.is_admin === true;
         await rememberSessionUser(body.user_id);
         return true;
       } catch {
@@ -99,6 +121,7 @@ export const useAuthStore = defineStore("auth", {
           this.isOfflineSession = false;
           this.userId = null;
           this.email = null;
+          this.isAdmin = false;
           this.storageHealth = null;
           return false;
         }
@@ -106,6 +129,7 @@ export const useAuthStore = defineStore("auth", {
         this.isOfflineSession = true;
         this.userId = remembered;
         this.email = null;
+        this.isAdmin = false;
         return true;
       }
     },
@@ -202,6 +226,7 @@ export const useAuthStore = defineStore("auth", {
       this.isOfflineSession = false;
       this.userId = null;
       this.email = null;
+      this.isAdmin = false;
       this.storageHealth = null;
       if (userId) await clearUserUnlockMaterial(userId);
       await clearRememberedSession();
@@ -261,6 +286,63 @@ export const useAuthStore = defineStore("auth", {
       });
       return { email, sessions };
     },
+    async listUsers(): Promise<ManagedUser[]> {
+      const response = await fetch("/auth/users", { credentials: "include" });
+      if (!response.ok) throw new Error("Unable to list users");
+      const body = (await response.json()) as { users?: unknown };
+      if (!Array.isArray(body.users)) throw new Error("Invalid users response");
+      return body.users.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const user = value as {
+          activated?: unknown;
+          created_at?: unknown;
+          email?: unknown;
+          is_admin?: unknown;
+        };
+        if (
+          typeof user.activated !== "boolean" ||
+          typeof user.created_at !== "string" ||
+          typeof user.email !== "string" ||
+          typeof user.is_admin !== "boolean"
+        ) {
+          return [];
+        }
+        return [
+          {
+            activated: user.activated,
+            createdAt: user.created_at,
+            email: user.email,
+            isAdmin: user.is_admin,
+          },
+        ];
+      });
+    },
+    async createInvitation(email: string): Promise<Invitation> {
+      const response = await fetch("/auth/invitations", {
+        body: JSON.stringify({ email }),
+        credentials: "include",
+        headers: jsonCsrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Unable to create invitation");
+      const body = (await response.json()) as {
+        email?: unknown;
+        expires_at?: unknown;
+        token?: unknown;
+      };
+      if (
+        typeof body.email !== "string" ||
+        typeof body.expires_at !== "string" ||
+        typeof body.token !== "string"
+      ) {
+        throw new Error("Invalid invitation response");
+      }
+      return {
+        email: body.email,
+        expiresAt: body.expires_at,
+        token: body.token,
+      };
+    },
     async revokeSession(sessionId: string) {
       const response = await fetch(`/auth/sessions/${sessionId}/revoke`, {
         credentials: "include",
@@ -297,6 +379,7 @@ export const useAuthStore = defineStore("auth", {
       this.isOfflineSession = false;
       this.userId = null;
       this.email = null;
+      this.isAdmin = false;
       this.storageHealth = null;
       await clearRememberedSession();
     },
