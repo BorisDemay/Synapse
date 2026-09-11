@@ -107,7 +107,10 @@ test("publishes the deployment archive for pull-based instance updaters", async 
     readFile(".github/workflows/main-release.yml", "utf8"),
     readFile("infra/scripts/update-instance.sh", "utf8"),
   ]);
-  assert.match(workflow, /tar -C payload -czf "synapse-\$SYNAPSE_VERSION\.tar\.gz"/u);
+  assert.match(
+    workflow,
+    /tar -C payload -czf "synapse-\$SYNAPSE_VERSION\.tar\.gz"/u,
+  );
   assert.match(updater, /releases\/latest/u);
   assert.match(updater, /synapse-\$version\.tar\.gz/u);
   assert.match(updater, /SYNAPSE_DEPLOY_COMMAND/u);
