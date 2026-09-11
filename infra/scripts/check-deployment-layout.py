@@ -3,14 +3,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
-from pathlib import Path
 from typing import Any
-
-try:
-    import yaml
-except ImportError:  # pragma: no cover - depends on deployment host packaging
-    yaml = None
 
 
 class InvalidLayout(Exception):
@@ -35,13 +31,33 @@ def required_mounts(value: Any) -> list[Any]:
     return value
 
 
-def read_layout(path: str) -> dict[str, Any]:
-    if yaml is None:
-        raise InvalidLayout
+def render_layout(env_file: str, compose_file: str) -> dict[str, Any]:
     try:
-        with Path(path).open(encoding="utf-8") as compose_file:
-            document = yaml.safe_load(compose_file)
-    except (OSError, yaml.YAMLError, UnicodeError):
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                env_file,
+                "-f",
+                compose_file,
+                "config",
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=30,
+        )
+        document = json.loads(result.stdout)
+    except (
+        FileNotFoundError,
+        json.JSONDecodeError,
+        OSError,
+        subprocess.SubprocessError,
+        UnicodeError,
+    ):
         raise InvalidLayout from None
 
     compose = required_mapping(document)
@@ -60,13 +76,13 @@ def read_layout(path: str) -> dict[str, Any]:
 
 
 def main(arguments: list[str]) -> int:
-    if len(arguments) != 2:
+    if len(arguments) != 3:
         print("invalid deployment layout arguments", file=sys.stderr)
         return 2
 
     try:
-        current = read_layout(arguments[0])
-        candidate = read_layout(arguments[1])
+        current = render_layout(arguments[0], arguments[1])
+        candidate = render_layout(arguments[0], arguments[2])
     except InvalidLayout:
         print("invalid deployment layout", file=sys.stderr)
         return 1
