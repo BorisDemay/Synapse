@@ -327,7 +327,14 @@ try {
     const capabilities = new Capabilities();
     capabilities.set("browserName", "wry");
     capabilities.set("unhandledPromptBehavior", "accept");
-    capabilities.set("tauri:options", { application: binary });
+    capabilities.set("tauri:options", {
+      application: binary,
+      ...(process.platform === "win32"
+        ? {
+            webviewOptions: { userDataFolder: path.join(temporary, "webview") },
+          }
+        : {}),
+    });
     driver = await new Builder()
       .usingServer(`http://127.0.0.1:${webdriverPort}`)
       .withCapabilities(capabilities)
