@@ -76,16 +76,17 @@ export async function registerAndUnlock(
 }
 
 export async function writeAndSave(page: Page, text: string): Promise<void> {
+  // The accessible label also exists on the mount point while Vditor loads.
+  await expect(page.getByRole("textbox", { name: "Éditeur Markdown" })).toBeEditable();
   await page.getByRole("button", { name: "Texte brut", exact: true }).click();
-  const editor = page.getByLabel("Éditeur Markdown");
+  const editor = page.locator('.vditor-sv[contenteditable="true"]');
+  await expect(editor).toBeVisible();
+  // Paste source text through the editor's supported multiline input path.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((value) => navigator.clipboard.writeText(value), text);
   await editor.click();
   await page.keyboard.press("Control+A");
-  await page.keyboard.press("Backspace");
-  const lines = text.split("\n");
-  for (let index = 0; index < lines.length; index += 1) {
-    if (index) await page.keyboard.press("Enter");
-    await page.keyboard.type(lines[index]!);
-  }
+  await page.keyboard.press("Control+V");
   await expect
     .poll(() => persistedMarkdown(page, DEFAULT_PASSPHRASE), { timeout: 30000 })
     .toContain(text.trim());
