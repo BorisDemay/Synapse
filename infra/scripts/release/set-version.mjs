@@ -37,6 +37,9 @@ await writeFile(
   ),
 );
 const tauriPath = "apps/desktop/src-tauri/tauri.conf.json";
-const tauri = JSON.parse(await readFile(tauriPath, "utf8"));
-tauri.version = version;
-await writeFile(tauriPath, `${JSON.stringify(tauri, null, 2)}\n`);
+const tauri = await readFile(tauriPath, "utf8");
+// Preserve the checked-in formatting (notably compact arrays) for CI lint.
+await writeFile(
+  tauriPath,
+  tauri.replace(/("version"\s*:\s*")[^"]+"/u, `$1${version}"`),
+);
