@@ -219,7 +219,15 @@ const env = {
       }
     : {}),
 };
-let driverProcess, driver, backend, windowManager;
+let driverProcess, driver, backend, windowManager, windowsApp;
+function stopWindowsApp() {
+  if (!windowsApp?.pid) return;
+  spawnSync("taskkill", ["/PID", String(windowsApp.pid), "/T", "/F"], {
+    timeout: 10000,
+    stdio: "ignore",
+  });
+  windowsApp = undefined;
+}
 async function quitDriver() {
   if (!driver) return;
   await Promise.race([
@@ -229,8 +237,10 @@ async function quitDriver() {
     }),
   ]);
   driver = undefined;
+  stopWindowsApp();
 }
 async function stopDriverTree() {
+  stopWindowsApp();
   if (!driverProcess?.pid) return;
   if (process.platform === "win32")
     spawnSync("taskkill", ["/PID", String(driverProcess.pid), "/T", "/F"], {
@@ -317,24 +327,44 @@ try {
     if (resolved.status !== 0) throw new Error("WebKitWebDriver missing");
     args.push("--native-driver", resolved.stdout.trim());
   }
-  driverProcess = spawn("tauri-driver", args, {
-    env,
-    stdio: "inherit",
-    detached: process.platform !== "win32",
-  });
+  driverProcess = spawn(
+    process.platform === "win32" ? "msedgedriver" : "tauri-driver",
+    process.platform === "win32" ? [`--port=${webdriverPort}`] : args,
+    {
+      env,
+      stdio: "inherit",
+      detached: process.platform !== "win32",
+    },
+  );
   await waitForReady(driverProcess, `http://127.0.0.1:${webdriverPort}/status`);
   async function launch() {
     const capabilities = new Capabilities();
-    capabilities.set("browserName", "wry");
+    capabilities.set(
+      "browserName",
+      process.platform === "win32" ? "webview2" : "wry",
+    );
     capabilities.set("unhandledPromptBehavior", "accept");
-    capabilities.set("tauri:options", {
-      application: binary,
-      ...(process.platform === "win32"
-        ? {
-            webviewOptions: { userDataFolder: path.join(temporary, "webview") },
-          }
-        : {}),
-    });
+    if (process.platform === "win32") {
+      const debugPort = await availablePort();
+      windowsApp = spawn(binary, [], {
+        env: {
+          ...env,
+          WEBVIEW2_USER_DATA_FOLDER: path.join(temporary, "webview"),
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${debugPort} --remote-debugging-address=127.0.0.1`,
+        },
+        stdio: "inherit",
+      });
+      await waitForReady(
+        windowsApp,
+        `http://127.0.0.1:${debugPort}/json/version`,
+        60000,
+      );
+      capabilities.set("ms:edgeOptions", {
+        debuggerAddress: `127.0.0.1:${debugPort}`,
+      });
+    } else {
+      capabilities.set("tauri:options", { application: binary });
+    }
     driver = await new Builder()
       .usingServer(`http://127.0.0.1:${webdriverPort}`)
       .withCapabilities(capabilities)
@@ -555,12 +585,15 @@ try {
   const envelope = await (
     await api(`/v1/vaults/${vaultId}/envelope`, undefined, cookie)
   ).json();
-  const { parseWrappedVaultKey, unlockVaultKey, uuidV7 } =
-    await import("../../web/src/crypto/vault-key.ts");
-  const { encodeNotePlaintext } =
-    await import("../../web/src/crypto/vault-item.ts");
-  const { xchacha20poly1305 } =
-    await import("../../web/node_modules/@noble/ciphers/chacha.js");
+  const { parseWrappedVaultKey, unlockVaultKey, uuidV7 } = await import(
+    "../../web/src/crypto/vault-key.ts"
+  );
+  const { encodeNotePlaintext } = await import(
+    "../../web/src/crypto/vault-item.ts"
+  );
+  const { xchacha20poly1305 } = await import(
+    "../../web/node_modules/@noble/ciphers/chacha.js"
+  );
   const key = await unlockVaultKey(
     parseWrappedVaultKey(envelope.bytes),
     phrase,

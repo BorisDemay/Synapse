@@ -57,7 +57,6 @@ jobs:
       - run: node --test tests/release/*.test.mjs
 
   desktop:
-    needs: verify
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -90,6 +89,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Generate desktop icons
         run: pnpm --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg
+      - name: Validate signing credentials and configure bundler
+        run: node infra/scripts/release/prepare-updater.mjs
       - run: node infra/scripts/release/set-version.mjs "$SYNAPSE_VERSION"
         shell: bash
       - name: Import Authenticode certificate before bundling
@@ -198,7 +199,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [desktop, images]
+    needs: [verify, desktop, images]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -245,7 +246,7 @@ jobs:
           NAS_DEPLOY_USER: ${{ vars.NAS_DEPLOY_USER }}
         run: |
           tar -C payload -czf "synapse-$SYNAPSE_VERSION.tar.gz" .
-          scp "synapse-$SYNAPSE_VERSION.tar.gz" "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST:incoming/"
+          scp -O "synapse-$SYNAPSE_VERSION.tar.gz" "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST:incoming/"
           ssh "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST" synapse-deploy "$SYNAPSE_VERSION" "$SYNAPSE_COMMIT_SHA"
       - name: Create immutable GitHub release
         env:

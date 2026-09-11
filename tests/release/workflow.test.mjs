@@ -7,7 +7,7 @@ test("main release is serialized, parity gated, and deploys before publishing", 
   assert.match(workflow, /branches:\s*\[main\]/u);
   assert.match(workflow, /group:\s*synapse-stable-main/u);
   assert.match(workflow, /cancel-in-progress:\s*false/u);
-  assert.match(workflow, /needs:\s*\[desktop, images\]/u);
+  assert.match(workflow, /needs:\s*\[verify, desktop, images\]/u);
   assert.ok(
     workflow.indexOf("Deploy staged release") <
       workflow.indexOf("Create immutable GitHub release"),
