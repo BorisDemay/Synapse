@@ -26,10 +26,19 @@ fi
 }
 
 (cd "$STAGE" && sha256sum --check SHA256SUMS)
-node "$STAGE/validate-release.mjs" "$STAGE/release"
+if command -v node >/dev/null 2>&1; then
+  node "$STAGE/validate-release.mjs" "$STAGE/release"
+else
+  bash "$SYNAPSE_DEPLOY_ROOT/infra/scripts/release/validate-release.sh" "$STAGE/release"
+fi
+DEPLOY_COMPOSE="$STAGE/docker-compose.deploy.yml"
+sed -E \
+  -e "s#^([[:space:]]*image:[[:space:]]*synapse-server:).*#\\1$VERSION#" \
+  -e "s#^([[:space:]]*image:[[:space:]]*synapse-web:).*#\\1$VERSION#" \
+  "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml" > "$DEPLOY_COMPOSE"
 python3 "$SYNAPSE_DEPLOY_ROOT/infra/scripts/check-deployment-layout.py" \
   "$SYNAPSE_DEPLOY_ROOT/.env" \
-  "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml" "$STAGE/docker-compose.yml"
+  "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml" "$DEPLOY_COMPOSE"
 
 docker load --input "$STAGE/synapse-server-$VERSION.tar"
 docker load --input "$STAGE/synapse-web-$VERSION.tar"
@@ -66,7 +75,7 @@ rollback() {
 }
 trap rollback EXIT
 
-cp "$STAGE/docker-compose.yml" "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml.next"
+cp "$DEPLOY_COMPOSE" "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml.next"
 mv "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml.next" "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml"
 SYNAPSE_VERSION="$VERSION" SYNAPSE_COMMIT_SHA="$COMMIT_SHA" docker compose \
   -f "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml" \
