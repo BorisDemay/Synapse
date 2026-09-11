@@ -647,15 +647,7 @@ try {
   await driver.wait(until.elementLocated(By.id("unlock-passphrase")), timeout);
   await (await field("unlock-passphrase")).sendKeys(phrase);
   await driver.findElement(By.css('form button[type="submit"]')).click();
-  await poll(
-    async () =>
-      (
-        await driver.findElements(
-          By.css('[aria-label="Résolution de conflit"]'),
-        )
-      ).length === 1,
-    "native conflict materialization",
-  );
+  await waitVault();
   assert.equal(
     await vaultCall(
       `return vault.notes.get(${JSON.stringify(noteId)}).content.includes("Offline native competing line.");`,
@@ -665,6 +657,15 @@ try {
   await driver.executeScript(
     `localStorage.setItem("synapse-instance-url", arguments[0]); window.dispatchEvent(new Event("online"));`,
     backend.baseUrl,
+  );
+  await poll(
+    async () =>
+      (
+        await driver.findElements(
+          By.css('[aria-label="Résolution de conflit"]'),
+        )
+      ).length === 1,
+    "native conflict materialization",
   );
   await driver.wait(
     until.elementLocated(By.css('pre[aria-label="Version locale"]')),
