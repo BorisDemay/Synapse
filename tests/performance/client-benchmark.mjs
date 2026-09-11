@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 
 const count = Number(process.env.SYNAPSE_BENCH_NOTES ?? 10000);
 const timeout = Number(process.env.SYNAPSE_BENCH_TIMEOUT_MS ?? 30000);
+const TREEITEM_BUDGET = 80;
+const DOM_ELEMENT_BUDGET = 584;
 const server = await createServer({
   root: resolve("apps/web"),
   configFile: resolve("apps/web/vite.config.ts"),
@@ -181,6 +183,14 @@ try {
     },
     { count, timeout },
   );
+  if (
+    result.treeitems > TREEITEM_BUDGET ||
+    result.dom_elements > DOM_ELEMENT_BUDGET
+  ) {
+    throw new Error(
+      `Virtualized tree budget exceeded: treeitems=${result.treeitems}, dom_elements=${result.dom_elements}`,
+    );
+  }
   if (!result.open_timeout_ms) {
     await page.getByRole("treeitem").first().click();
     const editor = page.getByRole("textbox", {
