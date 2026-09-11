@@ -1,6 +1,16 @@
 use synapse_desktop::updater::{update_manifest_url, updater_public_key};
 
 #[test]
+fn updater_plugin_configuration_deserializes_before_builder_key_override() {
+    let config: serde_json::Value =
+        serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+    let updater: tauri_plugin_updater::Config =
+        serde_json::from_value(config["plugins"]["updater"].clone()).unwrap();
+    assert!(!updater.dangerous_insecure_transport_protocol);
+    assert!(!updater.dangerous_accept_invalid_certs);
+}
+
+#[test]
 fn updater_builder_configuration_uses_the_embedded_public_key() {
     let public_key = "untrusted comment: test public key\nRWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
