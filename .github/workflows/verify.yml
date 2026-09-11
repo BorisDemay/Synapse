@@ -82,7 +82,7 @@ jobs:
             . -> target
             apps/desktop/src-tauri -> target
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/windows-native' }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
         with:
           version: 11.20.0
@@ -113,3 +113,10 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: ./infra/scripts/native-ci-windows.ps1 -Action stop
+      - name: Upload native failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-failure-${{ runner.os }}
+          retention-days: 3
+          path: ${{ runner.temp }}/synapse-native-failure.*

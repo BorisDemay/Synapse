@@ -700,9 +700,46 @@ try {
     }),
   );
 } catch (error) {
+  const diagnosticsRoot = process.env.RUNNER_TEMP || tmpdir();
+  if (process.platform === "win32" && process.env.GITHUB_ACTIONS === "true") {
+    // The disposable hosted test desktop contains only synthetic scenario data.
+    spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        `
+      Add-Type -AssemblyName System.Windows.Forms,System.Drawing;
+      $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen;
+      $bitmap = New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height;
+      $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
+      $graphics.CopyFromScreen($bounds.Left,$bounds.Top,0,0,$bounds.Size);
+      $bitmap.Save((Join-Path $env:RUNNER_TEMP 'synapse-native-failure.desktop.png'));
+      $graphics.Dispose(); $bitmap.Dispose();
+    `,
+      ],
+      { timeout: 10000, stdio: "ignore" },
+    );
+  }
   if (driver) {
+    console.error(
+      "Native failure UI:",
+      await Promise.race([
+        driver
+          .executeScript(() => ({
+            route: location.pathname,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map(
+              (element) => element.textContent,
+            ),
+            submitDisabled: document.querySelector('form button[type="submit"]')
+              ?.disabled,
+          }))
+          .catch(() => "unavailable"),
+        pause(3000).then(() => "unavailable"),
+      ]),
+    );
     await writeFile(
-      path.join(tmpdir(), "synapse-native-failure.png"),
+      path.join(diagnosticsRoot, "synapse-native-failure.png"),
       await Promise.race([
         driver.takeScreenshot().catch(() => ""),
         pause(3000).then(() => ""),
@@ -710,7 +747,7 @@ try {
       "base64",
     );
     await writeFile(
-      path.join(tmpdir(), "synapse-native-failure.html"),
+      path.join(diagnosticsRoot, "synapse-native-failure.html"),
       await Promise.race([
         driver.getPageSource().catch(() => ""),
         pause(3000).then(() => ""),

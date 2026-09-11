@@ -122,6 +122,8 @@ Un push vers `ci/windows-native` exécute uniquement le parcours natif Windows
 du workflow de vérification, sans secrets, packaging ni déploiement. Cette
 branche sert à diagnostiquer le runner sans relancer toute la release ; les
 pull requests gardent la vérification complète et les deux plateformes.
+Elle peut sauvegarder ses caches Rust ; les diagnostics d'échec du scénario
+synthétique sont conservés trois jours comme artefacts GitHub.
 
 Les jobs de vérification, desktop Windows/Linux et images démarrent en
 parallèle. La publication attend explicitement leur réussite à tous. `just
@@ -131,8 +133,8 @@ pas relancés une seconde fois après cette commande.
 Les outils `just`, `cargo-nextest`, `cargo-deny` et `cargo-cyclonedx` sont
 installés depuis des binaires précompilés avec vérification de checksum via
 une action fixée à un commit. Les dépendances Rust des deux workspaces et
-le driver Linux sont mis en cache, y compris après un échec ; seules les
-exécutions `main` écrivent ces caches. Les images utilisent des caches de
+le driver Linux sont mis en cache, y compris après un échec ; les exécutions
+`main` et la branche de diagnostic Windows écrivent ces caches. Les images utilisent des caches de
 couches BuildKit distincts et sont exportées directement en archives Docker.
 Le contexte Docker exclut les dépendances locales, les compilations, les
 worktrees et les secrets locaux.
