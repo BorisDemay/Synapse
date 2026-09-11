@@ -77,7 +77,9 @@ export async function registerAndUnlock(
 
 export async function writeAndSave(page: Page, text: string): Promise<void> {
   // The accessible label also exists on the mount point while Vditor loads.
-  await expect(page.getByRole("textbox", { name: "Éditeur Markdown" })).toBeEditable();
+  await expect(
+    page.getByRole("textbox", { name: "Éditeur Markdown" }),
+  ).toBeEditable();
   await page.getByRole("button", { name: "Texte brut", exact: true }).click();
   const editor = page.locator('.vditor-sv[contenteditable="true"]');
   await expect(editor).toBeVisible();
