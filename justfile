@@ -14,6 +14,15 @@ default:
 # Start the shared test/dev PostgreSQL (synapse_test for cargo tests, synapse_dev for the API).
 db:
     docker compose -f infra/docker/compose.test.yml up -d --wait
+    for attempt in {1..20}; do \
+      if docker compose -f infra/docker/compose.test.yml exec -T postgres \
+        psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'synapse_dev'" \
+        | grep -qx 1; then \
+        break; \
+      fi; \
+      if [ "$$attempt" -eq 20 ]; then exit 1; fi; \
+      sleep 1; \
+    done
     docker compose -f infra/docker/compose.test.yml exec -T postgres \
       psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'synapse_dev'" \
       | grep -qx 1 \
