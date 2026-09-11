@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
 
 export interface VaultTreeNode {
   children?: VaultTreeNode[];
@@ -25,9 +31,78 @@ const emit = defineEmits<{
 }>();
 
 const activeIndex = ref(0);
-const treeItems = ref<HTMLElement[]>([]);
+const treeElement = ref<HTMLElement>();
+const treeItems = new Map<number, HTMLElement>();
+const virtualStart = ref(0);
+
+const ROW_HEIGHT = 56;
+const VIRTUAL_WINDOW_SIZE = 80;
 
 const collapsed = ref(new Set<string>());
+
+const usesVirtualWindow = computed(
+  () =>
+    !props.nested &&
+    props.nodes.length > VIRTUAL_WINDOW_SIZE &&
+    !props.nodes.some(isFolder),
+);
+const renderedStart = computed(() =>
+  usesVirtualWindow.value ? virtualStart.value : 0,
+);
+const renderedNodes = computed(() =>
+  usesVirtualWindow.value
+    ? props.nodes.slice(
+        renderedStart.value,
+        renderedStart.value + VIRTUAL_WINDOW_SIZE,
+      )
+    : props.nodes,
+);
+const renderedEnd = computed(
+  () => renderedStart.value + renderedNodes.value.length,
+);
+
+watch(
+  () => props.nodes.length,
+  () => {
+    virtualStart.value = Math.min(
+      virtualStart.value,
+      Math.max(0, props.nodes.length - VIRTUAL_WINDOW_SIZE),
+    );
+  },
+);
+
+function setTreeItem(
+  element: Element | ComponentPublicInstance | null,
+  index: number,
+) {
+  if (element instanceof HTMLElement) {
+    treeItems.set(index, element);
+    return;
+  }
+  treeItems.delete(index);
+}
+
+function showIndex(index: number) {
+  if (!usesVirtualWindow.value) return;
+  if (index < renderedStart.value || index >= renderedEnd.value) {
+    virtualStart.value = Math.max(
+      0,
+      Math.min(index, props.nodes.length - VIRTUAL_WINDOW_SIZE),
+    );
+    if (treeElement.value) {
+      treeElement.value.scrollTop = virtualStart.value * ROW_HEIGHT;
+    }
+  }
+}
+
+function onScroll() {
+  if (usesVirtualWindow.value && treeElement.value) {
+    virtualStart.value = Math.min(
+      Math.floor(treeElement.value.scrollTop / ROW_HEIGHT),
+      props.nodes.length - VIRTUAL_WINDOW_SIZE,
+    );
+  }
+}
 
 function isFolder(node: VaultTreeNode | undefined) {
   return node?.kind === "folder";
@@ -58,9 +133,10 @@ async function select(index: number) {
     return;
   }
   activeIndex.value = index;
+  showIndex(index);
   emit("select", node.id);
   await nextTick();
-  treeItems.value[index]?.focus();
+  treeItems.get(index)?.focus();
 }
 
 function attach(index: number) {
@@ -109,28 +185,39 @@ async function selectNext(index: number) {
   </div>
   <ul
     v-else-if="nodes.length"
+    ref="treeElement"
     :aria-label="nested ? undefined : 'Notes du coffre'"
-    class="vault-tree"
+    :class="['vault-tree', { 'vault-tree--virtual': usesVirtualWindow }]"
     role="tree"
+    @scroll="onScroll"
   >
     <li
-      v-for="(node, index) in nodes"
+      v-if="usesVirtualWindow && renderedStart"
+      :style="{ height: `${renderedStart * ROW_HEIGHT}px` }"
+      aria-hidden="true"
+      role="presentation"
+    />
+    <li
+      v-for="(node, renderedIndex) in renderedNodes"
       :key="node.id"
       class="vault-tree-item"
-      ref="treeItems"
-      :aria-selected="index === activeIndex"
+      :ref="(element) => setTreeItem(element, renderedStart + renderedIndex)"
+      :aria-posinset="renderedStart + renderedIndex + 1"
+      :aria-selected="renderedStart + renderedIndex === activeIndex"
+      :aria-setsize="nodes.length"
       :data-attached="
         (attachedIds ?? []).includes(node.id) ? 'true' : undefined
       "
       :data-kind="node.kind"
       :data-status="node.syncStatus"
+      :data-tree-index="renderedStart + renderedIndex"
       role="treeitem"
-      :tabindex="index === activeIndex ? 0 : -1"
-      @click="onItemClick($event, index)"
-      @keydown.delete.prevent="remove(index)"
-      @keydown.down.prevent="selectNext(index)"
-      @keydown.enter.ctrl.prevent="attach(index)"
-      @keydown.enter.meta.prevent="attach(index)"
+      :tabindex="renderedStart + renderedIndex === activeIndex ? 0 : -1"
+      @click="onItemClick($event, renderedStart + renderedIndex)"
+      @keydown.delete.prevent="remove(renderedStart + renderedIndex)"
+      @keydown.down.prevent="selectNext(renderedStart + renderedIndex)"
+      @keydown.enter.ctrl.prevent="attach(renderedStart + renderedIndex)"
+      @keydown.enter.meta.prevent="attach(renderedStart + renderedIndex)"
     >
       <div class="vault-tree-row">
         <span class="vault-tree-label">{{ node.label }}</span>
@@ -140,7 +227,7 @@ async function selectNext(index: number) {
           type="button"
           tabindex="-1"
           :aria-label="`Supprimer ${node.label}`"
-          @click="onDeleteClick($event, index)"
+          @click="onDeleteClick($event, renderedStart + renderedIndex)"
           @mousedown.prevent
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -165,6 +252,12 @@ async function selectNext(index: number) {
         @select="emit('select', $event)"
       />
     </li>
+    <li
+      v-if="usesVirtualWindow && renderedEnd < nodes.length"
+      :style="{ height: `${(nodes.length - renderedEnd) * ROW_HEIGHT}px` }"
+      aria-hidden="true"
+      role="presentation"
+    />
   </ul>
 </template>
 
@@ -173,6 +266,12 @@ async function selectNext(index: number) {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.vault-tree--virtual {
+  height: min(60vh, 48rem);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .vault-tree :deep(.vault-tree) {
@@ -186,6 +285,10 @@ async function selectNext(index: number) {
   color: var(--synapse-color-text-muted);
   cursor: pointer;
   overflow: hidden;
+}
+
+.vault-tree--virtual > .vault-tree-item {
+  height: 3.5rem;
 }
 
 .vault-tree-row {

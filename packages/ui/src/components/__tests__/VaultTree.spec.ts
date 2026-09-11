@@ -9,6 +9,62 @@ const nodes = [
 ];
 
 describe("VaultTree", () => {
+  it("borne le nombre de lignes matérialisées pour un coffre de 10 000 notes", () => {
+    const largeNodes = Array.from({ length: 10_000 }, (_, index) => ({
+      id: `note-${index}`,
+      label: `Note ${index}`,
+    }));
+    const wrapper = mount(VaultTree, { props: { nodes: largeNodes } });
+
+    expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(80);
+  });
+
+  it("sélectionne et focalise une note virtualisée sans perdre sa commande de suppression", async () => {
+    const largeNodes = Array.from({ length: 10_000 }, (_, index) => ({
+      id: `note-${index}`,
+      label: `Note ${index}`,
+    }));
+    const wrapper = mount(VaultTree, {
+      attachTo: document.body,
+      props: { nodes: largeNodes },
+    });
+    const tree = wrapper.get('[role="tree"]');
+
+    (tree.element as HTMLElement).scrollTop = 500 * 56;
+    await tree.trigger("scroll");
+
+    const virtualizedItem = wrapper.get('[data-tree-index="500"]');
+    (virtualizedItem.element as HTMLElement).focus();
+    await virtualizedItem.trigger("keydown", { key: "ArrowDown" });
+
+    const selectedItem = wrapper.get('[data-tree-index="501"]');
+    expect(wrapper.emitted("select")?.[0]).toEqual(["note-501"]);
+    expect(document.activeElement).toBe(selectedItem.element);
+    expect(selectedItem.attributes("aria-selected")).toBe("true");
+    expect(selectedItem.attributes("aria-posinset")).toBe("502");
+    expect(selectedItem.attributes("aria-setsize")).toBe("10000");
+    expect(
+      selectedItem
+        .get('button[aria-label="Supprimer Note 501"]')
+        .attributes("aria-label"),
+    ).toBe("Supprimer Note 501");
+  });
+
+  it("réinitialise la fenêtre après le remplacement d'un grand coffre", async () => {
+    const largeNodes = Array.from({ length: 10_000 }, (_, index) => ({
+      id: `note-${index}`,
+      label: `Note ${index}`,
+    }));
+    const wrapper = mount(VaultTree, { props: { nodes: largeNodes } });
+    const tree = wrapper.get('[role="tree"]');
+
+    (tree.element as HTMLElement).scrollTop = 500 * 56;
+    await tree.trigger("scroll");
+    await wrapper.setProps({ nodes: largeNodes.slice(0, 100) });
+
+    expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(80);
+  });
+
   it("expose les notes dans un arbre ARIA nommé", () => {
     const wrapper = mount(VaultTree, { props: { nodes } });
 
