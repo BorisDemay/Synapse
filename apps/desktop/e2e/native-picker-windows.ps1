@@ -30,15 +30,20 @@ if ($Directory) {
   Start-Sleep -Milliseconds 500
 }
 
-# Common Item Dialog uses IDOK=1 and IDCANCEL=2. Invoke the control itself;
-# accelerator keys vary with focus and the runner's display language.
-$buttonId = if ($Directory) { '1' } else { '2' }
+# Hosted Windows runners use the English Common Item Dialog. Its accessible
+# button names are stable; its UI Automation IDs are not Win32 control IDs.
+$buttonName = if ($Directory) { 'Select Folder' } else { 'Cancel' }
 $buttonCondition = [System.Windows.Automation.AndCondition]::new(
-  [System.Windows.Automation.PropertyCondition]::new($automation::AutomationIdProperty, $buttonId),
+  [System.Windows.Automation.PropertyCondition]::new($automation::NameProperty, $buttonName),
   [System.Windows.Automation.PropertyCondition]::new($automation::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
 )
 $button = $dialog.FindFirst($scope, $buttonCondition)
-if (!$button -or !$button.Current.IsEnabled) { throw 'Native folder dialog button is unavailable' }
+if (!$button -or !$button.Current.IsEnabled) {
+  foreach ($control in $dialog.FindAll($scope, [System.Windows.Automation.Condition]::TrueCondition)) {
+    Write-Output "Dialog control: $($control.Current.ControlType.ProgrammaticName) / $($control.Current.Name) / $($control.Current.AutomationId)"
+  }
+  throw 'Native folder dialog button is unavailable'
+}
 Write-Output "Invoking native dialog button: $($button.Current.Name)"
 $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
 $invoke.Invoke()
@@ -46,7 +51,7 @@ $invoke.Invoke()
 $deadline = (Get-Date).AddSeconds(30)
 do {
   if (!$automation::RootElement.FindFirst($scope, $condition)) {
-    Write-Output "Native folder dialog completed (button $buttonId)"
+    Write-Output "Native folder dialog completed ($buttonName)"
     exit 0
   }
   Start-Sleep -Milliseconds 100
