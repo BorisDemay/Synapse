@@ -6,4 +6,4 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=/mnt/nas1/synapse/.env
-ExecStart=/usr/local/sbin/synapse-update
+ExecStart=/mnt/nas1/synapse/infra/scripts/update-instance.sh
