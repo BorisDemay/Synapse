@@ -9,7 +9,7 @@ const nodes = [
 ];
 
 describe("VaultTree", () => {
-  it("borne les lignes matérialisées pour 10 000 feuilles réparties dans des dossiers", () => {
+  it("rend la première fenêtre de 10 000 feuilles hiérarchiques sans lire les branches hors écran", () => {
     const nestedNodes = Array.from({ length: 100 }, (_, folderIndex) => ({
       children: Array.from({ length: 100 }, (_, noteIndex) => ({
         id: `folder-${folderIndex}/note-${noteIndex}`,
@@ -20,9 +20,17 @@ describe("VaultTree", () => {
       kind: "folder" as const,
       label: `Dossier ${folderIndex}`,
     }));
+    let offscreenBranchReads = 0;
+    Object.defineProperty(nestedNodes[99], "id", {
+      get() {
+        offscreenBranchReads++;
+        return "folder:99";
+      },
+    });
     const wrapper = mount(VaultTree, { props: { nodes: nestedNodes } });
 
     expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(80);
+    expect(offscreenBranchReads).toBe(1);
   });
 
   it("borne le nombre de lignes matérialisées pour un coffre de 10 000 notes", () => {

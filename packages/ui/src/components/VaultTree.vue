@@ -47,19 +47,20 @@ interface VisibleTreeNode {
   setSize: number;
 }
 
+const visibleNodeCount = computed(() => countVisibleNodes(props.nodes));
 const usesVirtualWindow = computed(
-  () => !props.nested && visibleNodes.value.length > VIRTUAL_WINDOW_SIZE,
+  () => !props.nested && visibleNodeCount.value > VIRTUAL_WINDOW_SIZE,
 );
 const renderedStart = computed(() =>
   usesVirtualWindow.value ? virtualStart.value : 0,
 );
 const renderedNodes = computed(() =>
   usesVirtualWindow.value
-    ? visibleNodes.value.slice(
+    ? visibleNodesInRange(
         renderedStart.value,
         renderedStart.value + VIRTUAL_WINDOW_SIZE,
       )
-    : visibleNodes.value,
+    : visibleNodesInRange(0, visibleNodeCount.value),
 );
 const renderedEnd = computed(
   () => renderedStart.value + renderedNodes.value.length,
@@ -81,7 +82,7 @@ function showIndex(index: number) {
   if (index < renderedStart.value || index >= renderedEnd.value) {
     virtualStart.value = Math.max(
       0,
-      Math.min(index, visibleNodes.value.length - VIRTUAL_WINDOW_SIZE),
+      Math.min(index, visibleNodeCount.value - VIRTUAL_WINDOW_SIZE),
     );
     if (treeElement.value) {
       treeElement.value.scrollTop = virtualStart.value * ROW_HEIGHT;
@@ -93,7 +94,7 @@ function onScroll() {
   if (usesVirtualWindow.value && treeElement.value) {
     virtualStart.value = Math.min(
       Math.floor(treeElement.value.scrollTop / ROW_HEIGHT),
-      Math.max(0, visibleNodes.value.length - VIRTUAL_WINDOW_SIZE),
+      Math.max(0, visibleNodeCount.value - VIRTUAL_WINDOW_SIZE),
     );
   }
 }
@@ -125,40 +126,67 @@ function isExpanded(id: string) {
   return !collapsed.value.has(id);
 }
 
-const visibleNodes = computed<VisibleTreeNode[]>(() => {
-  const result: VisibleTreeNode[] = [];
+function hasExpandedChildren(
+  node: VaultTreeNode,
+): node is VaultTreeNode & { children: VaultTreeNode[] } {
+  return (
+    !!node.children?.length &&
+    (collapsed.value.size === 0 || isExpanded(node.id))
+  );
+}
 
-  function append(nodes: VaultTreeNode[], level: number) {
-    for (const [index, node] of nodes.entries()) {
-      result.push({
-        level,
-        node,
-        posInSet: index + 1,
-        setSize: nodes.length,
-      });
-      if (node.children?.length && isExpanded(node.id)) {
-        append(node.children, level + 1);
+function countVisibleNodes(nodes: VaultTreeNode[]): number {
+  let count = 0;
+  for (const node of nodes) {
+    count++;
+    if (hasExpandedChildren(node)) {
+      count += countVisibleNodes(node.children);
+    }
+  }
+  return count;
+}
+
+function visibleNodesInRange(start: number, end: number): VisibleTreeNode[] {
+  const result: VisibleTreeNode[] = [];
+  let index = 0;
+
+  function append(nodes: VaultTreeNode[], level: number): boolean {
+    for (const [posInSet, node] of nodes.entries()) {
+      if (index >= end) return true;
+      if (index >= start) {
+        result.push({
+          level,
+          node,
+          posInSet: posInSet + 1,
+          setSize: nodes.length,
+        });
+      }
+      index++;
+      if (hasExpandedChildren(node) && append(node.children, level + 1)) {
+        return true;
       }
     }
+    return false;
   }
 
   append(props.nodes, 1);
   return result;
-});
+}
 
 const activeIndex = computed(() => {
-  const index = visibleNodes.value.findIndex(
+  if (!activeId.value) return 0;
+  const index = visibleNodesInRange(0, visibleNodeCount.value).findIndex(
     (entry) => entry.node.id === activeId.value,
   );
   return index === -1 ? 0 : index;
 });
 
 watch(
-  () => visibleNodes.value.length,
+  () => visibleNodeCount.value,
   () => {
     virtualStart.value = Math.min(
       virtualStart.value,
-      Math.max(0, visibleNodes.value.length - VIRTUAL_WINDOW_SIZE),
+      Math.max(0, visibleNodeCount.value - VIRTUAL_WINDOW_SIZE),
     );
   },
 );
@@ -178,7 +206,7 @@ function toggleFolder(id: string) {
 }
 
 async function select(index: number) {
-  const entry = visibleNodes.value[index];
+  const entry = visibleNodesInRange(index, index + 1)[0];
   const node = entry?.node;
 
   if (!node) {
@@ -196,14 +224,14 @@ async function select(index: number) {
 }
 
 function attach(index: number) {
-  const node = visibleNodes.value[index]?.node;
+  const node = visibleNodesInRange(index, index + 1)[0]?.node;
   if (node && !isFolder(node)) {
     emit("attach", node.id);
   }
 }
 
 function remove(index: number) {
-  const node = visibleNodes.value[index]?.node;
+  const node = visibleNodesInRange(index, index + 1)[0]?.node;
   if (node && !isFolder(node)) {
     emit("delete", node.id);
   }
@@ -218,7 +246,7 @@ function onDeleteClick(event: MouseEvent, index: number) {
 function onItemClick(event: MouseEvent, index: number) {
   if (
     (event.ctrlKey || event.metaKey) &&
-    !isFolder(visibleNodes.value[index]?.node)
+    !isFolder(visibleNodesInRange(index, index + 1)[0]?.node)
   ) {
     event.preventDefault();
     attach(index);
@@ -307,9 +335,9 @@ async function selectNext(index: number) {
       </div>
     </li>
     <li
-      v-if="usesVirtualWindow && renderedEnd < visibleNodes.length"
+      v-if="usesVirtualWindow && renderedEnd < visibleNodeCount"
       :style="{
-        height: `${(visibleNodes.length - renderedEnd) * ROW_HEIGHT}px`,
+        height: `${(visibleNodeCount - renderedEnd) * ROW_HEIGHT}px`,
       }"
       aria-hidden="true"
       role="presentation"

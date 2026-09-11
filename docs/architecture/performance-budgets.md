@@ -141,9 +141,9 @@ client :
 | ----------------------- | -------: |
 | `treeitem` matérialisés |       80 |
 | Éléments DOM            |      584 |
-| Ouverture               | 860,5 ms |
-| Rendu                   | 116,8 ms |
-| Plus longue tâche       |   458 ms |
+| Ouverture               | 857,7 ms |
+| Rendu                   | 114,5 ms |
+| Plus longue tâche       |   427 ms |
 
 Cette observation est reproductible avec `SYNAPSE_BENCH_NOTES=10000 node
 tests/performance/client-benchmark.mjs` sur la machine WSL2 de référence. Elle
@@ -152,6 +152,11 @@ n'est pas un budget CI absolu ni une garantie de latence sur toute machine ou
 topologie de coffre. La recherche reste sous 100 ms dans cette mesure et ne
 justifie pas une nouvelle dépendance d'indexation. Les mesures « avant » en
 mémoire ne sont pas directement comparables à l'ouverture chiffrée.
+
+La fenêtre rendue résout désormais seulement ses entrées visibles ; le comptage
+conserve la hauteur de défilement sans allouer une entrée ARIA par feuille. La
+mesure ci-dessus a été rejouée après cette optimisation, avec les mêmes limites
+de 80 `treeitem` et 584 éléments DOM.
 
 ### Réplique Markdown native
 
