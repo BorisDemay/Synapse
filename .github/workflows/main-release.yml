@@ -12,9 +12,9 @@ permissions:
   contents: read
 
 env:
-  CARGO_PROFILE_DEV_DEBUG: '0'
-  CARGO_PROFILE_TEST_DEBUG: '0'
-  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
   SYNAPSE_VERSION: 0.1.${{ github.run_number }}
   SYNAPSE_COMMIT_SHA: ${{ github.sha }}
 
