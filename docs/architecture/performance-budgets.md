@@ -6,14 +6,14 @@ rapport à la baseline Criterion (ou si le script k6 croise ses seuils).
 
 ## Machine de référence
 
-| Champ | Valeur |
-| --- | --- |
-| Date | 2026-08-11 |
-| Hôte | WSL2 (`Linux 6.6.87`, `DESKTOP-A9LH8E4`) |
-| CPU | Intel Core i5-14600KF (20 threads visibles) |
-| RAM | 15 GiB |
-| Rust | `cargo bench` profile `bench` (optimisé) |
-| k6 | `k6 v0.57.0` |
+| Champ           | Valeur                                                     |
+| --------------- | ---------------------------------------------------------- |
+| Date            | 2026-08-11                                                 |
+| Hôte            | WSL2 (`Linux 6.6.87`, `DESKTOP-A9LH8E4`)                   |
+| CPU             | Intel Core i5-14600KF (20 threads visibles)                |
+| RAM             | 15 GiB                                                     |
+| Rust            | `cargo bench` profile `bench` (optimisé)                   |
+| k6              | `k6 v0.57.0`                                               |
 | API sous charge | `synapse-server` debug + PostgreSQL test `127.0.0.1:55432` |
 
 ## Générateur de coffre
@@ -36,15 +36,15 @@ cargo bench -p synapse-local-store --bench search -- --quick
 
 Mesures `--quick` sur la machine de référence (médiane Criterion) :
 
-| Benchmark | Mesure | Budget initial (alerte) |
-| --- | ---: | ---: |
-| `parse_note/bytes_kib/1` | ~395 ns | < 1 µs |
-| `parse_note/bytes_kib/8` | ~775 ns | < 2 µs |
-| `parse_note/bytes_kib/64` | ~3.5 µs | < 10 µs |
-| `parse_note_batch_1000` | ~450 µs | < 1.5 ms |
-| `search_paths_token_mid` (index 10k) | ~13 µs | < 50 µs |
-| `search_paths_shared_term` (limit 50) | ~4.1 ms | < 15 ms |
-| `upsert_note_1000` | ~24 ms | < 80 ms |
+| Benchmark                             |  Mesure | Budget initial (alerte) |
+| ------------------------------------- | ------: | ----------------------: |
+| `parse_note/bytes_kib/1`              | ~395 ns |                  < 1 µs |
+| `parse_note/bytes_kib/8`              | ~775 ns |                  < 2 µs |
+| `parse_note/bytes_kib/64`             | ~3.5 µs |                 < 10 µs |
+| `parse_note_batch_1000`               | ~450 µs |                < 1.5 ms |
+| `search_paths_token_mid` (index 10k)  |  ~13 µs |                 < 50 µs |
+| `search_paths_shared_term` (limit 50) | ~4.1 ms |                 < 15 ms |
+| `upsert_note_1000`                    |  ~24 ms |                 < 80 ms |
 
 Les rapports HTML Criterion sont écrits sous `target/criterion/` (gitignored).
 Pour une comparaison de régression plus stable, relancer sans `--quick` et
@@ -64,13 +64,13 @@ ciphertext) et un upgrade WebSocket périodique.
 
 Mesure du 2026-08-11 :
 
-| Métrique | Mesure | Seuil k6 |
-| --- | ---: | --- |
-| `http_req_duration` p(95) | ~45 ms | `< 750 ms` |
-| `http_req_failed` | ~0.00 % (3/70914) | `< 2 %` |
-| `checks` | ~99.99 % | `> 98 %` |
-| Débit HTTP | ~2308 req/s | informatif |
-| Itérations | ~576 /s | informatif |
+| Métrique                  |            Mesure | Seuil k6   |
+| ------------------------- | ----------------: | ---------- |
+| `http_req_duration` p(95) |            ~45 ms | `< 750 ms` |
+| `http_req_failed`         | ~0.00 % (3/70914) | `< 2 %`    |
+| `checks`                  |          ~99.99 % | `> 98 %`   |
+| Débit HTTP                |       ~2308 req/s | informatif |
+| Itérations                |           ~576 /s | informatif |
 
 Le script ne transporte aucun clair de coffre : seulement des ciphertexts, nonces
 et empreintes, conformément au protocole v1.
@@ -104,16 +104,16 @@ ou une vérification échouée termine la commande avec un code non nul.
 Mesures ponctuelles sur la machine WSL2 de référence ci-dessus, navigateur
 Chromium headless, build Vite de développement (pas un budget CI absolu) :
 
-| Étape | Avant | Après |
-| --- | ---: | ---: |
-| Ouverture froide, 10 000 ciphertexts + 10 000 révisions | **> 30 000 ms**, timeout pendant l'hydratation des historiques | 812 ms |
-| Recherche, médiane de 20 requêtes | 10,7 ms, fixture en mémoire uniquement | 17,1 ms, fixture chiffrée rouverte |
-| Recherche, p95 | 14,5 ms, fixture en mémoire uniquement | 22,4 ms |
-| Rendu du coffre (2 frames) | 615 ms, fixture en mémoire uniquement | 678 ms |
-| Modification UI → cache durable, debounce inclus | non mesuré | 1 004 ms |
-| Action `saveNote` durable | non mesuré | 319 ms |
-| Reconnexion client, curseur + delta puis page terminale | non mesuré | 1 432 ms, 2 GET |
-| Plus longue tâche observée pendant ouverture/recherche/rendu | non mesuré | 650 ms |
+| Étape                                                        |                                                          Avant |                              Après |
+| ------------------------------------------------------------ | -------------------------------------------------------------: | ---------------------------------: |
+| Ouverture froide, 10 000 ciphertexts + 10 000 révisions      | **> 30 000 ms**, timeout pendant l'hydratation des historiques |                             812 ms |
+| Recherche, médiane de 20 requêtes                            |                         10,7 ms, fixture en mémoire uniquement | 17,1 ms, fixture chiffrée rouverte |
+| Recherche, p95                                               |                         14,5 ms, fixture en mémoire uniquement |                            22,4 ms |
+| Rendu du coffre (2 frames)                                   |                          615 ms, fixture en mémoire uniquement |                             678 ms |
+| Modification UI → cache durable, debounce inclus             |                                                     non mesuré |                           1 004 ms |
+| Action `saveNote` durable                                    |                                                     non mesuré |                             319 ms |
+| Reconnexion client, curseur + delta puis page terminale      |                                                     non mesuré |                    1 432 ms, 2 GET |
+| Plus longue tâche observée pendant ouverture/recherche/rendu |                                                     non mesuré |                             650 ms |
 
 La création du fixture (9 846 ms) est exclue de l'ouverture. Une mesure
 intermédiaire avec seulement les lectures IndexedDB bornées donnait 3 060 ms
@@ -123,11 +123,35 @@ les historiques déchiffrés et clés sont purgés au verrouillage. La restaurat
 et les points de restauration chargent explicitement l'historique de leur note.
 Les lectures par lots partagent une seule transaction readonly cohérente.
 
-Limites observées : l'arbre affiche encore 10 000 éléments (60 103 nœuds DOM) ;
-son rendu produit une longue tâche. La recherche reste sous 100 ms dans cette
-mesure et ne justifie pas une nouvelle dépendance d'indexation. Ces chiffres ne
-prouvent pas une frappe sans aucune pause sur toutes les machines. Les mesures
-« avant » en mémoire ne sont pas directement comparables à l'ouverture chiffrée.
+### Limite historique avant virtualisation de l'arbre
+
+La campagne ci-dessus a aussi montré une limite désormais corrigée : l'arbre
+matérialisait encore 10 000 éléments, pour 60 103 nœuds DOM, et son rendu
+produisait une longue tâche. Cette mesure historique explique les 678 ms de
+rendu et la plus longue tâche de 650 ms consignés ci-dessus ; elle ne décrit pas
+le comportement de l'arbre virtualisé.
+
+### Arbre de coffre virtualisé — 10 000 feuilles hiérarchiques
+
+Mesure post-virtualisation sur un arbre de 10 000 feuilles réparties
+hiérarchiquement, dans les mêmes conditions de développement que la campagne
+client :
+
+| Métrique                | Résultat |
+| ----------------------- | -------: |
+| `treeitem` matérialisés |       80 |
+| Éléments DOM            |      584 |
+| Ouverture               | 860,5 ms |
+| Rendu                   | 116,8 ms |
+| Plus longue tâche       |   458 ms |
+
+Cette observation est reproductible avec `SYNAPSE_BENCH_NOTES=10000 node
+tests/performance/client-benchmark.mjs` sur la machine WSL2 de référence. Elle
+est effectuée avec le build Vite de développement et Chromium headless : ce
+n'est pas un budget CI absolu ni une garantie de latence sur toute machine ou
+topologie de coffre. La recherche reste sous 100 ms dans cette mesure et ne
+justifie pas une nouvelle dépendance d'indexation. Les mesures « avant » en
+mémoire ne sont pas directement comparables à l'ouverture chiffrée.
 
 ### Réplique Markdown native
 
