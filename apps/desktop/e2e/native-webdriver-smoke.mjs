@@ -404,6 +404,27 @@ try {
       timeout,
     );
   }
+  async function waitVaultOrConflict() {
+    return driver.wait(async () => {
+      if (
+        (
+          await driver.findElements(
+            By.css('[aria-label="Éditeur Markdown"][contenteditable="true"]'),
+          )
+        ).length === 1
+      )
+        return "editor";
+      if (
+        (
+          await driver.findElements(
+            By.css('[aria-label="Résolution de conflit"]'),
+          )
+        ).length === 1
+      )
+        return "conflict";
+      return false;
+    }, timeout);
+  }
   async function createVault(folder, cancelFirst = false) {
     await driver.wait(
       until.elementLocated(By.id("unlock-passphrase")),
@@ -650,7 +671,7 @@ try {
   );
   await unlockField.sendKeys(phrase);
   await driver.findElement(By.css('form button[type="submit"]')).click();
-  await waitVault();
+  await waitVaultOrConflict();
   assert.equal(
     await vaultCall(
       `return vault.notes.get(${JSON.stringify(noteId)}).content.includes("Offline native competing line.");`,
