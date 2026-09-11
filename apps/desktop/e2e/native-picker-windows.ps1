@@ -33,9 +33,13 @@ if ($Directory) {
 # Common Item Dialog uses IDOK=1 and IDCANCEL=2. Invoke the control itself;
 # accelerator keys vary with focus and the runner's display language.
 $buttonId = if ($Directory) { '1' } else { '2' }
-$buttonCondition = [System.Windows.Automation.PropertyCondition]::new($automation::AutomationIdProperty, $buttonId)
+$buttonCondition = [System.Windows.Automation.AndCondition]::new(
+  [System.Windows.Automation.PropertyCondition]::new($automation::AutomationIdProperty, $buttonId),
+  [System.Windows.Automation.PropertyCondition]::new($automation::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+)
 $button = $dialog.FindFirst($scope, $buttonCondition)
 if (!$button -or !$button.Current.IsEnabled) { throw 'Native folder dialog button is unavailable' }
+Write-Output "Invoking native dialog button: $($button.Current.Name)"
 $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
 $invoke.Invoke()
 
