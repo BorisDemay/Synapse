@@ -42,3 +42,7 @@ déjà installée n’est jamais rétrogradée : une correction est une nouvelle
 version ascendante. Les migrations de release restent additives et compatibles
 avec le serveur précédent. Le canal `beta` est réservé mais n’est pas alimenté
 par ce pipeline.
+
+Le déploiement serveur/web suit désormais un modèle pull : chaque instance
+exécute localement un timer updater qui lit la dernière release GitHub, sans
+registre central d’instances ni connexion entrante depuis GitHub Actions.

@@ -2,16 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("main release is serialized, parity gated, and deploys before publishing", async () => {
+test("main release is serialized, parity gated, and publishes before pull deployment", async () => {
   const workflow = await readFile(".github/workflows/main-release.yml", "utf8");
   assert.match(workflow, /branches:\s*\[main\]/u);
   assert.match(workflow, /group:\s*synapse-stable-main/u);
   assert.match(workflow, /cancel-in-progress:\s*false/u);
   assert.match(workflow, /needs:\s*\[verify, desktop, images\]/u);
-  assert.ok(
-    workflow.indexOf("Deploy staged release") <
-      workflow.indexOf("Create immutable GitHub release"),
-  );
+  assert.ok(workflow.indexOf("Create immutable GitHub release") >= 0);
+  assert.doesNotMatch(workflow, /scp .*incoming|synapse-deploy/u);
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/u);
   assert.match(workflow, /WINDOWS_CERTIFICATE_PFX_BASE64/u);
   assert.match(
@@ -102,6 +100,17 @@ test("NAS deployment health-gates manifest-last activation and keeps rollback", 
   assert.match(script, /sha256sum --check SHA256SUMS/u);
   assert.match(script, /for attempt in \{1\.\.30\}/u);
   assert.match(script, /synapse-windows-x86_64\.exe/u);
+});
+
+test("publishes the deployment archive for pull-based instance updaters", async () => {
+  const [workflow, updater] = await Promise.all([
+    readFile(".github/workflows/main-release.yml", "utf8"),
+    readFile("infra/scripts/update-instance.sh", "utf8"),
+  ]);
+  assert.match(workflow, /tar -C payload -czf "synapse-\$SYNAPSE_VERSION\.tar\.gz"/u);
+  assert.match(updater, /releases\/latest/u);
+  assert.match(updater, /synapse-\$version\.tar\.gz/u);
+  assert.match(updater, /SYNAPSE_DEPLOY_COMMAND/u);
 });
 
 test("both native matrices provision isolated Windows PostgreSQL and gate release bundles", async () => {

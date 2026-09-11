@@ -1,0 +1,9 @@
+[Unit]
+Description=Synapse pull-based release updater
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/mnt/nas1/synapse/.env
+ExecStart=/usr/local/sbin/synapse-update

@@ -275,28 +275,8 @@ jobs:
           cp infra/scripts/release/validate-release.mjs payload/
           sha256sum migrations/*.sql > payload/migrations.sha256
           (cd payload && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-      - uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:synapse-deploy
-      - name: Pin NAS host identity
-        env:
-          NAS_DEPLOY_SSH_KEY: ${{ secrets.NAS_DEPLOY_SSH_KEY }}
-          NAS_SSH_KNOWN_HOSTS: ${{ secrets.NAS_SSH_KNOWN_HOSTS }}
-        run: |
-          install -m 0700 -d ~/.ssh
-          printf '%s' "$NAS_DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 0600 ~/.ssh/id_ed25519
-          printf '%s\n' "$NAS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Deploy staged release
-        env:
-          NAS_DEPLOY_HOST: ${{ vars.NAS_DEPLOY_HOST }}
-          NAS_DEPLOY_USER: ${{ vars.NAS_DEPLOY_USER }}
-        run: |
           tar -C payload -czf "synapse-$SYNAPSE_VERSION.tar.gz" .
-          scp -O "synapse-$SYNAPSE_VERSION.tar.gz" "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST:incoming/"
-          ssh "$NAS_DEPLOY_USER@$NAS_DEPLOY_HOST" synapse-deploy "$SYNAPSE_VERSION" "$SYNAPSE_COMMIT_SHA"
+          mv "synapse-$SYNAPSE_VERSION.tar.gz" payload/
       - name: Create immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

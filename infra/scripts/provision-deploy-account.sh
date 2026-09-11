@@ -16,6 +16,9 @@ install -o root -g root -m 0644 infra/scripts/backup_manifest.py "$DEPLOY_ROOT/i
 install -o root -g root -m 0755 infra/scripts/check-deployment-layout.py "$DEPLOY_ROOT/infra/scripts/check-deployment-layout.py"
 install -o root -g root -m 0755 infra/scripts/deploy-release.sh /usr/local/sbin/synapse-deploy
 install -o root -g root -m 0755 infra/scripts/synapse-deploy-ssh /usr/local/sbin/synapse-deploy-ssh
+install -o root -g root -m 0755 infra/scripts/update-instance.sh /usr/local/sbin/synapse-update
+install -o root -g root -m 0644 infra/systemd/synapse-update.service /etc/systemd/system/synapse-update.service
+install -o root -g root -m 0644 infra/systemd/synapse-update.timer /etc/systemd/system/synapse-update.timer
 
 HOME_DIR="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0700 "$HOME_DIR/.ssh"

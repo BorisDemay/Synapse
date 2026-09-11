@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pull-based updater. Each instance runs this locally; no instance registry is
+# required. Configuration is read from the instance environment file.
+ROOT="${SYNAPSE_DEPLOY_ROOT:-/mnt/nas1/synapse}"
+ENV_FILE="${SYNAPSE_UPDATE_ENV_FILE:-$ROOT/.env}"
+REPOSITORY="${SYNAPSE_UPDATE_REPOSITORY:-}"
+API="${SYNAPSE_UPDATE_API:-https://api.github.com}"
+TOKEN_FILE="${SYNAPSE_UPDATE_TOKEN_FILE:-$ROOT/.update-token}"
+
+[[ -r "$ENV_FILE" ]] || { echo "update environment is missing" >&2; exit 1; }
+[[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+  echo "SYNAPSE_UPDATE_REPOSITORY must be owner/repository" >&2; exit 2;
+}
+command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
+
+headers=(-H 'Accept: application/vnd.github+json')
+if [[ -r "$TOKEN_FILE" ]]; then
+  token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+  [[ "$token" =~ ^gh[pousr]_[A-Za-z0-9_]+$ ]] || { echo "invalid update token" >&2; exit 2; }
+  headers+=(-H "Authorization: Bearer $token")
+fi
+
+release="$(curl --fail --silent --show-error --max-time 20 "${headers[@]}" "$API/repos/$REPOSITORY/releases/latest")"
+tag="$(jq -er '.tag_name | strings | select(test("^v0\\.1\\.[0-9]+$"))' <<<"$release")"
+version="${tag#v}"
+asset="$(jq -er --arg name "synapse-$version.tar.gz" '.assets[] | select(.name == $name) | .browser_download_url' <<<"$release")"
+sha="$(jq -er '.target_commitish | strings | select(test("^[0-9a-f]{40,64}$"))' <<<"$release")"
+
+active=""
+[[ -f "$ROOT/.active-version" ]] && active="$(tr -d '\r\n' < "$ROOT/.active-version")"
+if [[ "$active" == "$version" ]]; then
+  exit 0
+fi
+
+incoming="${SYNAPSE_DEPLOY_INCOMING:-$ROOT/incoming}"
+install -d -m 0750 "$incoming"
+archive="$incoming/synapse-$version.tar.gz"
+tmp="$archive.part"
+trap 'rm -f "$tmp"' EXIT
+curl --fail --silent --show-error --location --max-time 300 "${headers[@]}" "$asset" --output "$tmp"
+test -s "$tmp"
+mv "$tmp" "$archive"
+"${SYNAPSE_DEPLOY_COMMAND:-/usr/local/sbin/synapse-deploy}" "$version" "$sha"
