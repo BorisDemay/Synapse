@@ -103,6 +103,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Generate desktop icons
         run: pnpm --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg
+      - name: Native filesystem regression tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test local_folder
       - name: Native Tauri recovery
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a pnpm --filter @synapse/desktop test:native

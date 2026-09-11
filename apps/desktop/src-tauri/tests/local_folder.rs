@@ -3,6 +3,37 @@ use tempfile::tempdir;
 
 use synapse_desktop::local_folder::{FolderEntry, LocalFolderMirror};
 
+#[tokio::test]
+async fn mirror_reopens_the_canonical_root_persisted_after_folder_selection() {
+    let directory = tempdir().expect("tempdir");
+    let mirror = LocalFolderMirror::open_for_vault(directory.path(), "canonical-test")
+        .await
+        .expect("initial folder opens");
+    mirror
+        .claim_selection()
+        .await
+        .expect("empty folder is claimed");
+    let saved_root = mirror.root();
+    drop(mirror);
+
+    let mut reopened = LocalFolderMirror::open_for_vault(&saved_root, "canonical-test")
+        .await
+        .expect("persisted canonical folder reopens");
+    reopened
+        .apply(&[FolderEntry::Note {
+            path: "canonical.md".to_owned(),
+            markdown: "# Canonical root".to_owned(),
+        }])
+        .await
+        .expect("canonical folder accepts the Markdown replica");
+    assert_eq!(
+        tokio::fs::read_to_string(directory.path().join("canonical.md"))
+            .await
+            .unwrap(),
+        "# Canonical root"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn mirror_rejects_a_symlinked_root() {
