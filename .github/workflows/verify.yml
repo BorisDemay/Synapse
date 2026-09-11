@@ -79,6 +79,8 @@ jobs:
         run: ./infra/scripts/native-ci-windows.ps1 -Action start
       - run: cargo install tauri-driver --locked
       - run: pnpm install --frozen-lockfile
+      - name: Generate desktop icons
+        run: pnpm --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg
       - name: Native Tauri recovery
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a pnpm --filter @synapse/desktop test:native

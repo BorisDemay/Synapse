@@ -85,3 +85,26 @@ test("both native matrices provision isolated Windows PostgreSQL and gate releas
     }
   }
 });
+
+test("desktop jobs generate Tauri icons after installing dependencies and before native compilation", async () => {
+  const iconCommand = "pnpm --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg";
+  const workflows = [
+    [".github/workflows/verify.yml", "desktop-native", "test:native"],
+    [".github/workflows/main-release.yml", "desktop", "tauri build"],
+  ];
+
+  for (const [path, jobName, consumer] of workflows) {
+    const workflow = await readFile(path, "utf8");
+    const jobStart = workflow.indexOf(`  ${jobName}:\n`);
+    assert.notEqual(jobStart, -1, `${path} contains the ${jobName} job`);
+    const followingJob = workflow.slice(jobStart + 1).search(/\n  [a-z][\w-]*:\n/u);
+    const job = workflow.slice(jobStart, followingJob === -1 ? undefined : jobStart + 1 + followingJob);
+
+    assert.match(
+      job,
+      new RegExp(`- name: Generate desktop icons\\n\\s+run: ${iconCommand}`, "u"),
+    );
+    assert.ok(job.indexOf("pnpm install --frozen-lockfile") < job.indexOf(iconCommand));
+    assert.ok(job.indexOf(iconCommand) < job.indexOf(consumer));
+  }
+});
