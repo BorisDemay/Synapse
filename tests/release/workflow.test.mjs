@@ -50,6 +50,7 @@ test("parallel release work remains gated by all checks without duplicate verifi
   assert.match(workflow, /tauri build --bundles/u);
   assert.match(workflow, /cache-on-failure: true/u);
   assert.match(workflow, /cache-to: type=gha,scope=synapse-server,mode=max/u);
+  assert.match(workflow, /transiently unsuccessful; retrying once/u);
 });
 
 test("release workflows pin every third-party action to an immutable commit", async () => {

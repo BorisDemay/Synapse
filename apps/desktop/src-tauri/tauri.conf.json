@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "org.synapse.desktop",
   "build": {
-    "beforeBuildCommand": "corepack pnpm --dir ../.. --filter @synapse/desktop build && corepack pnpm --dir ../.. --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg",
+    "beforeBuildCommand": "pnpm --dir ../.. --filter @synapse/desktop build && pnpm --dir ../.. --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg",
     "beforeDevCommand": "pnpm --filter @synapse/desktop dev",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
