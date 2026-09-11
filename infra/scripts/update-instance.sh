@@ -17,10 +17,21 @@ command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
 headers=(-H 'Accept: application/vnd.github+json')
+curl_config=""
+tmp=""
+cleanup() {
+  rm -f "$tmp" "$curl_config"
+}
+trap cleanup EXIT
+
 if [[ -r "$TOKEN_FILE" ]]; then
   token="$(tr -d '\r\n' < "$TOKEN_FILE")"
   [[ "$token" =~ ^gh[pousr]_[A-Za-z0-9_]+$ ]] || { echo "invalid update token" >&2; exit 2; }
-  headers+=(-H "Authorization: Bearer $token")
+  curl_config="$(mktemp "${TMPDIR:-/tmp}/synapse-update-curl.XXXXXX")"
+  chmod 0600 "$curl_config"
+  printf 'header = Authorization: Bearer %s\n' "$token" > "$curl_config"
+  unset token
+  headers+=(--config "$curl_config")
 fi
 
 release="$(curl --fail --silent --show-error --max-time 20 "${headers[@]}" "$API/repos/$REPOSITORY/releases/latest")"
@@ -39,7 +50,6 @@ incoming="${SYNAPSE_DEPLOY_INCOMING:-$ROOT/incoming}"
 install -d -m 0750 "$incoming"
 archive="$incoming/synapse-$version.tar.gz"
 tmp="$archive.part"
-trap 'rm -f "$tmp"' EXIT
 curl --fail --silent --show-error --location --max-time 300 "${headers[@]}" "$asset" --output "$tmp"
 test -s "$tmp"
 mv "$tmp" "$archive"
