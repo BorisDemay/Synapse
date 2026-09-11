@@ -644,7 +644,11 @@ try {
     201,
   );
   await launch();
-  await driver.wait(until.elementLocated(By.id("unlock-passphrase")), timeout);
+  await poll(
+    async () =>
+      (await driver.findElements(By.id("unlock-passphrase"))).length === 1,
+    "native restart unlock form",
+  );
   await (await field("unlock-passphrase")).sendKeys(phrase);
   await driver.findElement(By.css('form button[type="submit"]')).click();
   await waitVault();
