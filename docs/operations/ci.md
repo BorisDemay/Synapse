@@ -101,6 +101,13 @@ runner puis nettoie son cluster dans une étape `always()`. La configuration
 Windows a été revue ; son exécution réelle doit être observée dans le job
 Windows. Les résultats locaux de cette revue sont Linux/WSL2 et Chromium.
 
+WebView2 150+ ignore les variables `WEBVIEW2_*` lorsque le processus est
+élevé, ce qui concerne les runners Windows GitHub. Le harness passe donc
+le port CDP via `additionalBrowserArgs` dans la configuration Tauri
+temporaire du build `--debug --no-bundle`, puis connecte EdgeDriver à ce
+port loopback. Ce réglage n'est pas ajouté au build distribué. Voir
+[l'explication Microsoft](https://github.com/MicrosoftEdge/WebView2Feedback/issues/5645).
+
 ## Workflows GitHub
 
 | Fichier                              | Rôle                                                                                 |
@@ -110,6 +117,11 @@ Windows. Les résultats locaux de cette revue sont Linux/WSL2 et Chromium.
 
 Le job final reçoit seul `contents: write`. Protéger `main` avec le statut
 `verify` requis. Les pushes directs déclenchent le même pipeline complet.
+
+Un push vers `ci/windows-native` exécute uniquement le parcours natif Windows
+du workflow de vérification, sans secrets, packaging ni déploiement. Cette
+branche sert à diagnostiquer le runner sans relancer toute la release ; les
+pull requests gardent la vérification complète et les deux plateformes.
 
 Les jobs de vérification, desktop Windows/Linux et images démarrent en
 parallèle. La publication attend explicitement leur réussite à tous. `just

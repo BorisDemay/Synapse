@@ -24,6 +24,7 @@ import {
   waitForReady,
 } from "../../../tests/harness/lifecycle.mjs";
 import { resolveDesktopBinaryPath } from "./native-webdriver-path.mjs";
+import { nativeTestConfig } from "./native-webdriver-config.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -274,6 +275,8 @@ try {
   const offlinePort = await availablePort();
   const webdriverPort = await availablePort();
   const nativePort = await availablePort();
+  const debugPort =
+    process.platform === "win32" ? await availablePort() : undefined;
   const config = JSON.parse(
     await readFile(
       path.join(root, "apps/desktop/src-tauri/tauri.conf.json"),
@@ -283,15 +286,14 @@ try {
   const override = path.join(temporary, "tauri-e2e.json");
   await writeFile(
     override,
-    JSON.stringify({
-      identifier,
-      app: {
-        windows: config.app.windows.map((window) => ({
-          ...window,
-          dataDirectory: path.join(temporary, "webview"),
-        })),
-      },
-    }),
+    JSON.stringify(
+      nativeTestConfig(config, {
+        identifier,
+        dataDirectory: path.join(temporary, "webview"),
+        platform: process.platform,
+        debugPort,
+      }),
+    ),
   );
   await run(
     process.execPath,
@@ -345,13 +347,8 @@ try {
     );
     capabilities.set("unhandledPromptBehavior", "accept");
     if (process.platform === "win32") {
-      const debugPort = await availablePort();
       windowsApp = spawn(binary, [], {
-        env: {
-          ...env,
-          WEBVIEW2_USER_DATA_FOLDER: path.join(temporary, "webview"),
-          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${debugPort} --remote-debugging-address=127.0.0.1`,
-        },
+        env,
         stdio: "inherit",
       });
       await waitForReady(
@@ -362,6 +359,7 @@ try {
       capabilities.set("ms:edgeOptions", {
         debuggerAddress: `127.0.0.1:${debugPort}`,
       });
+      console.log("Windows WebView2 debugging endpoint ready");
     } else {
       capabilities.set("tauri:options", { application: binary });
     }
