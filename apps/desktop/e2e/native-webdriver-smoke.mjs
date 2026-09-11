@@ -174,9 +174,17 @@ async function nativePicker(directory) {
       "native selection closes dialog",
     );
   } else {
-    const keys = directory ? ["%d", directory, "{ENTER}", "%s"] : ["{ESC}"];
-    const script = `$shell = New-Object -ComObject WScript.Shell; $end=(Get-Date).AddSeconds(30); while (!( $shell.AppActivate('Choisir un dossier de coffre Synapse'))) { if((Get-Date)-gt $end){throw 'folder dialog timeout'}; Start-Sleep -Milliseconds 100 }; ${keys.map((value) => `$shell.SendKeys('${value.replaceAll("'", "''")}'); Start-Sleep -Milliseconds 300;`).join(" ")}`;
-    await run("powershell", ["-NoProfile", "-Command", script]);
+    const args = [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      path.join(root, "apps/desktop/e2e/native-picker-windows.ps1"),
+      "-AppProcessId",
+      String(windowsApp.pid),
+    ];
+    if (directory) args.push("-Directory", directory);
+    await run("powershell", args, { timeoutMs: 70000 });
   }
 }
 async function readNotes(directory) {
@@ -711,7 +719,7 @@ try {
         `
       Add-Type -AssemblyName System.Windows.Forms,System.Drawing;
       $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen;
-      $bitmap = New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height;
+      $bitmap = [System.Drawing.Bitmap]::new($bounds.Width,$bounds.Height);
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
       $graphics.CopyFromScreen($bounds.Left,$bounds.Top,0,0,$bounds.Size);
       $bitmap.Save((Join-Path $env:RUNNER_TEMP 'synapse-native-failure.desktop.png'));
@@ -767,7 +775,12 @@ try {
     cleanup.push(
       ...(await Promise.allSettled(
         [temporary, ...windowsOwnedProfiles].map((profile) =>
-          rm(profile, { recursive: true, force: true }),
+          rm(profile, {
+            recursive: true,
+            force: true,
+            maxRetries: 10,
+            retryDelay: 200,
+          }),
         ),
       )),
     );
