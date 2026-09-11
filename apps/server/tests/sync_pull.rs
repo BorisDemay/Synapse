@@ -5,6 +5,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
+use rand::RngCore;
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -370,6 +371,105 @@ async fn pagination_resumes_from_the_persisted_opaque_cursor_without_a_duplicate
             .await
             .expect("cursor is persisted"),
         1
+    );
+}
+
+#[tokio::test]
+async fn pull_response_budget_keeps_the_first_large_opaque_operation_and_pages_without_gaps() {
+    let _guard = sync_test_lock().await;
+    let pool = test_pool().await;
+    synapse_server::run_migrations(&pool)
+        .await
+        .expect("migrations apply");
+    reset_sync_tables(&pool).await;
+
+    let owner_id = create_user(&pool, "member-a@example.test").await;
+    let vault_id = create_vault(&pool, owner_id).await;
+    let mut first_ciphertext = vec![0; synapse_server::sync::apply::MAX_CIPHERTEXT_BYTES];
+    let mut second_ciphertext = vec![0; synapse_server::sync::apply::MAX_CIPHERTEXT_BYTES];
+    rand::thread_rng().fill_bytes(&mut first_ciphertext);
+    rand::thread_rng().fill_bytes(&mut second_ciphertext);
+    insert_operation(&pool, vault_id, 1, uuid_v7(11), first_ciphertext).await;
+    insert_operation(&pool, vault_id, 2, uuid_v7(12), second_ciphertext).await;
+    let session = synapse_server::auth::session::create(&pool, owner_id, SystemTime::now())
+        .await
+        .expect("session is created");
+    let stranger_id = create_user(&pool, "member-b@example.test").await;
+    let stranger_session =
+        synapse_server::auth::session::create(&pool, stranger_id, SystemTime::now())
+            .await
+            .expect("stranger session is created");
+    let app = synapse_server::router(Some(pool));
+
+    let hidden = app
+        .clone()
+        .oneshot(pull_request(
+            vault_id,
+            &stranger_session.cookie_value(),
+            None,
+            2,
+        ))
+        .await
+        .expect("hidden vault response");
+    assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
+
+    let first_body = app
+        .clone()
+        .oneshot(pull_request(vault_id, &session.cookie_value(), None, 2))
+        .await
+        .expect("first page")
+        .into_body()
+        .collect()
+        .await
+        .expect("first response body is readable")
+        .to_bytes();
+    assert!(
+        first_body.len() <= synapse_server::sync::pull::MAX_PULL_RESPONSE_BYTES,
+        "pull response stays within the response budget"
+    );
+    let first: serde_json::Value = serde_json::from_slice(&first_body).expect("first page is JSON");
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("large first operation produces a cursor")
+        .to_owned();
+    assert_eq!(
+        first["operations"]
+            .as_array()
+            .expect("operations array")
+            .len(),
+        1
+    );
+    assert_eq!(
+        first["operations"][0]["operation_id"],
+        uuid_v7(11).to_string()
+    );
+
+    let second: serde_json::Value = serde_json::from_slice(
+        &app.oneshot(pull_request(
+            vault_id,
+            &session.cookie_value(),
+            Some(&cursor),
+            2,
+        ))
+        .await
+        .expect("second page")
+        .into_body()
+        .collect()
+        .await
+        .expect("second response body is readable")
+        .to_bytes(),
+    )
+    .expect("second page is JSON");
+    assert_eq!(
+        second["operations"]
+            .as_array()
+            .expect("operations array")
+            .len(),
+        1
+    );
+    assert_eq!(
+        second["operations"][0]["operation_id"],
+        uuid_v7(12).to_string()
     );
 }
 

@@ -38,11 +38,8 @@ fn sync_gate() -> &'static Arc<Semaphore> {
     GATE.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_SYNC_REQUESTS)))
 }
 
-async fn acquire_sync_slot() -> Option<tokio::sync::OwnedSemaphorePermit> {
-    timeout(Duration::from_secs(1), sync_gate().clone().acquire_owned())
-        .await
-        .ok()
-        .and_then(Result::ok)
+fn acquire_sync_slot() -> Option<tokio::sync::OwnedSemaphorePermit> {
+    sync_gate().clone().try_acquire_owned().ok()
 }
 
 /// Bound the whole request, including body extraction, before a handler can
@@ -50,7 +47,7 @@ async fn acquire_sync_slot() -> Option<tokio::sync::OwnedSemaphorePermit> {
 /// until the response body is ready, so slow uploads cannot bypass the global
 /// synchronization limit.
 pub async fn limits(request: Request, next: Next) -> Response {
-    let Some(_slot) = acquire_sync_slot().await else {
+    let Some(_slot) = acquire_sync_slot() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     match timeout(SYNC_REQUEST_TIMEOUT, next.run(request)).await {
