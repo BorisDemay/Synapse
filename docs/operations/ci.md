@@ -111,6 +111,30 @@ Windows. Les résultats locaux de cette revue sont Linux/WSL2 et Chromium.
 Le job final reçoit seul `contents: write`. Protéger `main` avec le statut
 `verify` requis. Les pushes directs déclenchent le même pipeline complet.
 
+Les jobs de vérification, desktop Windows/Linux et images démarrent en
+parallèle. La publication attend explicitement leur réussite à tous. `just
+verify` conserve ses contrôles ; les tests Rust desktop et release ne sont
+pas relancés une seconde fois après cette commande.
+
+Les outils `just`, `cargo-nextest`, `cargo-deny` et `cargo-cyclonedx` sont
+installés depuis des binaires précompilés avec vérification de checksum via
+une action fixée à un commit. Les dépendances Rust des deux workspaces et
+le driver Linux sont mis en cache, y compris après un échec ; seules les
+exécutions `main` écrivent ces caches. Les images utilisent des caches de
+couches BuildKit distincts et sont exportées directement en archives Docker.
+Le contexte Docker exclut les dépendances locales, les compilations, les
+worktrees et les secrets locaux.
+
+Les paquets publiés sont l'AppImage Linux et l'installeur NSIS Windows ; les
+formats DEB/RPM/MSI ne sont pas construits dans cette release. Les uploads
+d'artefacts utilisent une compression nulle pour éviter de recompresser les
+installeurs déjà compressés. Le contrôle de signature précède la compilation.
+
+Le premier passage remplit les caches. Aucun délai maximal de release n'est
+garanti : mesurer séparément une exécution froide et une exécution avec
+caches avant d'annoncer un gain. Les caches n'incluent pas les clés privées
+ni les fichiers PFX.
+
 La version est `0.1.<github.run_number>`. Si le workflow est renommé ou son
 compteur réinitialisé, augmenter la série au-dessus de toute version déjà
 publiée avant de réactiver l’updater.

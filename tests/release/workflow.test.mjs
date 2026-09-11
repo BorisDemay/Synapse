@@ -29,6 +29,19 @@ test("pull requests retain verification without publication", async () => {
   assert.doesNotMatch(workflow, /gh release create|synapse-deploy/u);
 });
 
+test("parallel release work remains gated by all checks without duplicate verification", async () => {
+  const workflow = await readFile(".github/workflows/main-release.yml", "utf8");
+  const justfile = await readFile("justfile", "utf8");
+  assert.doesNotMatch(workflow, /needs: verify/u);
+  assert.match(workflow, /needs: \[verify, desktop, images\]/u);
+  assert.match(workflow, /- run: just verify/u);
+  assert.match(justfile, /verify: [^\n]*test-native-rust[^\n]*test-release/u);
+  assert.doesNotMatch(workflow, /- run: cargo test --manifest-path/u);
+  assert.match(workflow, /tauri build --bundles/u);
+  assert.match(workflow, /cache-on-failure: true/u);
+  assert.match(workflow, /cache-to: type=gha,scope=synapse-server,mode=max/u);
+});
+
 test("release workflows pin every third-party action to an immutable commit", async () => {
   for (const path of [
     ".github/workflows/verify.yml",
@@ -93,7 +106,7 @@ test("both native matrices provision isolated Windows PostgreSQL and gate releas
       /dbus-run-session -- xvfb-run -a pnpm --filter @synapse\/desktop test:native/u,
     );
     assert.match(workflow, /webkit2gtk-driver xvfb xdotool dbus-x11 openbox/u);
-    assert.match(workflow, /cargo install tauri-driver --locked/u);
+    assert.match(workflow, /command -v tauri-driver[^\n]*cargo install tauri-driver --version 2\.0\.6 --locked/u);
     assert.match(workflow, /Native Tauri recovery/u);
     if (path.includes("main-release")) {
       assert.ok(
