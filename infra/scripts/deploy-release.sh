@@ -27,6 +27,8 @@ fi
 
 (cd "$STAGE" && sha256sum --check SHA256SUMS)
 node "$STAGE/validate-release.mjs" "$STAGE/release"
+python3 "$SYNAPSE_DEPLOY_ROOT/infra/scripts/check-deployment-layout.py" \
+  "$SYNAPSE_DEPLOY_ROOT/docker-compose.yml" "$STAGE/docker-compose.yml"
 
 docker load --input "$STAGE/synapse-server-$VERSION.tar"
 docker load --input "$STAGE/synapse-web-$VERSION.tar"

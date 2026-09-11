@@ -13,6 +13,7 @@ install -d -o root -g root -m 0755 "$DEPLOY_ROOT/releases" "$DEPLOY_ROOT/backups
 install -d -o root -g root -m 0755 "$DEPLOY_ROOT/infra/scripts"
 install -o root -g root -m 0755 infra/scripts/backup.sh "$DEPLOY_ROOT/infra/scripts/backup.sh"
 install -o root -g root -m 0644 infra/scripts/backup_manifest.py "$DEPLOY_ROOT/infra/scripts/backup_manifest.py"
+install -o root -g root -m 0755 infra/scripts/check-deployment-layout.py "$DEPLOY_ROOT/infra/scripts/check-deployment-layout.py"
 install -o root -g root -m 0755 infra/scripts/deploy-release.sh /usr/local/sbin/synapse-deploy
 install -o root -g root -m 0755 infra/scripts/synapse-deploy-ssh /usr/local/sbin/synapse-deploy-ssh
 
