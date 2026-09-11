@@ -591,12 +591,15 @@ try {
   const envelope = await (
     await api(`/v1/vaults/${vaultId}/envelope`, undefined, cookie)
   ).json();
-  const { parseWrappedVaultKey, unlockVaultKey, uuidV7 } =
-    await import("../../web/src/crypto/vault-key.ts");
-  const { encodeNotePlaintext } =
-    await import("../../web/src/crypto/vault-item.ts");
-  const { xchacha20poly1305 } =
-    await import("../../web/node_modules/@noble/ciphers/chacha.js");
+  const { parseWrappedVaultKey, unlockVaultKey, uuidV7 } = await import(
+    "../../web/src/crypto/vault-key.ts"
+  );
+  const { encodeNotePlaintext } = await import(
+    "../../web/src/crypto/vault-item.ts"
+  );
+  const { xchacha20poly1305 } = await import(
+    "../../web/node_modules/@noble/ciphers/chacha.js"
+  );
   const key = await unlockVaultKey(
     parseWrappedVaultKey(envelope.bytes),
     phrase,
