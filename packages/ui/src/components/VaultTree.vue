@@ -30,7 +30,7 @@ const emit = defineEmits<{
   select: [id: string];
 }>();
 
-const activeIndex = ref(0);
+const activeId = ref<string>();
 const treeElement = ref<HTMLElement>();
 const treeItems = new Map<number, HTMLElement>();
 const virtualStart = ref(0);
@@ -40,35 +40,29 @@ const VIRTUAL_WINDOW_SIZE = 80;
 
 const collapsed = ref(new Set<string>());
 
+interface VisibleTreeNode {
+  level: number;
+  node: VaultTreeNode;
+  posInSet: number;
+  setSize: number;
+}
+
 const usesVirtualWindow = computed(
-  () =>
-    !props.nested &&
-    props.nodes.length > VIRTUAL_WINDOW_SIZE &&
-    !props.nodes.some(isFolder),
+  () => !props.nested && visibleNodes.value.length > VIRTUAL_WINDOW_SIZE,
 );
 const renderedStart = computed(() =>
   usesVirtualWindow.value ? virtualStart.value : 0,
 );
 const renderedNodes = computed(() =>
   usesVirtualWindow.value
-    ? props.nodes.slice(
+    ? visibleNodes.value.slice(
         renderedStart.value,
         renderedStart.value + VIRTUAL_WINDOW_SIZE,
       )
-    : props.nodes,
+    : visibleNodes.value,
 );
 const renderedEnd = computed(
   () => renderedStart.value + renderedNodes.value.length,
-);
-
-watch(
-  () => props.nodes.length,
-  () => {
-    virtualStart.value = Math.min(
-      virtualStart.value,
-      Math.max(0, props.nodes.length - VIRTUAL_WINDOW_SIZE),
-    );
-  },
 );
 
 function setTreeItem(
@@ -87,7 +81,7 @@ function showIndex(index: number) {
   if (index < renderedStart.value || index >= renderedEnd.value) {
     virtualStart.value = Math.max(
       0,
-      Math.min(index, props.nodes.length - VIRTUAL_WINDOW_SIZE),
+      Math.min(index, visibleNodes.value.length - VIRTUAL_WINDOW_SIZE),
     );
     if (treeElement.value) {
       treeElement.value.scrollTop = virtualStart.value * ROW_HEIGHT;
@@ -99,7 +93,7 @@ function onScroll() {
   if (usesVirtualWindow.value && treeElement.value) {
     virtualStart.value = Math.min(
       Math.floor(treeElement.value.scrollTop / ROW_HEIGHT),
-      props.nodes.length - VIRTUAL_WINDOW_SIZE,
+      Math.max(0, visibleNodes.value.length - VIRTUAL_WINDOW_SIZE),
     );
   }
 }
@@ -108,11 +102,72 @@ function isFolder(node: VaultTreeNode | undefined) {
   return node?.kind === "folder";
 }
 
+function findNode(
+  nodes: VaultTreeNode[],
+  id: string,
+): VaultTreeNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = node.children && findNode(node.children, id);
+    if (child) return child;
+  }
+  return undefined;
+}
+
+function containsNode(node: VaultTreeNode, id: string): boolean {
+  return (
+    node.id === id ||
+    node.children?.some((child) => containsNode(child, id)) === true
+  );
+}
+
 function isExpanded(id: string) {
   return !collapsed.value.has(id);
 }
 
+const visibleNodes = computed<VisibleTreeNode[]>(() => {
+  const result: VisibleTreeNode[] = [];
+
+  function append(nodes: VaultTreeNode[], level: number) {
+    for (const [index, node] of nodes.entries()) {
+      result.push({
+        level,
+        node,
+        posInSet: index + 1,
+        setSize: nodes.length,
+      });
+      if (node.children?.length && isExpanded(node.id)) {
+        append(node.children, level + 1);
+      }
+    }
+  }
+
+  append(props.nodes, 1);
+  return result;
+});
+
+const activeIndex = computed(() => {
+  const index = visibleNodes.value.findIndex(
+    (entry) => entry.node.id === activeId.value,
+  );
+  return index === -1 ? 0 : index;
+});
+
+watch(
+  () => visibleNodes.value.length,
+  () => {
+    virtualStart.value = Math.min(
+      virtualStart.value,
+      Math.max(0, visibleNodes.value.length - VIRTUAL_WINDOW_SIZE),
+    );
+  },
+);
+
 function toggleFolder(id: string) {
+  const folder = findNode(props.nodes, id);
+  if (folder && activeId.value && containsNode(folder, activeId.value)) {
+    activeId.value = folder.id;
+  }
   const next = new Set(collapsed.value);
   if (next.has(id)) {
     next.delete(id);
@@ -123,7 +178,8 @@ function toggleFolder(id: string) {
 }
 
 async function select(index: number) {
-  const node = props.nodes[index];
+  const entry = visibleNodes.value[index];
+  const node = entry?.node;
 
   if (!node) {
     return;
@@ -132,7 +188,7 @@ async function select(index: number) {
     toggleFolder(node.id);
     return;
   }
-  activeIndex.value = index;
+  activeId.value = node.id;
   showIndex(index);
   emit("select", node.id);
   await nextTick();
@@ -140,14 +196,14 @@ async function select(index: number) {
 }
 
 function attach(index: number) {
-  const node = props.nodes[index];
-  if (node) {
+  const node = visibleNodes.value[index]?.node;
+  if (node && !isFolder(node)) {
     emit("attach", node.id);
   }
 }
 
 function remove(index: number) {
-  const node = props.nodes[index];
+  const node = visibleNodes.value[index]?.node;
   if (node && !isFolder(node)) {
     emit("delete", node.id);
   }
@@ -160,7 +216,10 @@ function onDeleteClick(event: MouseEvent, index: number) {
 }
 
 function onItemClick(event: MouseEvent, index: number) {
-  if (event.ctrlKey || event.metaKey) {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !isFolder(visibleNodes.value[index]?.node)
+  ) {
     event.preventDefault();
     attach(index);
     return;
@@ -198,18 +257,22 @@ async function selectNext(index: number) {
       role="presentation"
     />
     <li
-      v-for="(node, renderedIndex) in renderedNodes"
-      :key="node.id"
+      v-for="(entry, renderedIndex) in renderedNodes"
+      :key="entry.node.id"
       class="vault-tree-item"
       :ref="(element) => setTreeItem(element, renderedStart + renderedIndex)"
-      :aria-posinset="renderedStart + renderedIndex + 1"
-      :aria-selected="renderedStart + renderedIndex === activeIndex"
-      :aria-setsize="nodes.length"
-      :data-attached="
-        (attachedIds ?? []).includes(node.id) ? 'true' : undefined
+      :aria-expanded="
+        entry.node.kind === 'folder' ? isExpanded(entry.node.id) : undefined
       "
-      :data-kind="node.kind"
-      :data-status="node.syncStatus"
+      :aria-level="entry.level"
+      :aria-posinset="entry.posInSet"
+      :aria-selected="renderedStart + renderedIndex === activeIndex"
+      :aria-setsize="entry.setSize"
+      :data-attached="
+        (attachedIds ?? []).includes(entry.node.id) ? 'true' : undefined
+      "
+      :data-kind="entry.node.kind"
+      :data-status="entry.node.syncStatus"
       :data-tree-index="renderedStart + renderedIndex"
       role="treeitem"
       :tabindex="renderedStart + renderedIndex === activeIndex ? 0 : -1"
@@ -220,13 +283,13 @@ async function selectNext(index: number) {
       @keydown.enter.meta.prevent="attach(renderedStart + renderedIndex)"
     >
       <div class="vault-tree-row">
-        <span class="vault-tree-label">{{ node.label }}</span>
+        <span class="vault-tree-label">{{ entry.node.label }}</span>
         <button
-          v-if="node.kind !== 'folder'"
+          v-if="entry.node.kind !== 'folder'"
           class="vault-tree-delete"
           type="button"
           tabindex="-1"
-          :aria-label="`Supprimer ${node.label}`"
+          :aria-label="`Supprimer ${entry.node.label}`"
           @click="onDeleteClick($event, renderedStart + renderedIndex)"
           @mousedown.prevent
         >
@@ -242,19 +305,12 @@ async function selectNext(index: number) {
           </svg>
         </button>
       </div>
-      <VaultTree
-        v-if="node.children?.length && isExpanded(node.id)"
-        nested
-        :attached-ids="attachedIds"
-        :nodes="node.children"
-        @attach="emit('attach', $event)"
-        @delete="emit('delete', $event)"
-        @select="emit('select', $event)"
-      />
     </li>
     <li
-      v-if="usesVirtualWindow && renderedEnd < nodes.length"
-      :style="{ height: `${(nodes.length - renderedEnd) * ROW_HEIGHT}px` }"
+      v-if="usesVirtualWindow && renderedEnd < visibleNodes.length"
+      :style="{
+        height: `${(visibleNodes.length - renderedEnd) * ROW_HEIGHT}px`,
+      }"
       aria-hidden="true"
       role="presentation"
     />

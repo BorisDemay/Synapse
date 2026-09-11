@@ -9,6 +9,22 @@ const nodes = [
 ];
 
 describe("VaultTree", () => {
+  it("borne les lignes matérialisées pour 10 000 feuilles réparties dans des dossiers", () => {
+    const nestedNodes = Array.from({ length: 100 }, (_, folderIndex) => ({
+      children: Array.from({ length: 100 }, (_, noteIndex) => ({
+        id: `folder-${folderIndex}/note-${noteIndex}`,
+        kind: "note" as const,
+        label: `Note ${folderIndex}-${noteIndex}`,
+      })),
+      id: `folder:${folderIndex}`,
+      kind: "folder" as const,
+      label: `Dossier ${folderIndex}`,
+    }));
+    const wrapper = mount(VaultTree, { props: { nodes: nestedNodes } });
+
+    expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(80);
+  });
+
   it("borne le nombre de lignes matérialisées pour un coffre de 10 000 notes", () => {
     const largeNodes = Array.from({ length: 10_000 }, (_, index) => ({
       id: `note-${index}`,
@@ -17,6 +33,129 @@ describe("VaultTree", () => {
     const wrapper = mount(VaultTree, { props: { nodes: largeNodes } });
 
     expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(80);
+  });
+
+  it("replie un dossier sans matérialiser ses descendants", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              { id: "projets/alpha.md", kind: "note", label: "Alpha" },
+              { id: "projets/beta.md", kind: "note", label: "Beta" },
+            ],
+            id: "folder:projets",
+            kind: "folder",
+            label: "projets",
+          },
+        ],
+      },
+    });
+    const folder = wrapper.get('[data-kind="folder"]');
+
+    expect(folder.attributes("aria-expanded")).toBe("true");
+    expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(3);
+
+    await folder.trigger("click");
+
+    expect(folder.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(1);
+  });
+
+  it("conserve la sélection d'une feuille lorsque les lignes précédentes sont repliées", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              { id: "a/one.md", kind: "note", label: "One" },
+              { id: "a/two.md", kind: "note", label: "Two" },
+            ],
+            id: "folder:a",
+            kind: "folder",
+            label: "A",
+          },
+          {
+            children: [{ id: "b/three.md", kind: "note", label: "Three" }],
+            id: "folder:b",
+            kind: "folder",
+            label: "B",
+          },
+        ],
+      },
+    });
+
+    await wrapper.get('[data-tree-index="4"]').trigger("click");
+    await wrapper.get('[data-tree-index="0"]').trigger("click");
+
+    const selected = wrapper.get('[data-tree-index="2"]');
+    expect(selected.attributes("aria-selected")).toBe("true");
+    expect(selected.attributes("tabindex")).toBe("0");
+  });
+
+  it("focalise une feuille hiérarchique hors de la fenêtre avec ArrowDown", async () => {
+    const nestedNodes = Array.from({ length: 100 }, (_, folderIndex) => ({
+      children: Array.from({ length: 100 }, (_, noteIndex) => ({
+        id: `folder-${folderIndex}/note-${noteIndex}`,
+        kind: "note" as const,
+        label: `Note ${folderIndex}-${noteIndex}`,
+      })),
+      id: `folder:${folderIndex}`,
+      kind: "folder" as const,
+      label: `Dossier ${folderIndex}`,
+    }));
+    const wrapper = mount(VaultTree, {
+      attachTo: document.body,
+      props: { nodes: nestedNodes },
+    });
+    const tree = wrapper.get('[role="tree"]');
+
+    (tree.element as HTMLElement).scrollTop = 1_000 * 56;
+    await tree.trigger("scroll");
+    const current = wrapper.get('[data-tree-index="1000"]');
+    (current.element as HTMLElement).focus();
+    await current.trigger("keydown", { key: "ArrowDown" });
+
+    const selected = wrapper.get('[data-tree-index="1001"]');
+    expect(wrapper.emitted("select")?.[0]).toEqual(["folder-9/note-91"]);
+    expect(document.activeElement).toBe(selected.element);
+    expect(selected.attributes("aria-level")).toBe("2");
+    expect(selected.attributes("aria-posinset")).toBe("92");
+    expect(selected.attributes("aria-setsize")).toBe("100");
+  });
+
+  it("préserve attach et delete sur les feuilles avec les attributs ARIA hiérarchiques", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              { id: "projets/roadmap.md", kind: "note", label: "Roadmap" },
+              { id: "projets/image.png", kind: "attachment", label: "image" },
+            ],
+            id: "folder:projets",
+            kind: "folder",
+            label: "projets",
+          },
+        ],
+      },
+    });
+    const folder = wrapper.get('[data-kind="folder"]');
+    const note = wrapper.get('[data-tree-index="1"]');
+
+    expect(folder.attributes("aria-level")).toBe("1");
+    expect(folder.attributes("aria-posinset")).toBe("1");
+    expect(folder.attributes("aria-setsize")).toBe("1");
+    expect(folder.find('button[aria-label^="Supprimer"]').exists()).toBe(false);
+    expect(note.attributes("aria-level")).toBe("2");
+    expect(note.attributes("aria-posinset")).toBe("1");
+    expect(note.attributes("aria-setsize")).toBe("2");
+
+    await note.trigger("click", { ctrlKey: true });
+    await note.get('button[aria-label="Supprimer Roadmap"]').trigger("click");
+
+    expect(wrapper.emitted("attach")?.[0]).toEqual(["projets/roadmap.md"]);
+    expect(wrapper.emitted("delete")?.[0]).toEqual(["projets/roadmap.md"]);
   });
 
   it("sélectionne et focalise une note virtualisée sans perdre sa commande de suppression", async () => {
