@@ -647,7 +647,15 @@ try {
   await driver.wait(until.elementLocated(By.id("unlock-passphrase")), timeout);
   await (await field("unlock-passphrase")).sendKeys(phrase);
   await driver.findElement(By.css('form button[type="submit"]')).click();
-  await waitVault();
+  await poll(
+    async () =>
+      (
+        await driver.findElements(
+          By.css('[aria-label="Résolution de conflit"]'),
+        )
+      ).length === 1,
+    "native conflict materialization",
+  );
   assert.equal(
     await vaultCall(
       `return vault.notes.get(${JSON.stringify(noteId)}).content.includes("Offline native competing line.");`,
