@@ -29,7 +29,7 @@ if [[ -r "$TOKEN_FILE" ]]; then
   [[ "$token" =~ ^gh[pousr]_[A-Za-z0-9_]+$ ]] || { echo "invalid update token" >&2; exit 2; }
   curl_config="$(mktemp "${TMPDIR:-/tmp}/synapse-update-curl.XXXXXX")"
   chmod 0600 "$curl_config"
-  printf 'header = Authorization: Bearer %s\n' "$token" > "$curl_config"
+  printf 'header = "Authorization: Bearer %s"\n' "$token" > "$curl_config"
   unset token
   headers+=(--config "$curl_config")
 fi

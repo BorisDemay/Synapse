@@ -5,6 +5,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -49,7 +50,8 @@ if [[ "\${SYNAPSE_TEST_EXPECT_AUTH:-0}" == "1" ]]; then
       echo "curl config permissions are not restrictive" >&2
       exit 91
     }
-    grep -Fx -- "header = Authorization: Bearer $SYNAPSE_TEST_EXPECTED_TOKEN" "$config" >/dev/null || {
+    expected_header='header = "Authorization: Bearer '"\${SYNAPSE_TEST_EXPECTED_TOKEN}"'"'
+    grep -Fx -- "$expected_header" "$config" >/dev/null || {
       echo "curl config lacks the effective authorization header" >&2
       exit 92
     }
@@ -147,6 +149,24 @@ async function runUpdater({ token }) {
   return { captures, result, root, token };
 }
 
+test("curl parses a quoted Authorization curl-config directive without whitespace warning", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "synapse-curl-config-"));
+  const config = join(root, "curl.config");
+  t.after(() => rm(root, { force: true, recursive: true }));
+  await writeFile(config, 'header = "Authorization: Bearer fixture-token"\n', {
+    mode: 0o600,
+  });
+
+  const { stderr, stdout } = await execFileAsync("curl", [
+    "--config",
+    config,
+    "--version",
+  ]);
+
+  assert.match(stdout, /^curl /u);
+  assert.doesNotMatch(stderr, /uses unquoted whitespace/u);
+});
+
 test("pull updater authenticates both private GitHub downloads without exposing its token", async () => {
   const token = `ghp_${"x".repeat(36)}`;
   const { captures, result, root } = await runUpdater({ token });
@@ -174,7 +194,16 @@ test("pull updater keeps public GitHub downloads unauthenticated", async () => {
 
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
-  assert.doesNotMatch(await readFile(join(captures, "curl-1.args"), "utf8"), /Authorization:/u);
-  assert.doesNotMatch(await readFile(join(captures, "curl-2.args"), "utf8"), /Authorization:/u);
-  assert.equal(await readFile(join(root, "incoming/synapse-0.1.1.tar.gz"), "utf8"), "archive");
+  assert.doesNotMatch(
+    await readFile(join(captures, "curl-1.args"), "utf8"),
+    /Authorization:/u,
+  );
+  assert.doesNotMatch(
+    await readFile(join(captures, "curl-2.args"), "utf8"),
+    /Authorization:/u,
+  );
+  assert.equal(
+    await readFile(join(root, "incoming/synapse-0.1.1.tar.gz"), "utf8"),
+    "archive",
+  );
 });
