@@ -1,11 +1,11 @@
 [profile.default]
-# Server integration tests share one PostgreSQL database and use process-local
-# mutexes; serialize them across nextest binaries.
+# Only PostgreSQL-backed integration binaries share synapse_test. Serialize those
+# across nextest processes; pure server tests remain parallel with the workspace.
 default-filter = "all()"
 
 [test-groups]
 server-db = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'package(synapse-server)'
+filter = 'package(synapse-server) & (binary(account_settings) | binary(auth) | binary(csrf) | binary(health) | binary(sync_conflict) | binary(sync_pull) | binary(sync_push) | binary(vault_authorization) | binary(websocket))'
 test-group = 'server-db'
