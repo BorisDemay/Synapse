@@ -348,10 +348,16 @@ impl LocalFolderMirror {
 async fn ensure_root_directory(root: &Path) -> Result<(), String> {
     let mut directory = PathBuf::new();
 
-    for component in root.components() {
+    let mut components = root.components().peekable();
+    while let Some(component) = components.next() {
         match component {
             Component::CurDir => continue,
             Component::ParentDir => return Err("local folder is unavailable".into()),
+            Component::Prefix(_) if matches!(components.peek(), Some(Component::RootDir)) => {
+                // Wait for the root separator before inspecting a Windows prefix.
+                directory.push(component.as_os_str());
+                continue;
+            }
             _ => directory.push(component.as_os_str()),
         }
 

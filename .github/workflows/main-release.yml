@@ -130,6 +130,9 @@ jobs:
       - name: Install cached Linux Tauri driver
         if: runner.os == 'Linux'
         run: command -v tauri-driver >/dev/null || cargo install tauri-driver --version 2.0.6 --locked
+      - name: Native filesystem regression tests
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test local_folder
       - name: Native Tauri recovery
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a pnpm --filter @synapse/desktop test:native

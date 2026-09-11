@@ -50,10 +50,17 @@ impl VaultService {
         };
         let mut directory = PathBuf::new();
 
-        for component in root.components() {
+        let mut components = root.components().peekable();
+        while let Some(component) = components.next() {
             match component {
                 Component::CurDir => continue,
                 Component::ParentDir => return Err(VaultError::InvalidRoot),
+                Component::Prefix(_) if matches!(components.peek(), Some(Component::RootDir)) => {
+                    // A Windows drive/verbatim prefix is not a directory on its
+                    // own. Validate it together with the following root separator.
+                    directory.push(component.as_os_str());
+                    continue;
+                }
                 _ => directory.push(component.as_os_str()),
             }
 
@@ -65,7 +72,12 @@ impl VaultService {
             }
         }
 
-        Ok(Self { root: directory })
+        // Child paths are canonicalized before containment checks. Keep the
+        // same representation here (including Windows' extended-length prefix).
+        let root = tokio::fs::canonicalize(directory)
+            .await
+            .map_err(VaultError::Io)?;
+        Ok(Self { root })
     }
 
     pub async fn create_note(&self, path: &VaultPath, content: &str) -> VaultResult<()> {

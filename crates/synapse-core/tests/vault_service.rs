@@ -2,6 +2,24 @@ use synapse_core::{ContentHash, VaultPath, VaultService};
 use tempfile::tempdir;
 
 #[tokio::test]
+async fn ordinary_and_canonical_roots_support_nested_writes() {
+    let directory = tempdir().unwrap();
+    let canonical = tokio::fs::canonicalize(directory.path()).await.unwrap();
+    for (index, root) in [directory.path(), canonical.as_path()]
+        .into_iter()
+        .enumerate()
+    {
+        let vault = VaultService::open(root).await.expect("root opens");
+        let note = VaultPath::parse(&format!("notes/root-{index}.md")).unwrap();
+        vault
+            .create_note(&note, "# Canonical path")
+            .await
+            .expect("nested write stays inside the root");
+        assert_eq!(vault.read_note(&note).await.unwrap(), "# Canonical path");
+    }
+}
+
+#[tokio::test]
 async fn create_note_writes_markdown_inside_vault() {
     let directory = tempdir().unwrap();
     let vault = VaultService::open(directory.path()).await.unwrap();
