@@ -24,7 +24,7 @@ jobs:
       SYNAPSE_STORAGE_PATH: ${{ github.workspace }}/.ci-blobs
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      - uses: dtolnay/rust-toolchain@f40ffcd9367d9f12939873eb1018b921a783ffaa # stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
@@ -59,7 +59,7 @@ jobs:
       SYNAPSE_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      - uses: dtolnay/rust-toolchain@f40ffcd9367d9f12939873eb1018b921a783ffaa # stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
         with:
           version: 11.20.0
@@ -147,7 +147,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      - uses: dtolnay/rust-toolchain@f40ffcd9367d9f12939873eb1018b921a783ffaa # stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.0.0
         with:
           version: 11.20.0
