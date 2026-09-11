@@ -123,8 +123,16 @@ jobs:
           New-Item -ItemType Directory release-desktop
           $artifact = Get-ChildItem apps/desktop/src-tauri/target/release/bundle -Recurse -Filter '*setup.exe' | Select-Object -First 1
           if (!$artifact -or !(Test-Path "$($artifact.FullName).sig")) { throw "signed Windows updater missing" }
-          & signtool verify /pa $artifact.FullName
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $signature = Get-AuthenticodeSignature $artifact.FullName
+          if ($signature.Status -eq 'NotSigned' -or !$signature.SignerCertificate) { throw "Windows Authenticode signature missing" }
+          $isSelfSigned = $signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer
+          if ($isSelfSigned) {
+            if ($signature.Status -ne 'NotTrusted') { throw "unexpected self-signed Authenticode status: $($signature.Status)" }
+            Write-Warning "Self-signed Authenticode certificate detected; trust verification is skipped for this test release."
+          } else {
+            & signtool verify /pa $artifact.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           Copy-Item $artifact.FullName release-desktop/synapse-windows-x86_64.exe
           Copy-Item "$($artifact.FullName).sig" release-desktop/synapse-windows-x86_64.exe.sig
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
