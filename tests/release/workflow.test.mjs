@@ -14,7 +14,10 @@ test("main release is serialized, parity gated, and deploys before publishing", 
   );
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/u);
   assert.match(workflow, /WINDOWS_CERTIFICATE_PFX_BASE64/u);
-  assert.match(workflow, /timestampUrl\s*=\s*"https:\/\/timestamp\.digicert\.com"/u);
+  assert.match(
+    workflow,
+    /timestampUrl\s*=\s*"https:\/\/timestamp\.digicert\.com"/u,
+  );
 });
 
 test("pull requests retain verification without publication", async () => {
@@ -27,7 +30,10 @@ test("pull requests retain verification without publication", async () => {
 });
 
 test("release workflows pin every third-party action to an immutable commit", async () => {
-  for (const path of [".github/workflows/verify.yml", ".github/workflows/main-release.yml"]) {
+  for (const path of [
+    ".github/workflows/verify.yml",
+    ".github/workflows/main-release.yml",
+  ]) {
     const workflow = await readFile(path, "utf8");
     assert.doesNotMatch(workflow, /uses:\s*[^\s@]+@(?:v|stable|main|master)/u);
     for (const line of workflow.split("\n")) {
@@ -53,7 +59,10 @@ test("desktop-native runs the maintained native WebDriver smoke on every platfor
     workflow,
     /runner\.os == 'Windows'[\s\S]*?pnpm --filter @synapse\/desktop test:native/u,
   );
-  assert.equal(scripts["test:native"], "node --experimental-strip-types e2e/native-webdriver-smoke.mjs");
+  assert.equal(
+    scripts["test:native"],
+    "node --experimental-strip-types e2e/native-webdriver-smoke.mjs",
+  );
   assert.doesNotMatch(scripts["test:native"], /e2e\/native\.mjs/u);
 });
 
@@ -71,23 +80,33 @@ test("NAS deployment health-gates manifest-last activation and keeps rollback", 
 });
 
 test("both native matrices provision isolated Windows PostgreSQL and gate release bundles", async () => {
-  for (const path of [".github/workflows/verify.yml", ".github/workflows/main-release.yml"]) {
+  for (const path of [
+    ".github/workflows/verify.yml",
+    ".github/workflows/main-release.yml",
+  ]) {
     const workflow = await readFile(path, "utf8");
     assert.match(workflow, /native-ci-windows\.ps1 -Action start/u);
     assert.match(workflow, /native-ci-windows\.ps1 -Action stop/u);
     assert.match(workflow, /always\(\) && runner\.os == 'Windows'/u);
-    assert.match(workflow, /dbus-run-session -- xvfb-run -a pnpm --filter @synapse\/desktop test:native/u);
+    assert.match(
+      workflow,
+      /dbus-run-session -- xvfb-run -a pnpm --filter @synapse\/desktop test:native/u,
+    );
     assert.match(workflow, /webkit2gtk-driver xvfb xdotool dbus-x11 openbox/u);
     assert.match(workflow, /cargo install tauri-driver --locked/u);
     assert.match(workflow, /Native Tauri recovery/u);
     if (path.includes("main-release")) {
-      assert.ok(workflow.indexOf("Native Tauri recovery") < workflow.indexOf("Build signed updater bundle"));
+      assert.ok(
+        workflow.indexOf("Native Tauri recovery") <
+          workflow.indexOf("Build signed updater bundle"),
+      );
     }
   }
 });
 
 test("desktop jobs generate Tauri icons after installing dependencies and before native compilation", async () => {
-  const iconCommand = "pnpm --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg";
+  const iconCommand =
+    "pnpm --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg";
   const workflows = [
     [".github/workflows/verify.yml", "desktop-native", "test:native"],
     [".github/workflows/main-release.yml", "desktop", "tauri build"],
@@ -97,14 +116,24 @@ test("desktop jobs generate Tauri icons after installing dependencies and before
     const workflow = await readFile(path, "utf8");
     const jobStart = workflow.indexOf(`  ${jobName}:\n`);
     assert.notEqual(jobStart, -1, `${path} contains the ${jobName} job`);
-    const followingJob = workflow.slice(jobStart + 1).search(/\n  [a-z][\w-]*:\n/u);
-    const job = workflow.slice(jobStart, followingJob === -1 ? undefined : jobStart + 1 + followingJob);
+    const followingJob = workflow
+      .slice(jobStart + 1)
+      .search(/\n  [a-z][\w-]*:\n/u);
+    const job = workflow.slice(
+      jobStart,
+      followingJob === -1 ? undefined : jobStart + 1 + followingJob,
+    );
 
     assert.match(
       job,
-      new RegExp(`- name: Generate desktop icons\\n\\s+run: ${iconCommand}`, "u"),
+      new RegExp(
+        `- name: Generate desktop icons\\n\\s+run: ${iconCommand}`,
+        "u",
+      ),
     );
-    assert.ok(job.indexOf("pnpm install --frozen-lockfile") < job.indexOf(iconCommand));
+    assert.ok(
+      job.indexOf("pnpm install --frozen-lockfile") < job.indexOf(iconCommand),
+    );
     assert.ok(job.indexOf(iconCommand) < job.indexOf(consumer));
   }
 });
