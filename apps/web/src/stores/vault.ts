@@ -417,7 +417,7 @@ export const useVaultStore = defineStore("vault", () => {
     await putAssistantCredential({
       ciphertext: envelope.ciphertext,
       nonce: envelope.nonce,
-      provider: "codex",
+      provider: credential.provider || "codex",
       userId: requireUserId(),
       vaultId,
     });

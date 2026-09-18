@@ -32,6 +32,31 @@ describe("assistant credential envelope", () => {
     ).resolves.toEqual(credential);
   });
 
+  it("round-trips a third-party provider credential with its base URL", () => {
+    const vaultKey = Uint8Array.from({ length: 32 }, (_, index) => index * 2);
+    const deepseek: AssistantCredential = {
+      authKind: "api_key",
+      baseUrl: "https://api.deepseek.com/v1",
+      model: "deepseek-chat",
+      provider: "deepseek",
+      token: "ds-key-123",
+    };
+    const envelope = wrapAssistantCredential(vaultKey, vaultId, deepseek);
+
+    expect(JSON.stringify(envelope)).not.toContain("ds-key-123");
+    expect(unwrapAssistantCredential(vaultKey, vaultId, envelope)).toEqual(
+      deepseek,
+    );
+  });
+
+  it("reads a legacy codex-only envelope and defaults the provider", () => {
+    const vaultKey = Uint8Array.from({ length: 32 }, (_, index) => index * 2);
+    const legacy = wrapAssistantCredential(vaultKey, vaultId, credential);
+    const restored = unwrapAssistantCredential(vaultKey, vaultId, legacy);
+    expect(restored.provider).toBe("codex");
+    expect(restored.baseUrl).toBeUndefined();
+  });
+
   it("rejects an envelope bound to another vault", () => {
     const vaultKey = Uint8Array.from({ length: 32 }, (_, index) => index);
     const envelope = wrapAssistantCredential(vaultKey, vaultId, credential);

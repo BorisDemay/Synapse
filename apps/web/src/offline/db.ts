@@ -29,7 +29,7 @@ export interface TrustedDeviceRecord {
 export interface CachedAssistantCredentialRecord {
   ciphertext: number[];
   nonce: number[];
-  provider: "codex";
+  provider: string;
   userId: string;
   vaultId: string;
 }
