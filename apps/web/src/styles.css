@@ -1,0 +1,231 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  font-family: var(--synapse-font-sans);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid
+    color-mix(in srgb, var(--synapse-color-accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--synapse-color-accent);
+}
+
+.page-frame {
+  min-height: 100vh;
+}
+
+.auth-page {
+  display: grid;
+  grid-template-columns: minmax(20rem, 0.9fr) minmax(22rem, 1.1fr);
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      circle at 12% 15%,
+      color-mix(in srgb, var(--synapse-color-accent) 20%, transparent),
+      transparent 28rem
+    ),
+    var(--synapse-color-surface);
+}
+
+.auth-aside {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: clamp(2rem, 7vw, 6rem);
+  color: #fff;
+  background:
+    linear-gradient(145deg, rgb(49 46 129 / 96%), rgb(79 70 229 / 92%)), #4338ca;
+}
+
+.auth-aside h1 {
+  max-width: 11ch;
+  margin: 1.5rem 0;
+  font-size: clamp(2.8rem, 6vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.06em;
+}
+
+.auth-aside p {
+  max-width: 34rem;
+  color: rgb(255 255 255 / 78%);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.auth-brand,
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.brand-mark {
+  color: var(--synapse-color-text);
+  font-size: 1.1rem;
+}
+
+.brand-symbol {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.7rem;
+  color: #fff;
+  background: var(--synapse-color-accent);
+  box-shadow: 0 8px 20px rgb(79 70 229 / 24%);
+}
+
+.auth-content {
+  display: grid;
+  place-items: center;
+  padding: clamp(1.5rem, 5vw, 5rem);
+}
+
+.auth-card {
+  width: min(100%, 28rem);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-lg);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: var(--synapse-shadow-md);
+}
+
+.auth-card h2 {
+  margin: 0.75rem 0 0.5rem;
+  font-size: 2rem;
+  letter-spacing: -0.04em;
+}
+
+.auth-card .subtitle {
+  margin: 0 0 1.75rem;
+  color: var(--synapse-color-text-muted);
+  line-height: 1.6;
+}
+
+.form-stack {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.form-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.form-field label {
+  color: var(--synapse-color-text);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.trusted-device-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--synapse-color-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.trusted-device-option input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--synapse-color-accent);
+}
+
+.form-hint {
+  margin: -0.35rem 0 0;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.trusted-device-status {
+  margin: 0 0 1rem;
+  color: var(--synapse-color-success);
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.form-footer {
+  margin: 1.5rem 0 0;
+  color: var(--synapse-color-text-muted);
+  text-align: center;
+}
+
+.form-footer a {
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--synapse-color-border);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 88%,
+    transparent
+  );
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 760px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-aside {
+    min-height: 15rem;
+    padding: 2rem 1.5rem;
+  }
+
+  .auth-aside h1 {
+    margin: 1rem 0;
+    font-size: 3rem;
+  }
+
+  .auth-aside p {
+    display: none;
+  }
+
+  .auth-content {
+    padding: 1rem;
+  }
+}

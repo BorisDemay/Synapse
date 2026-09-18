@@ -1,0 +1,21 @@
+[package]
+name = "synapse-vault-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json = "1.0.149"
+synapse-core = { path = "../synapse-core" }
+synapse-crypto = { path = "../synapse-crypto" }
+synapse-local-store = { path = "../synapse-local-store" }
+synapse-protocol = { path = "../synapse-protocol" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1.48.0", features = ["macros", "rt"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+overrides:
+  nanoid: 3.3.18
+
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@noble/ciphers@2.3.0'

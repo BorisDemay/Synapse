@@ -1,0 +1,22 @@
+[workspace]
+members = [
+    "apps/server",
+    "crates/synapse-core",
+    "crates/synapse-crypto",
+    "crates/synapse-local-store",
+    "crates/synapse-protocol",
+    "crates/synapse-sync",
+    "crates/synapse-vault-service",
+    "tests/fixtures/generator",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "AGPL-3.0-or-later"
+repository = "https://example.invalid/synapse"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

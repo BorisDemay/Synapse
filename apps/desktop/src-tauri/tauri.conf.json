@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Synapse",
+  "version": "0.1.0",
+  "identifier": "org.synapse.desktop",
+  "build": {
+    "beforeBuildCommand": "pnpm --dir ../.. --filter @synapse/desktop build && pnpm --dir ../.. --filter @synapse/desktop exec tauri icon src-tauri/icons/icon.svg",
+    "beforeDevCommand": "pnpm --filter @synapse/desktop dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src 'self' https://api.openai.com https://auth.openai.com https://chatgpt.com"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Synapse",
+        "width": 1100,
+        "height": 740,
+        "minWidth": 800,
+        "minHeight": 600,
+        "decorations": true,
+        "shadow": true,
+        "backgroundColor": "#0f172a"
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": ""
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/128x128.png", "icons/icon.ico"]
+  }
+}

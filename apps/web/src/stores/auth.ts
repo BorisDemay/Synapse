@@ -1,0 +1,387 @@
+import { defineStore } from "pinia";
+
+import {
+  clearRememberedSession,
+  clearUserUnlockMaterial,
+  getRememberedSessionUser,
+  rememberSessionUser,
+} from "../offline/cache";
+import {
+  readBrowserStorageHealth,
+  type BrowserStorageHealth,
+} from "../offline/storage-health";
+import { useVaultStore } from "./vault";
+
+interface LoginCredentials {
+  email: string;
+  password: string;
+  remember_device?: boolean;
+}
+
+export interface LoginOptions {
+  rememberDevice?: boolean;
+}
+
+interface RegisterInput {
+  email: string;
+  invitationToken?: string;
+  password: string;
+}
+
+export interface AuthSession {
+  createdAt: string;
+  current: boolean;
+  id: string;
+}
+
+export interface ManagedUser {
+  activated: boolean;
+  createdAt: string;
+  email: string;
+  isAdmin: boolean;
+}
+
+export interface Invitation {
+  email: string;
+  expiresAt: string;
+  token: string;
+}
+
+function csrfHeaders(): HeadersInit {
+  return {
+    Origin: window.location.origin,
+  };
+}
+
+function jsonCsrfHeaders(): HeadersInit {
+  return {
+    Origin: window.location.origin,
+    "content-type": "application/json",
+  };
+}
+
+export const useAuthStore = defineStore("auth", {
+  state: () => ({
+    isLocalMode: false,
+    isAuthenticated: false,
+    isOfflineSession: false,
+    userId: null as string | null,
+    email: null as string | null,
+    isAdmin: false,
+    storageHealth: null as BrowserStorageHealth | null,
+  }),
+  actions: {
+    async enterLocalMode() {
+      useVaultStore().lockAndRequirePassphrase();
+      this.isLocalMode = true;
+      this.isAuthenticated = false;
+      this.isOfflineSession = true;
+      this.userId = "local-device";
+      this.email = null;
+      this.isAdmin = false;
+      this.storageHealth = null;
+      await clearRememberedSession();
+      await rememberSessionUser("local-device");
+    },
+    async restoreSession() {
+      if ((await getRememberedSessionUser()) === "local-device") {
+        await this.enterLocalMode();
+        return true;
+      }
+
+      try {
+        const response = await fetch("/v1/session", {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          this.isAuthenticated = false;
+          this.isOfflineSession = false;
+          this.userId = null;
+          this.email = null;
+          this.isAdmin = false;
+          this.storageHealth = null;
+          return false;
+        }
+        const body = (await response.json()) as {
+          email?: string;
+          is_admin?: boolean;
+          user_id: string;
+        };
+        this.isAuthenticated = true;
+        this.isOfflineSession = false;
+        this.userId = body.user_id;
+        this.email = body.email ?? null;
+        this.isAdmin = body.is_admin === true;
+        await rememberSessionUser(body.user_id);
+        return true;
+      } catch {
+        const remembered = await getRememberedSessionUser();
+        if (!remembered) {
+          this.isAuthenticated = false;
+          this.isOfflineSession = false;
+          this.userId = null;
+          this.email = null;
+          this.isAdmin = false;
+          this.storageHealth = null;
+          return false;
+        }
+        this.isAuthenticated = true;
+        this.isOfflineSession = true;
+        this.userId = remembered;
+        this.email = null;
+        this.isAdmin = false;
+        return true;
+      }
+    },
+    async refreshStorageHealth() {
+      const userId = this.userId;
+      if (!userId || this.isLocalMode) {
+        this.storageHealth = null;
+        return null;
+      }
+      try {
+        const health = await readBrowserStorageHealth(userId);
+        // A logout or account switch may have happened while IndexedDB and the
+        // authenticated health request were in flight. Never let an older
+        // response repopulate state for the current account.
+        if (
+          this.userId !== userId ||
+          !this.isAuthenticated ||
+          this.isLocalMode
+        ) {
+          return null;
+        }
+        this.storageHealth = health;
+        return health;
+      } catch {
+        if (
+          this.userId === userId &&
+          this.isAuthenticated &&
+          !this.isLocalMode
+        ) {
+          this.storageHealth = null;
+        }
+        return null;
+      }
+    },
+    async fetchPublicSignup() {
+      try {
+        const response = await fetch("/auth/signup", {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          return false;
+        }
+        const body = (await response.json()) as { public_signup?: unknown };
+        return body.public_signup === true;
+      } catch {
+        return false;
+      }
+    },
+    async register(input: RegisterInput) {
+      const body: Record<string, string> = {
+        email: input.email,
+        password: input.password,
+      };
+      if (input.invitationToken) {
+        body.invitation_token = input.invitationToken;
+      }
+      const response = await fetch("/auth/signup", {
+        body: JSON.stringify(body),
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Registration failed");
+      }
+      // The account remains inactive until the email link is confirmed.
+    },
+    async login(email: string, password: string, options: LoginOptions = {}) {
+      const credentials: LoginCredentials = { email, password };
+      if (options.rememberDevice) {
+        credentials.remember_device = true;
+      }
+      const response = await fetch("/auth/login", {
+        body: JSON.stringify(credentials),
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Authentication failed");
+      }
+      this.isLocalMode = false;
+      await clearRememberedSession();
+      this.isAuthenticated = true;
+      await this.restoreSession();
+    },
+    async logout() {
+      const vault = useVaultStore();
+      vault.lockAndRequirePassphrase();
+      const userId = this.userId;
+      const local = this.isLocalMode;
+      this.isLocalMode = false;
+      this.isAuthenticated = false;
+      this.isOfflineSession = false;
+      this.userId = null;
+      this.email = null;
+      this.isAdmin = false;
+      this.storageHealth = null;
+      if (userId) await clearUserUnlockMaterial(userId);
+      await clearRememberedSession();
+      if (local) return;
+      const response = await fetch("/auth/logout", {
+        credentials: "include",
+        headers: csrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Logout failed");
+    },
+    async changePassword(currentPassword: string, newPassword: string) {
+      const response = await fetch("/auth/password", {
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+        credentials: "include",
+        headers: jsonCsrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Password change failed");
+      }
+    },
+    async listSessions(): Promise<{ email: string; sessions: AuthSession[] }> {
+      const response = await fetch("/auth/sessions", {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to list sessions");
+      }
+      const body = (await response.json()) as {
+        email?: unknown;
+        sessions?: Array<{
+          created_at?: unknown;
+          current?: unknown;
+          id?: unknown;
+        }>;
+      };
+      const email = typeof body.email === "string" ? body.email : "";
+      this.email = email || null;
+      const sessions = (body.sessions ?? []).flatMap((item) => {
+        if (
+          typeof item.id !== "string" ||
+          typeof item.created_at !== "string"
+        ) {
+          return [];
+        }
+        return [
+          {
+            createdAt: item.created_at,
+            current: item.current === true,
+            id: item.id,
+          },
+        ];
+      });
+      return { email, sessions };
+    },
+    async listUsers(): Promise<ManagedUser[]> {
+      const response = await fetch("/auth/users", { credentials: "include" });
+      if (!response.ok) throw new Error("Unable to list users");
+      const body = (await response.json()) as { users?: unknown };
+      if (!Array.isArray(body.users)) throw new Error("Invalid users response");
+      return body.users.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const user = value as {
+          activated?: unknown;
+          created_at?: unknown;
+          email?: unknown;
+          is_admin?: unknown;
+        };
+        if (
+          typeof user.activated !== "boolean" ||
+          typeof user.created_at !== "string" ||
+          typeof user.email !== "string" ||
+          typeof user.is_admin !== "boolean"
+        ) {
+          return [];
+        }
+        return [
+          {
+            activated: user.activated,
+            createdAt: user.created_at,
+            email: user.email,
+            isAdmin: user.is_admin,
+          },
+        ];
+      });
+    },
+    async createInvitation(email: string): Promise<Invitation> {
+      const response = await fetch("/auth/invitations", {
+        body: JSON.stringify({ email }),
+        credentials: "include",
+        headers: jsonCsrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Unable to create invitation");
+      const body = (await response.json()) as {
+        email?: unknown;
+        expires_at?: unknown;
+        token?: unknown;
+      };
+      if (
+        typeof body.email !== "string" ||
+        typeof body.expires_at !== "string" ||
+        typeof body.token !== "string"
+      ) {
+        throw new Error("Invalid invitation response");
+      }
+      return {
+        email: body.email,
+        expiresAt: body.expires_at,
+        token: body.token,
+      };
+    },
+    async revokeSession(sessionId: string) {
+      const response = await fetch(`/auth/sessions/${sessionId}/revoke`, {
+        credentials: "include",
+        headers: csrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to revoke session");
+      }
+    },
+    async revokeOtherSessions() {
+      const response = await fetch("/auth/sessions/revoke-others", {
+        credentials: "include",
+        headers: csrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to revoke sessions");
+      }
+    },
+    async deleteAccount(password: string) {
+      const vault = useVaultStore();
+      const response = await fetch("/auth/account/delete", {
+        body: JSON.stringify({ password }),
+        credentials: "include",
+        headers: jsonCsrfHeaders(),
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Account deletion failed");
+      }
+      await vault.clearDeviceData();
+      this.isAuthenticated = false;
+      this.isOfflineSession = false;
+      this.userId = null;
+      this.email = null;
+      this.isAdmin = false;
+      this.storageHealth = null;
+      await clearRememberedSession();
+    },
+  },
+});

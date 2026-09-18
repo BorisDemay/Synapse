@@ -1,0 +1,38 @@
+{
+  "name": "@synapse/ui",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "prettier --check .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@primeuix/styles": "2.0.3",
+    "dompurify": "3.4.13",
+    "markdown-it": "15.0.0",
+    "primevue": "^4.5.4",
+    "vditor": "3.11.3",
+    "vue": "3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/markdown-it": "14.1.2",
+    "@vitejs/plugin-vue": "5.2.1",
+    "@vue/test-utils": "2.4.6",
+    "jsdom": "25.0.1",
+    "prettier": "3.5.3",
+    "typescript": "5.7.3",
+    "vite": "6.4.3",
+    "vitest": "4.1.11",
+    "vue-tsc": "2.2.0"
+  }
+}

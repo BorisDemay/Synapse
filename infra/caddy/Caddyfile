@@ -1,0 +1,38 @@
+{
+  admin off
+}
+
+{$SYNAPSE_PUBLIC_HOST:notes.example.com} {
+  encode gzip
+
+  header {
+    Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://api.openai.com https://auth.openai.com https://chatgpt.com; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; frame-src 'none'; img-src data: blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    Referrer-Policy "no-referrer"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+  }
+
+  handle /auth/* {
+    reverse_proxy server:3000
+  }
+
+  handle /v1/* {
+    reverse_proxy server:3000
+  }
+
+  handle /vaults* {
+    reverse_proxy server:3000
+  }
+
+  handle /health/* {
+    reverse_proxy server:3000
+  }
+
+  handle /metrics {
+    reverse_proxy server:3000
+  }
+
+  handle {
+    reverse_proxy web:8080
+  }
+}

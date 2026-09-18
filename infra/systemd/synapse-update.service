@@ -1,0 +1,12 @@
+[Unit]
+Description=Synapse pull-based release updater
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# A real release downloads ~150 MB, loads images and waits for health checks;
+# the 90 s systemd default would kill it mid-deployment.
+TimeoutStartSec=1800
+EnvironmentFile=/srv/synapse/.env
+ExecStart=/srv/synapse/infra/scripts/update-instance.sh

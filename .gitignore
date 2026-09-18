@@ -1,0 +1,55 @@
+# Rust
+/target/
+/apps/desktop/src-tauri/target/
+/apps/desktop/src-tauri/gen/
+
+# Node.js
+node_modules/
+.pnpm-store/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.development.example
+/synapse-blobs/
+/synapse-mail/
+
+# Local coding-agent configuration and process notes
+.agents/
+.codex/
+.hermes/
+
+# Test and build artifacts
+__pycache__/
+*.pyc
+/coverage/
+/playwright-report/
+/test-results/
+/dist/
+/apps/desktop/dist/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Web build output
+/apps/web/dist/
+
+# Performance fixtures and Criterion reports
+/target/perf-vault/
+/target/criterion/
+
+# Accidental local CycloneDX outputs next to crates
+**/rust.json
+**/synapse-rust.json
+# Tauri derives platform icon binaries from the versioned SVG source.
+apps/desktop/src-tauri/icons/*.ico
+apps/desktop/src-tauri/icons/*.icns
+apps/desktop/src-tauri/icons/[0-9]*.png
+apps/desktop/src-tauri/icons/Square*Logo.png
+apps/desktop/src-tauri/icons/StoreLogo.png
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/
