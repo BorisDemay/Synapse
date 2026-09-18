@@ -1278,6 +1278,13 @@ async fn admin_invitation_emails_a_link_and_grants_the_admin_role() {
             .body
             .contains("https://synapse.local/register?invitation=")
     );
+    let html = invitation_mail
+        .html
+        .as_deref()
+        .expect("invitation email carries an html alternative");
+    assert!(html.contains("https://synapse.local/register?invitation="));
+    assert!(html.contains("Synapse"));
+    assert!(!html.contains("token=\""));
     let token = invitation_mail
         .body
         .split("invitation=")

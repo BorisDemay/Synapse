@@ -753,13 +753,18 @@ async fn send_activation_mail(
     token: &str,
 ) -> Result<(), MailError> {
     let origin = public_origin.trim_end_matches('/');
+    let link = format!("{origin}/activate?token={token}");
     mailer
         .send(MailMessage {
             to: email.to_owned(),
             subject: "Activate your Synapse account".to_owned(),
-            body: format!(
-                "Open this link to activate your account:\n{origin}/activate?token={token}\n"
-            ),
+            body: format!("Open this link to activate your account:\n{link}\n"),
+            html: Some(branded_mail_html(
+                "Activate your account",
+                "Confirm your email address to activate your Synapse account.",
+                "Activate account",
+                &link,
+            )),
         })
         .await
 }
@@ -771,13 +776,61 @@ async fn send_invitation_mail(
     token: &str,
 ) -> Result<(), MailError> {
     let origin = public_origin.trim_end_matches('/');
+    let link = format!("{origin}/register?invitation={token}");
     mailer
         .send(MailMessage {
             to: email.to_owned(),
             subject: "Your Synapse invitation".to_owned(),
-            body: format!(
-                "Open this link to create your Synapse account:\n{origin}/register?invitation={token}\n"
-            ),
+            body: format!("Open this link to create your Synapse account:\n{link}\n"),
+            html: Some(branded_mail_html(
+                "You are invited to Synapse",
+                &format!(
+                    "An administrator invited you to join the Synapse instance at {origin}. \
+                     Create your account to start collaborating in end-to-end encrypted vaults."
+                ),
+                "Create your account",
+                &link,
+            )),
         })
         .await
+}
+
+/// Renders an email-safe HTML alternative styled after the web app design
+/// tokens (see `packages/ui/src/styles/tokens.css`). It uses tables and
+/// inline styles only — no external assets, scripts, or custom fonts — so it
+/// renders consistently in Gmail, Outlook, and other clients. The template
+/// carries only transactional copy and the one-time link, never vault content.
+fn branded_mail_html(headline: &str, intro: &str, button_label: &str, link: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{headline}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f8fafc;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8fafc;padding:32px 12px;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background-color:#ffffff;border:1px solid #d9e1ec;border-radius:12px;">
+<tr><td style="background-color:#4338ca;background-image:linear-gradient(145deg,#312e81f4,#4f46e2eb);padding:28px 32px;border-radius:12px 12px 0 0;">
+<div style="font-family:Inter,'Avenir Next','Segoe UI',Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Synapse</div>
+<div style="font-family:Inter,'Avenir Next','Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:rgba(255,255,255,0.78);margin-top:4px;">Local-first, end-to-end encrypted vaults</div>
+</td></tr>
+<tr><td style="padding:32px;font-family:Inter,'Avenir Next','Segoe UI',Helvetica,Arial,sans-serif;">
+<h1 style="margin:0 0 12px;font-size:22px;line-height:1.25;color:#172033;">{headline}</h1>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#64748b;">{intro}</p>
+<a href="{link}" style="display:inline-block;background-color:#4f46e5;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 24px;border-radius:8px;">{button_label}</a>
+<p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#64748b;">Or copy this one-time link into your browser:<br>
+<a href="{link}" style="color:#4f46e5;word-break:break-all;">{link}</a></p>
+<p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#64748b;">This link expires in 24 hours. If you were not expecting this email, you can safely ignore it.</p>
+</td></tr>
+<tr><td style="padding:16px 32px;border-top:1px solid #d9e1ec;font-family:Inter,'Avenir Next','Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#64748b;">Synapse keeps your vaults end-to-end encrypted: nobody else can read them, not even this server.</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+"#
+    )
 }

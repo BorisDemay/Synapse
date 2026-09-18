@@ -5,7 +5,10 @@ use std::{
     sync::Mutex,
 };
 
-use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::Mailbox};
+use lettre::{
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    message::{Mailbox, MultiPart},
+};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -14,6 +17,10 @@ pub struct MailMessage {
     pub to: String,
     pub subject: String,
     pub body: String,
+    /// Optional styled HTML alternative. When present, SMTP transports send it
+    /// alongside `body` as a multipart/alternative message. It must never carry
+    /// vault content, only transactional copy and links.
+    pub html: Option<String>,
 }
 
 #[derive(Debug)]
@@ -118,12 +125,20 @@ impl Mailer for SmtpMailer {
         let from = self.from.clone();
         Box::pin(async move {
             let to: Mailbox = message.to.parse().map_err(|_| MailError)?;
-            let email = Message::builder()
-                .from(from)
-                .to(to)
-                .subject(message.subject)
-                .body(message.body)
-                .map_err(|_| MailError)?;
+            let email = match message.html {
+                Some(html) => Message::builder()
+                    .from(from)
+                    .to(to)
+                    .subject(message.subject)
+                    .multipart(MultiPart::alternative_plain_html(message.body, html))
+                    .map_err(|_| MailError)?,
+                None => Message::builder()
+                    .from(from)
+                    .to(to)
+                    .subject(message.subject)
+                    .body(message.body)
+                    .map_err(|_| MailError)?,
+            };
             transport.send(email).await.map_err(|_| MailError)?;
             Ok(())
         })
