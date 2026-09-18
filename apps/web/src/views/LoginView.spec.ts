@@ -4,7 +4,7 @@ import PrimeVue from "primevue/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
-import { useAuthStore } from "../stores/auth";
+import { useAuthStore, AuthError } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 import LoginView from "./LoginView.vue";
 
@@ -57,6 +57,41 @@ describe("LoginView", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("explains that an unactivated account must be confirmed by email", async () => {
+    mockSignupStatus(false);
+    const { wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "login").mockRejectedValue(
+      new AuthError("Authentication failed", 403),
+    );
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain("non activé");
+    expect(wrapper.text()).not.toContain("Connexion impossible");
+  });
+
+  it("keeps the generic error for unexpected login failures", async () => {
+    mockSignupStatus(false);
+    const { wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "login").mockRejectedValue(
+      new AuthError("Authentication failed", 401),
+    );
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "Connexion impossible",
+    );
   });
 
   it("hides the register link when public signup is closed", async () => {

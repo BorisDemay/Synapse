@@ -9,7 +9,7 @@ import Password from "primevue/password";
 
 import { ThemeToggle } from "@synapse/ui";
 
-import { useAuthStore } from "../stores/auth";
+import { useAuthStore, AuthError } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 
 const auth = useAuthStore();
@@ -37,9 +37,12 @@ async function submit() {
       return;
     }
     await router.push(auth.isAdmin ? "/admin" : "/unlock");
-  } catch {
+  } catch (cause) {
     password.value = "";
-    error.value = "Connexion impossible.";
+    error.value =
+      cause instanceof AuthError && cause.status === 403
+        ? "Compte non activé. Ouvrez le lien d’activation envoyé par email (vérifiez vos spams), puis réessayez."
+        : "Connexion impossible.";
   }
 }
 </script>

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
+
+import Button from "primevue/button";
+
 const route = useRoute();
 const router = useRouter();
 let token = typeof route.query.token === "string" ? route.query.token : "";
@@ -39,18 +42,21 @@ async function activate() {
   <main class="auth-page">
     <section class="auth-content">
       <div class="auth-card">
-        <h1>Activer votre compte</h1>
-        <p>Confirmez l’activation du compte associé à ce lien.</p>
-        <button
+        <h2>Activer votre compte</h2>
+        <p class="subtitle">
+          Confirmez l’activation du compte associé à ce lien.
+        </p>
+        <Button
           v-if="!activated"
           :disabled="busy"
+          label="Activer le compte"
           type="button"
           @click="activate"
-        >
-          Activer le compte
-        </button>
-        <p v-if="status" role="status">{{ status }}</p>
-        <RouterLink to="/login">Se connecter</RouterLink>
+        />
+        <p v-if="status" role="status" class="form-hint">{{ status }}</p>
+        <p class="form-footer">
+          <RouterLink to="/login">Se connecter</RouterLink>
+        </p>
       </div>
     </section>
   </main>

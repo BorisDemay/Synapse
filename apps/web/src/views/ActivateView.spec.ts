@@ -34,3 +34,20 @@ it("removes the activation token from the address and submits it only after conf
   expect(wrapper.text()).not.toContain("synthetic-activation");
   wrapper.unmount();
 });
+
+it("uses the shared auth card layout with styled headings and links", () => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  const wrapper = mount(ActivateView, { global: { plugins: [router] } });
+
+  expect(wrapper.find("h2").text()).toContain("Activer votre compte");
+  expect(wrapper.get(".subtitle").text()).toContain("activation");
+  const footer = wrapper.get(".form-footer");
+  expect(footer.get("a").text()).toBe("Se connecter");
+  wrapper.unmount();
+});

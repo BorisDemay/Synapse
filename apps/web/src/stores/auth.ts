@@ -22,6 +22,17 @@ export interface LoginOptions {
   rememberDevice?: boolean;
 }
 
+/** Authentication failure carrying the HTTP status for specific UX handling. */
+export class AuthError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AuthError";
+    this.status = status;
+  }
+}
+
 interface RegisterInput {
   email: string;
   invitationToken?: string;
@@ -211,7 +222,7 @@ export const useAuthStore = defineStore("auth", {
         method: "POST",
       });
       if (!response.ok) {
-        throw new Error("Authentication failed");
+        throw new AuthError("Authentication failed", response.status);
       }
       this.isLocalMode = false;
       await clearRememberedSession();
