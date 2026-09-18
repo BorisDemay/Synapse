@@ -129,7 +129,10 @@ async function runUpdater({ configure, token }) {
   const { bin, captures, deploy } = await createFakeCommands(root);
   const environment = join(root, ".env");
   const tokenFile = join(root, ".update-token");
-  await writeFile(environment, "SYNAPSE_ALLOWED_ORIGIN=https://synapse.example.test\n");
+  await writeFile(
+    environment,
+    "SYNAPSE_ALLOWED_ORIGIN=https://synapse.example.test\n",
+  );
   if (token) await writeFile(tokenFile, `${token}\n`);
 
   const incoming = configure ? await configure(root) : undefined;
@@ -195,18 +198,20 @@ test("pull updater authenticates both private GitHub downloads without exposing 
   assert.doesNotMatch(deployArgs, new RegExp(token, "u"));
   assert.match(secondArgs, /\/releases\/assets\/424242/u);
   assert.match(secondArgs, /application\/octet-stream/u);
+  assert.doesNotMatch(secondArgs, /application\/vnd\.github\+json/u);
+  assert.match(firstArgs, /application\/vnd\.github\+json/u);
   assert.equal(configs.trim().split("\n").length, 2);
   for (const config of configs.trim().split("\n")) {
     await assert.rejects(readFile(config, "utf8"));
   }
-  assert.equal(await readFile(join(root, "incoming/synapse-0.1.1.tar.gz"), "utf8"), "archive");
+  assert.equal(
+    await readFile(join(root, "incoming/synapse-0.1.1.tar.gz"), "utf8"),
+    "archive",
+  );
 });
 
 test("the updater unit allows a full deployment to finish", async () => {
-  const unit = await readFile(
-    "infra/systemd/synapse-update.service",
-    "utf8",
-  );
+  const unit = await readFile("infra/systemd/synapse-update.service", "utf8");
   const timeout = unit.match(/TimeoutStartSec=(\S+)/u)?.[1];
   assert.ok(timeout, "synapse-update.service must set TimeoutStartSec");
   assert.ok(
@@ -254,11 +259,19 @@ test("pull updater rejects a symlinked incoming directory before network or depl
     },
     token: undefined,
   });
-  t.after(() => Promise.all([rm(root, { force: true, recursive: true }), rm(external, { force: true, recursive: true })]));
+  t.after(() =>
+    Promise.all([
+      rm(root, { force: true, recursive: true }),
+      rm(external, { force: true, recursive: true }),
+    ]),
+  );
 
   assert.ok(failure, "the updater must reject a symlinked incoming directory");
   assert.match(failure.stderr, /update incoming directory is unsafe/u);
   assert.deepEqual(await readdir(captures), []);
-  assert.equal(await readFile(join(external, "sentinel"), "utf8"), "do not modify\n");
+  assert.equal(
+    await readFile(join(external, "sentinel"), "utf8"),
+    "do not modify\n",
+  );
   assert.deepEqual(await readdir(external), ["sentinel"]);
 });

@@ -26,7 +26,9 @@ fi
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
-headers=(-H 'Accept: application/vnd.github+json')
+# Only authentication lives in the shared array; each request sets its own
+# Accept header so curl never sends two conflicting values.
+headers=()
 curl_config=""
 tmp=""
 cleanup() {
@@ -44,7 +46,8 @@ if [[ -r "$TOKEN_FILE" ]]; then
   headers+=(--config "$curl_config")
 fi
 
-release="$(curl --fail --silent --show-error --max-time 20 "${headers[@]}" "$API/repos/$REPOSITORY/releases/latest")"
+release="$(curl --fail --silent --show-error --max-time 20 "${headers[@]}" \
+  -H 'Accept: application/vnd.github+json' "$API/repos/$REPOSITORY/releases/latest")"
 tag="$(jq -er '.tag_name | strings | select(test("^v0\\.1\\.[0-9]+$"))' <<<"$release")"
 version="${tag#v}"
 asset_id="$(jq -er --arg name "synapse-$version.tar.gz" '.assets[] | select(.name == $name) | .id' <<<"$release")"
