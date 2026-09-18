@@ -55,6 +55,23 @@ docker compose down
 
 Les volumes nommés sont conservés tant que vous n’ajoutez pas `-v`.
 
+## Email (invitations et activation)
+
+Les invitations et l’activation des comptes envoient un lien par e-mail. Sans
+SMTP configuré, le serveur ne peut pas les délivrer : l’API d’invitation renvoie
+alors `email_sent: false` et l’administrateur doit transmettre le lien lui-même.
+
+Configurer un relais SMTP dans `.env` :
+
+```dotenv
+# STARTTLS (port 587), TLS implicite (smtps, port 465) ou clair (port 25).
+SYNAPSE_SMTP_URL=smtp://utilisateur:motdepasse@serveur:587?tls=required
+SYNAPSE_MAIL_FROM=synapse@votre-domaine.tld
+```
+
+Redémarrer la stack après modification (`docker compose up -d server`). Les liens
+d’invitation et d’activation expirent après 24 heures.
+
 ## Vérification automatisée
 
 ```bash
