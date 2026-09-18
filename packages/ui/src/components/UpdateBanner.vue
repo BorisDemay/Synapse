@@ -60,11 +60,11 @@ function applyUpdate() {
 
 <style scoped>
 .synapse-update-toast {
-  background: var(--synapse-surface-raised, #172033);
-  border: 1px solid var(--synapse-border, #334155);
+  background: var(--synapse-color-surface-raised, #172033);
+  border: 1px solid var(--synapse-color-border, #334155);
   border-radius: 0.6rem;
   box-shadow: 0 12px 30px rgb(0 0 0 / 35%);
-  color: var(--synapse-text, #f8fafc);
+  color: var(--synapse-color-text, #f8fafc);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -77,7 +77,7 @@ function applyUpdate() {
 }
 
 .synapse-update-toast__version {
-  color: var(--synapse-text-muted, #94a3b8);
+  color: var(--synapse-color-text-muted, #94a3b8);
   font-size: 0.85rem;
 }
 
@@ -110,13 +110,13 @@ function applyUpdate() {
 }
 
 .synapse-update-toast button:not(.synapse-update-toast__notes-toggle) {
-  background: var(--synapse-accent, #60a5fa);
+  background: var(--synapse-color-accent, #60a5fa);
   color: #07101f;
 }
 
 .synapse-update-toast__notes-toggle {
   background: transparent;
-  color: var(--synapse-text, #f8fafc);
+  color: var(--synapse-color-text, #f8fafc);
   font-weight: 500;
   text-decoration: underline;
 }
