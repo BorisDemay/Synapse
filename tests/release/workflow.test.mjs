@@ -274,8 +274,9 @@ test("publishes the release with retried parallel asset uploads", async () => {
   const workflow = await readFile(".github/workflows/main-release.yml", "utf8");
   assert.match(
     workflow,
-    /gh release create "\$tag" --target "\$SYNAPSE_COMMIT_SHA"/u,
+    /gh release create "\$tag" --draft --target "\$SYNAPSE_COMMIT_SHA"/u,
   );
+  assert.match(workflow, /gh release edit "\$tag" --draft=false/u);
   assert.match(workflow, /for attempt in 1 2 3 4 5/u);
   assert.match(workflow, /gh release upload "\$tag" --clobber "\$asset"/u);
   assert.match(
