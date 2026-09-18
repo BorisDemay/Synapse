@@ -36,7 +36,7 @@ async function submit() {
       await router.push("/vault");
       return;
     }
-    await router.push("/unlock");
+    await router.push(auth.isAdmin ? "/admin" : "/unlock");
   } catch {
     password.value = "";
     error.value = "Connexion impossible.";
