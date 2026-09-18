@@ -64,7 +64,7 @@ async function waitForWorker(
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Web update timed out"));
-    }, 15000);
+    }, 60000);
     const cleanup = () => {
       clearTimeout(timer);
       worker.removeEventListener("statechange", finish);
@@ -121,7 +121,13 @@ export function createWebUpdateProvider(
       };
     },
     async apply(_metadata, onStatus) {
-      await activateWaitingWebUpdate(onStatus);
+      try {
+        await activateWaitingWebUpdate(onStatus);
+      } catch {
+        // The offline precache can be large, so activation may exceed its
+        // window. Navigation is network-first, so reloading still loads the
+        // new build while the worker finishes installing in the background.
+      }
       onStatus("Rechargement de l’application…");
       reload();
     },

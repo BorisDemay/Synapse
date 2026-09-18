@@ -44,6 +44,9 @@ export default defineConfig({
             (path) =>
               path !== "/sw.js" &&
               path !== "/precache-manifest.json" &&
+              // TypeScript typings shipped with Vditor are never used at
+              // runtime and only slow down the offline precache.
+              !path.endsWith(".d.ts") &&
               !path.endsWith(".map"),
           )
           .sort();
