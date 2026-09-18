@@ -319,6 +319,102 @@ textarea[data-pc-name="textarea"]:enabled:focus {
   outline: 0;
 }
 
+/* Select: PrimeVue runs unstyled, so it only emits data-pc-* attributes. */
+[data-pc-name="select"][data-pc-section="root"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.7rem 2.75rem 0.7rem 0.8rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+[data-pc-name="select"][data-pc-section="root"]:hover {
+  border-color: var(--synapse-color-accent);
+}
+
+[data-pc-name="select"][data-pc-section="root"][data-p-focused="true"] {
+  border-color: var(--synapse-color-accent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--synapse-color-accent) 18%, transparent);
+}
+
+[data-pc-name="select"][data-pc-section="root"][data-p-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+[data-pc-name="select"] [data-pc-section="label"] {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-pc-name="select"] [data-pc-section="label"][data-p-placeholder="true"] {
+  color: var(--synapse-color-text-muted);
+}
+
+[data-pc-name="select"] [data-pc-section="dropdown"] {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 0.8rem;
+  display: grid;
+  place-items: center;
+  color: var(--synapse-color-text-muted);
+  transform: translateY(-50%);
+}
+
+[data-pc-name="select"][data-pc-section="overlay"] {
+  position: absolute;
+  z-index: 1100;
+  max-block-size: 16rem;
+  margin-block-start: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: var(--synapse-shadow-md);
+  overflow: auto;
+}
+
+[data-pc-name="select"] [data-pc-section="list"] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-pc-name="select"] [data-pc-section="option"] {
+  padding: 0.55rem 0.7rem;
+  border-radius: calc(var(--synapse-radius-sm) - 0.2rem);
+  cursor: pointer;
+}
+
+[data-pc-name="select"] [data-pc-section="option"][data-p-focused="true"] {
+  background: var(--synapse-color-surface-muted);
+}
+
+[data-pc-name="select"] [data-pc-section="option"][data-p-selected="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  font-weight: 600;
+}
+
+[data-pc-name="select"] [data-pc-section="emptymessage"] {
+  padding: 0.55rem 0.7rem;
+  color: var(--synapse-color-text-muted);
+}
+
 .p-password,
 div[data-pc-name="password"] {
   position: relative;

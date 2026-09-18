@@ -147,7 +147,7 @@ onMounted(loadUsers);
         <div class="admin__field">
           <label for="admin-invite-role">Rôle</label>
           <Select
-            id="admin-invite-role"
+            input-id="admin-invite-role"
             v-model="invitationRole"
             :options="roleOptions"
             option-label="label"
