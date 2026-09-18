@@ -1,269 +1,267 @@
-# Synapse — coffre Markdown local-first, chiffré de bout en bout
+# Synapse — local-first, end-to-end encrypted Markdown vault
 
-[![Licence : AGPL-3.0-or-later](https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org/)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB.svg)](https://tauri.app/)
 
-> Un espace de connaissances local-first, chiffré de bout en bout et auto-hébergeable, inspiré des usages d’Obsidian sans en reprendre le code ni l’identité.
+> A local-first, end-to-end encrypted and self-hostable knowledge workspace, inspired by Obsidian workflows without reusing its code or identity.
 
-**Statut : préversion.** Le MVP est fonctionnel : client lourd Tauri,
-interface web chiffrée, serveur Rust auto-hébergé, synchronisation par
-opérations et mises à jour signées. Le serveur ne voit jamais le clair d’un
-coffre.
+**Status: pre-release.** The MVP works: a Tauri desktop client, an encrypted
+web interface, a self-hosted Rust server, operation-based synchronization and
+signed updates. The server never sees a vault in plaintext.
 
-- **Démarrer en local** : [Développement local](#développement-local)
-- **Auto-héberger** : [Docker Compose](#self-hosting-docker-compose) · [guide opérateur](docs/operations/install.md)
-- **Sécurité** : [modèle de menace](docs/security/threat-model.md) · [signaler une vulnérabilité](SECURITY.md)
-- **Contribuer** : [CONTRIBUTING.md](CONTRIBUTING.md) · [code de conduite](CODE_OF_CONDUCT.md)
-- **Licence** : [AGPL-3.0-or-later](#licence)
+- **Get started locally**: [Local development](#local-development)
+- **Self-host**: [Docker Compose](#self-hosting-with-docker-compose) · [operator guide](docs/operations/install.md)
+- **Security**: [threat model](docs/security/threat-model.md) · [report a vulnerability](SECURITY.md)
+- **Contribute**: [CONTRIBUTING.md](CONTRIBUTING.md) · [code of conduct](CODE_OF_CONDUCT.md)
+- **License**: [AGPL-3.0-or-later](#license)
 
 ## Vision
 
-Synapse est un projet **from scratch** visant à offrir une expérience de prise de notes Markdown rapide, hors-ligne et fiable, disponible via :
+Synapse is a **from-scratch** project aiming to provide a fast, offline and
+reliable Markdown note-taking experience, available through:
 
-- un **client lourd** Tauri qui embarque le même coffre chiffré que le web ;
-- une **interface web** moderne pour accéder aux mêmes contenus depuis un navigateur ;
-- un serveur optionnel, simple à auto-héberger, qui assure la synchronisation temps réel et le partage contrôlé.
+- a **desktop client** built with Tauri that carries the same encrypted vault as the web;
+- a modern **web interface** to reach the same content from a browser;
+- an optional, easy-to-self-host server that provides real-time synchronization and controlled sharing.
 
-Le client partagé conserve son état canonique dans un cache local chiffré. Le
-desktop en produit une réplique Markdown lisible dans le dossier choisi ;
-l’export reste possible sans serveur. La synchronisation ne doit jamais
-empêcher le travail local (ADR 0011, 0013 et 0016).
+The shared client keeps its canonical state in an encrypted local cache. The
+desktop client produces a readable Markdown replica in the chosen folder;
+export remains possible without a server. Synchronization must never get in the
+way of local work (ADR 0011, 0013 and 0016).
 
-## Objectifs prioritaires
+## Primary goals
 
-1. **Performance** — ouverture instantanée des coffres, recherche fluide, faible empreinte mémoire et synchronisation incrémentale.
-2. **Sécurité** — conception défensive, isolation des données, authentification robuste, journalisation maîtrisée et chiffrement en transit.
-3. **Local-first** — l’application reste utilisable sans connexion ; les modifications sont synchronisées dès que possible.
-4. **Interopérabilité** — Markdown standard, pièces jointes sur disque, export simple et API documentée.
-5. **Auto-hébergement** — déploiement reproductible avec une configuration minimale, Docker/Compose et sauvegardes explicites.
-6. **Fiabilité** — aucune perte silencieuse : versionnage, détection de conflits, reprise après interruption et observabilité.
+1. **Performance** — instant vault opening, fluid search, low memory footprint and incremental synchronization.
+2. **Security** — defensive design, data isolation, robust authentication, controlled logging and encryption in transit.
+3. **Local-first** — the application stays usable offline; changes sync as soon as possible.
+4. **Interoperability** — standard Markdown, attachments on disk, simple export and a documented API.
+5. **Self-hosting** — reproducible deployment with minimal configuration, Docker/Compose and explicit backups.
+6. **Reliability** — no silent loss: versioning, conflict detection, recovery after interruption and observability.
 
-## Fonctionnalités prévues
+## Planned features
 
-### Gestion du coffre
+### Vault management
 
-- Cache local chiffré, utilisable hors connexion, pour chaque coffre autorisé.
-- Création, renommage, déplacement et suppression de notes/dossiers.
-- Surveillance du système de fichiers et prise en compte des modifications externes.
-- Métadonnées YAML front matter, tags, liens `[[wikilinks]]`, backlinks et graphe de relations.
-- Prévisualisation Markdown, édition riche ou texte brut, raccourcis clavier et thème clair/sombre.
-- Historique local des modifications et restauration de versions.
-- Recherche plein texte, filtre par tag/dossier/propriété et indexation incrémentale.
+- Encrypted local cache, usable offline, for every authorized vault.
+- Create, rename, move and delete notes and folders.
+- Filesystem watching and handling of external changes.
+- YAML front matter metadata, tags, `[[wikilinks]]`, backlinks and a relation graph.
+- Markdown preview, rich or plain-text editing, keyboard shortcuts and light/dark theme.
+- Local change history and version restore.
+- Full-text search, filtering by tag/folder/property and incremental indexing.
 
-### Synchronisation et collaboration
+### Synchronization and collaboration
 
-- Synchronisation bidirectionnelle de notes Markdown et de pièces jointes.
-- Transport temps réel lorsque la connexion est disponible ; rattrapage incrémental à la reconnexion.
-- Synchronisation par opérations ou par blocs afin d’éviter le transfert complet d’un coffre.
-- Détection de modifications concurrentes et résolution de conflit non destructive.
-- Indicateur d’état par coffre/note : local, en attente, synchronisé, conflit, erreur.
-- Partage futur par coffre, dossier ou note avec rôles explicites (lecture, écriture, administration).
+- Bidirectional synchronization of Markdown notes and attachments.
+- Real-time transport when the connection is available; incremental catch-up on reconnect.
+- Synchronization by operations or blocks to avoid transferring an entire vault.
+- Detection of concurrent changes and non-destructive conflict resolution.
+- Per-vault/note status indicator: local, pending, synced, conflict, error.
+- Future sharing by vault, folder or note with explicit roles (read, write, administration).
 
-### Interface web
+### Web interface
 
-- Connexion sécurisée et gestion des sessions.
-- Navigation dans les coffres autorisés, édition Markdown et prévisualisation.
-- Recherche, backlinks, tags et accès à l’historique selon les permissions.
-- Compatibilité navigateur moderne, interface responsive et cache offline progressif.
+- Secure sign-in and session management.
+- Navigation across authorized vaults, Markdown editing and preview.
+- Search, backlinks, tags and history access according to permissions.
+- Modern browser support, responsive interface and progressive offline cache.
 
-## Principes d’architecture
+## Architecture principles
 
 ```text
 ┌──────────────────────┐        HTTPS / WebSocket         ┌──────────────────────┐
-│ Client lourd         │ ────────────────────────────────▶ │ Serveur de sync      │
-│ - coffre local       │ ◀──────────────────────────────── │ - API/auth           │
-│ - index local        │                                    │ - moteur de conflits  │
-│ - file d’opérations  │                                    │ - stockage métadonnées│
+│ Desktop client       │ ────────────────────────────────▶ │ Sync server          │
+│ - local vault        │ ◀──────────────────────────────── │ - API/auth           │
+│ - local index        │                                    │ - conflict engine     │
+│ - operation queue    │                                    │ - metadata storage    │
 └──────────────────────┘                                    └──────────┬───────────┘
          ▲                                                               │
          │                                                               ▼
          │ local                                               ┌──────────────────┐
-┌────────┴─────────────┐                                      │ Stockage blobs   │
-│ Interface web         │ ◀──────────────────────────────────▶ │ / fichiers       │
-│ - cache navigateur    │          HTTPS / WebSocket            └──────────────────┘
-│ - éditeur Markdown    │
+┌────────┴─────────────┐                                      │ Blob storage     │
+│ Web interface        │ ◀──────────────────────────────────▶ │ / files          │
+│ - browser cache      │          HTTPS / WebSocket            └──────────────────┘
+│ - Markdown editor    │
 └──────────────────────┘
 ```
 
-### Modèle local-first
+### Local-first model
 
-Chaque client possède :
+Every client has:
 
-- une copie locale du coffre ;
-- une base d’index locale pour la recherche et les métadonnées ;
-- une file persistante des opérations non envoyées ;
-- des marqueurs de version permettant de demander uniquement les changements manquants.
+- a local copy of the vault;
+- a local index database for search and metadata;
+- a persistent queue of operations that have not been sent yet;
+- version markers so it can request only the missing changes.
 
-Le serveur coordonne les changements et conserve les versions nécessaires à la réplication. Il ne doit pas être un point de blocage pour l’édition locale.
+The server coordinates changes and keeps the versions needed for replication. It
+must not become a blocking point for local editing.
 
-### Stratégie de conflits
+### Conflict strategy
 
-Le projet doit privilégier des conflits explicites plutôt que des écrasements silencieux :
+The project must prefer explicit conflicts over silent overwrites:
 
-- fusion automatique uniquement lorsque les modifications sont manifestement disjointes ;
-- conservation des deux variantes lorsqu’une fusion sûre n’est pas possible ;
-- interface de comparaison et choix utilisateur ;
-- journal d’audit des résolutions et possibilité de revenir à une version antérieure.
+- automatic merge only when the changes are clearly disjoint;
+- keep both variants when a safe merge is not possible;
+- comparison interface and user choice;
+- audit log of resolutions and the ability to return to an earlier version.
 
-Pour l’édition collaborative simultanée à l’intérieur d’une même note, un CRDT peut être adopté dans une phase ultérieure. Le format final doit toutefois rester sérialisable proprement en Markdown.
+For simultaneous collaborative editing inside the same note, a CRDT may be
+adopted in a later phase. The final format must however remain cleanly
+serializable to Markdown.
 
-## Sécurité
+## Security
 
-La sécurité est une exigence de conception, pas une étape de finition.
+Security is a design requirement, not a finishing step.
 
-### Mesures minimales
+### Baseline measures
 
-- TLS obligatoire en production ; redirection HTTP vers HTTPS.
-- Authentification avec mots de passe hachés par un algorithme moderne et résistant (Argon2id).
-- Sessions courtes (8 h), cookies `HttpOnly`, `Secure`, `SameSite`, rotation et révocation ; 30 jours seulement si l’utilisateur coche « Se souvenir de cet appareil » (mot de passe de compte, pas la phrase du coffre).
-- Autorisation systématique côté serveur sur chaque coffre, fichier et opération.
-- Protection contre les attaques usuelles : CSRF, XSS, injection, traversal de chemin, SSRF, brute force et rejeu de requêtes.
-- Validation stricte des schémas d’API, limites de taille, quotas et limitation de débit.
-- Journalisation structurée sans contenu de notes, mots de passe, jetons ou données sensibles.
-- Dépendances verrouillées, analyse de vulnérabilités, mises à jour régulières et SBOM générable.
-- Sauvegardes chiffrées, testées et restaurables.
+- TLS is mandatory in production; HTTP redirects to HTTPS.
+- Authentication with passwords hashed by a modern, resistant algorithm (Argon2id).
+- Short sessions (8 h), `HttpOnly`, `Secure`, `SameSite` cookies, rotation and revocation; 30 days only when the user ticks "Remember this device" (account password, not the vault passphrase).
+- Systematic server-side authorization on every vault, file and operation.
+- Protection against common attacks: CSRF, XSS, injection, path traversal, SSRF, brute force and request replay.
+- Strict API schema validation, size limits, quotas and rate limiting.
+- Structured logging without note content, passwords, tokens or sensitive data.
+- Locked dependencies, vulnerability scanning, regular updates and a generatable SBOM.
+- Encrypted, tested and restorable backups.
 
-### Chiffrement de bout en bout obligatoire pour la synchronisation
+### End-to-end encryption is mandatory for synchronization
 
-Dans le MVP, tout contenu synchronisé est chiffré côté client avant l’envoi et
-le serveur ne conserve que des données chiffrées. Les coffres locaux restent
-utilisables sans serveur. Une phrase de déchiffrement distincte du mot de passe
-d’authentification enveloppe la clé de coffre localement et ne traverse jamais
-l’API. Cette conception limite volontairement la récupération de clés, le
-partage et la recherche côté serveur ; ces limites sont documentées.
+In the MVP, all synchronized content is encrypted on the client before it is
+sent, and the server only stores encrypted data. Local vaults remain usable
+without a server. A decryption passphrase, distinct from the authentication
+password, wraps the vault key locally and never crosses the API. This design
+deliberately limits server-side key recovery, sharing and search; those limits
+are documented.
 
-## Performance et optimisation
+## Performance and optimization
 
-- Indexation incrémentale : seules les notes modifiées sont re-parsées.
-- Recherche locale avec index persistant ; pagination et annulation des requêtes coûteuses.
-- Chargement paresseux de l’arborescence, des aperçus et des pièces jointes.
-- Synchronisation delta, compression des transferts et déduplication des blobs par empreinte de contenu.
-- Traitement des gros fichiers en flux, avec plafonds configurables.
-- Éviter les lectures/écritures synchrones sur le chemin critique de l’interface.
-- Benchmarks reproductibles sur ouverture de coffre, indexation, recherche et synchronisation.
-- Profiling et métriques avant toute optimisation structurelle.
+- Incremental indexing: only modified notes are re-parsed.
+- Local search with a persistent index; pagination and cancellation of expensive queries.
+- Lazy loading of the tree, previews and attachments.
+- Delta synchronization, transfer compression and blob deduplication by content hash.
+- Streaming of large files, with configurable caps.
+- Avoid synchronous reads/writes on the interface critical path.
+- Reproducible benchmarks for vault opening, indexing, search and synchronization.
+- Profiling and metrics before any structural optimization.
 
-## Architecture et décisions du MVP
+## Architecture and MVP decisions
 
-Les frontières de responsabilité du monorepo sont consignées dans les ADR :
+The responsibility boundaries of the monorepo are recorded in the ADRs:
 
-- [ADR 0001 — Monorepo et frontières de confiance](docs/adr/0001-monorepo-and-boundaries.md)
-- [ADR 0002 — Synchronisation par opérations et révisions](docs/adr/0002-sync-versioning.md)
-- [ADR 0011 — Le client web chiffré est canonique](docs/adr/0011-web-client-canonical.md)
-- [ADR 0014 — Session de compte mémorisée](docs/adr/0014-remembered-account-session.md)
-- [ADR 0015 — Mises à jour continues et signées](docs/adr/0015-continuous-signed-updates.md)
-- [ADR 0013 — Réplique dossier desktop et priorité serveur](docs/adr/0013-desktop-folder-replica-and-server-priority.md)
-- [ADR 0016 — Coffres desktop chiffrés sans serveur](docs/adr/0016-standalone-encrypted-desktop-vaults.md)
-- [ADR 0007 — Éditeur Markdown à rendu instantané](docs/adr/0007-vditor-instant-rendering-editor.md)
-- [ADR 0008 — Assistant Codex optionnel côté client](docs/adr/0008-client-side-codex-assistant.md)
-- [ADR 0010 — Item de coffre chiffré](docs/adr/0010-encrypted-vault-item.md)
+- [ADR 0001 — Monorepo and trust boundaries](docs/adr/0001-monorepo-and-boundaries.md)
+- [ADR 0002 — Operation and revision based synchronization](docs/adr/0002-sync-versioning.md)
+- [ADR 0011 — The encrypted web client is canonical](docs/adr/0011-web-client-canonical.md)
+- [ADR 0014 — Remembered account session](docs/adr/0014-remembered-account-session.md)
+- [ADR 0015 — Continuous, signed updates](docs/adr/0015-continuous-signed-updates.md)
+- [ADR 0013 — Desktop folder replica and server priority](docs/adr/0013-desktop-folder-replica-and-server-priority.md)
+- [ADR 0016 — Standalone encrypted desktop vaults](docs/adr/0016-standalone-encrypted-desktop-vaults.md)
+- [ADR 0007 — Instant-rendering Markdown editor](docs/adr/0007-vditor-instant-rendering-editor.md)
+- [ADR 0008 — Optional client-side Codex assistant](docs/adr/0008-client-side-codex-assistant.md)
+- [ADR 0010 — Encrypted vault item](docs/adr/0010-encrypted-vault-item.md)
 
-Le [modèle de menace du MVP](docs/security/threat-model.md) précise les actifs,
-frontières de confiance, menaces et contrôles. Le serveur est un coordinateur
-opaque : il n'accède jamais au contenu des coffres en clair.
+The [MVP threat model](docs/security/threat-model.md) details the assets, trust
+boundaries, threats and controls. The server is an opaque coordinator: it never
+accesses vault content in plaintext.
 
-## Organisation cible du dépôt
+## Target repository layout
 
 ```text
 .
 ├── apps/
-│   ├── desktop/          # Client lourd
-│   ├── web/              # Application web
-│   └── server/           # API, synchronisation et workers
+│   ├── desktop/          # Desktop client
+│   ├── web/              # Web application
+│   └── server/           # API, synchronization and workers
 ├── packages/
-│   ├── core/             # Modèle de coffre, Markdown, liens, conflits
-│   ├── protocol/         # Contrats API et protocole de synchronisation
-│   ├── ui/               # Composants partagés
-│   └── config/           # Configuration, validation et observabilité
+│   ├── core/             # Vault model, Markdown, links, conflicts
+│   ├── protocol/         # API contracts and synchronization protocol
+│   ├── ui/               # Shared components
+│   └── config/           # Configuration, validation and observability
 ├── infra/
-│   ├── docker/           # Images et Compose
-│   ├── reverse-proxy/    # Exemples Caddy/Nginx
-│   └── scripts/          # Sauvegarde, restauration, maintenance
-├── docs/                 # Architecture, sécurité, exploitation
-└── tests/                # Tests d’intégration, charge et end-to-end
+│   ├── docker/           # Images and Compose
+│   ├── reverse-proxy/    # Caddy/Nginx examples
+│   └── scripts/          # Backup, restore, maintenance
+├── docs/                 # Architecture, security, operations
+└── tests/                # Integration, load and end-to-end tests
 ```
 
-## État MVP vérifié
+## Verified MVP state
 
-La [checklist de préversion](docs/testing/release-checklist.md) distingue les
-résultats observés, les contrôles de CI et les validations encore à exécuter.
+The [pre-release checklist](docs/testing/release-checklist.md) distinguishes
+observed results, CI checks and validations that still have to run.
 
-### Développement local
+### Local development
 
 ```bash
 just dev
 ```
 
-Démarre PostgreSQL (`synapse_dev`), l’API Rust (`http://127.0.0.1:3000`) et
-l’UI Vite (`http://localhost:5173`) dans un seul terminal. `Ctrl+C` arrête les
-deux. En deux terminaux : `just serve` puis `just web`.
+Starts PostgreSQL (`synapse_dev`), the Rust API (`http://127.0.0.1:3000`) and the
+Vite UI (`http://localhost:5173`) in a single terminal. `Ctrl+C` stops both. In
+two terminals: `just serve` then `just web`.
 
 ```bash
 just desktop
 ```
 
-Démarre PostgreSQL (`synapse_dev`), l’API Rust (`http://127.0.0.1:3000`) et
-la fenêtre native Tauri (Vite `http://127.0.0.1:1420`) dans un seul terminal.
-`Ctrl+C` arrête les deux. L’édition utilise le cache chiffré local et une
-réplique Markdown desktop, et ne bloque pas l’interface pendant une
-indisponibilité réseau.
+Starts PostgreSQL (`synapse_dev`), the Rust API (`http://127.0.0.1:3000`) and the
+native Tauri window (Vite `http://127.0.0.1:1420`) in a single terminal.
+`Ctrl+C` stops both. Editing uses the encrypted local cache and a desktop
+Markdown replica, and does not block the interface during a network outage.
 
-### Qualité
+### Quality
 
 ```bash
 just verify
 ```
 
-Enchaîne les contrôles Rust et frontend, les audits, les tests du harness et
-des scripts d’exploitation, les parcours Playwright de récupération, les
-scénarios Compose de redémarrage et de restauration, puis le drill de
-déploiement de release. Docker et les prérequis Rust natifs sont nécessaires.
-Détails : `docs/operations/ci.md`.
+Chains the Rust and frontend checks, the audits, the harness and operations
+script tests, the Playwright recovery journeys, the Compose restart and restore
+scenarios, then the release deployment drill. Docker and the native Rust
+prerequisites are required. Details: `docs/operations/ci.md`.
 
-Le client desktop (éditeur local, sync optionnelle) est aussi couvert par :
+The desktop client (local editor, optional sync) is also covered by:
 
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 pnpm --filter @synapse/desktop test
 pnpm --filter @synapse/desktop typecheck
-# Linux/WSL sans session graphique :
+# Linux/WSL without a graphical session:
 dbus-run-session -- xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native
 ```
 
-### Self-hosting Docker Compose
+### Self-hosting with Docker Compose
 
 ```bash
 cp .env.example .env
-# Ajuster SYNAPSE_ALLOWED_ORIGIN et les secrets PostgreSQL
+# Adjust SYNAPSE_ALLOWED_ORIGIN and the PostgreSQL secrets
 bash tests/integration/self_hosted.sh
 bash tests/integration/backup_restore.sh
 bash tests/integration/release_drill.sh
 ```
 
-`release_drill.sh` construit un projet Compose jetable avec des images
-étiquetées et un TLS local, puis exécute le vrai
-`infra/scripts/deploy-release.sh` : sauvegarde sur changement de migration,
-activation des manifestes en dernier et rollback d’images et de pointeur.
+`release_drill.sh` builds a disposable Compose project with labelled images and
+local TLS, then runs the real `infra/scripts/deploy-release.sh`: backup on a
+migration change, manifest-last activation and rollback of images and pointer.
 
-Stack minimale : PostgreSQL + API Rust + UI web + Caddy + volume de blobs.
-Guide opérateur : `docs/operations/install.md`, sauvegarde :
-`docs/operations/backup-restore.md`.
+Minimal stack: PostgreSQL + Rust API + web UI + Caddy + blob volume. Operator
+guide: `docs/operations/install.md`, backup: `docs/operations/backup-restore.md`.
 
-### Parcours chiffré web / sync
+### Encrypted web / sync journeys
 
-Le harness Playwright construit l’application et démarre sa propre API, sa
-base jetable et ses répertoires temporaires. Les ports par défaut sont 13000
-et 15173 ; un port occupé fait échouer le démarrage. Il ne faut pas démarrer
-`just serve` pour ces tests. Prérequis : Docker Compose, Rust et Chromium
-Playwright installé.
+The Playwright harness builds the application and starts its own API, disposable
+database and temporary directories. The default ports are 13000 and 15173; an
+occupied port makes startup fail. Do not start `just serve` for these tests.
+Prerequisites: Docker Compose, Rust and an installed Playwright Chromium.
 
 ```bash
 just e2e-recovery
 ```
 
-Checklist de préversion : `docs/testing/release-checklist.md`.
+Pre-release checklist: `docs/testing/release-checklist.md`.
 
 ### Performance
 
@@ -273,145 +271,150 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml \
   --test folder_performance -- --ignored --nocapture
 ```
 
-Ces commandes mesurent le client Vue/IndexedDB avec 10 000 notes chiffrées
-et la réplique Markdown dans un dossier temporaire. Le benchmark navigateur
-simule les réponses réseau : il mesure le traitement du delta côté client.
-Mesures, limites et anciens benchmarks Rust/k6 :
-[budgets de performance](docs/architecture/performance-budgets.md).
+These commands measure the Vue/IndexedDB client with 10,000 encrypted notes and
+the Markdown replica in a temporary folder. The browser benchmark simulates
+network responses: it measures delta processing on the client side. Measurements,
+limits and earlier Rust/k6 benchmarks:
+[performance budgets](docs/architecture/performance-budgets.md).
 
-### Limites connues du MVP
+### Known MVP limitations
 
-- Le client Tauri embarque le client web chiffré via un pont Rust fermé, sans
-  accès filesystem ou HTTP générique depuis Vue. Le mode local permet de créer
-  et rouvrir un coffre sans compte ni serveur. Un coffre local n’est pas envoyé
-  implicitement lors d’une connexion à un compte : son transfert passe par
-  l’export/import explicite.
-- Le desktop réplique aussi le Markdown **en clair** dans un dossier choisi
-  avec le sélecteur natif, ou dans le dossier proposé par défaut. Verrouiller
-  l’app n’efface pas ces fichiers. Les fichiers inconnus ou modifiés en dehors
-  de Synapse provoquent une erreur visible ; leur import automatique n’est pas
-  implémenté. Le navigateur conserve uniquement son cache IndexedDB chiffré
-  et ne montre aucun sélecteur de dossier natif.
-- Chaque sauvegarde persiste atomiquement le contenu chiffré et son opération
-  avant le transport. La déconnexion conserve ce travail chiffré en attente et
-  purge les secrets locaux. La reconnexion au même compte et le déverrouillage
-  permettent de reprendre la file jusqu’à un acquittement correspondant.
-  Si le stockage local refuse l’écriture, le brouillon reste affiché et le
-  changement de note, le verrouillage ou la déconnexion attendent une sauvegarde
-  réussie ; l’interface expose l’erreur.
-- Un pull incrémental précède le push. Les notifications WebSocket réveillent
-  le navigateur ; le desktop utilise son transport HTTP authentifié. La
-  reprise automatique suit le délai d’appareil (10 s par défaut, réglable
-  3–60 s), avec temporisation croissante et aléatoire après erreur, plafonnée à
-  60 s. Un conflit conserve ses variantes et bloque l’opération concernée
-  jusqu’à résolution dans le client déverrouillé.
-- Aucun contenu de coffre en clair n’atteint le serveur ; la phrase de
-  déchiffrement reste locale.
-- Pas de SaaS obligatoire, pas de télémétrie distante. Un chat Codex
-  optionnel peut partir du client déverrouillé avec une clé fournie par
-  l’utilisateur ; les notes liées vont alors vers OpenAI, jamais vers le
-  serveur Synapse (ADR 0008). La CI ne valide pas d’appel live à Codex.
-- SBOM CycloneDX : `just sbom` écrit sous `target/sbom/` (non versionné).
-- Les builds web et desktop partagent un coordinateur de mise à jour. Le web
-  propose un rechargement explicite ; Windows/Linux téléchargent en arrière-plan
-  un paquet signé Tauri, puis proposent l’installation et le redémarrage. Le
-  premier binaire compatible updater doit être installé manuellement.
+- The Tauri client embeds the encrypted web client through a closed Rust bridge,
+  with no generic filesystem or HTTP access from Vue. The local mode allows
+  creating and reopening a vault without an account or server. A local vault is
+  not sent implicitly when signing in to an account: moving it requires an
+  explicit export/import.
+- The desktop client also replicates Markdown **in plaintext** into a folder
+  chosen with the native picker, or into the default suggested folder. Locking
+  the app does not erase those files. Unknown files or files modified outside
+  Synapse raise a visible error; their automatic import is not implemented. The
+  browser keeps only its encrypted IndexedDB cache and shows no native folder
+  picker.
+- Every save atomically persists the encrypted content and its operation before
+  transport. Signing out keeps that pending encrypted work and purges local
+  secrets. Signing back into the same account and unlocking resumes the queue
+  until a matching acknowledgement. If local storage refuses the write, the
+  draft stays visible and changing note, locking or signing out waits for a
+  successful save; the interface surfaces the error.
+- An incremental pull precedes the push. WebSocket notifications wake the
+  browser; the desktop client uses its authenticated HTTP transport. Automatic
+  recovery follows the device delay (10 s by default, configurable 3–60 s), with
+  growing and randomized backoff after an error, capped at 60 s. A conflict
+  keeps its variants and blocks the relevant operation until resolution in the
+  unlocked client.
+- No vault content in plaintext reaches the server; the decryption passphrase
+  stays local.
+- No mandatory SaaS, no remote telemetry. An optional Codex chat can run from
+  the unlocked client with a user-provided key; the linked notes then go to
+  OpenAI, never to the Synapse server (ADR 0008). CI does not validate a live
+  Codex call.
+- CycloneDX SBOM: `just sbom` writes under `target/sbom/` (not versioned).
+- The web and desktop builds share one update coordinator. The web offers an
+  explicit reload; Windows/Linux download a signed Tauri package in the
+  background, then offer installation and restart. The first updater-compatible
+  binary must be installed manually.
 
-## Feuille de route
+## Roadmap
 
-### Phase 1 — fondations locales
+### Phase 1 — local foundations
 
-- Modèle de coffre, lecture/écriture Markdown et surveillance de fichiers.
-- Éditeur, aperçu, arborescence, backlinks et recherche locale.
-- Historique minimal et tests de non-régression.
+- Vault model, Markdown read/write and file watching.
+- Editor, preview, tree, backlinks and local search.
+- Minimal history and non-regression tests.
 
-### Phase 2 — service de synchronisation
+### Phase 2 — synchronization service
 
-- Comptes, coffres, autorisations et API versionnée.
-- Réplication incrémentale, file d’opérations et gestion des conflits.
-- Déploiement Docker, sauvegardes et observabilité de base.
+- Accounts, vaults, authorization and a versioned API.
+- Incremental replication, operation queue and conflict handling.
+- Docker deployment, backups and baseline observability.
 
-### Phase 3 — web et robustesse
+### Phase 3 — web and robustness
 
-- Client web avec synchronisation et cache local.
-- Partage, rôles, audit et limites d’usage.
-- Tests de charge, durcissement sécurité et documentation d’exploitation.
+- Web client with synchronization and local cache.
+- Sharing, roles, audit and usage limits.
+- Load testing, security hardening and operations documentation.
 
-### Phase 4 — collaboration avancée
+### Phase 4 — advanced collaboration
 
-- Édition temps réel d’une note, présence et commentaires optionnels.
-- Évolution du partage chiffré et de la gestion des clés ; l’E2EE des contenus
-  synchronisés est déjà obligatoire.
-- Extensions/API publique, import/export et écosystème de plugins isolés.
+- Real-time editing of a note, presence and optional comments.
+- Evolution of encrypted sharing and key management; E2EE of synchronized
+  content is already mandatory.
+- Extensions/public API, import/export and an isolated plugin ecosystem.
 
-## Non-objectifs initiaux
+## Initial non-goals
 
-- Compatibilité binaire ou protocolaire avec Obsidian Sync.
-- Marketplace de plugins avant la stabilisation du modèle de sécurité.
-- Intelligence artificielle obligatoire, ou relais des notes en clair via le
-  serveur Synapse. Un chat Codex optionnel peut partir du client déverrouillé
-  avec la clé de l’utilisateur (ADR 0008).
-- Dépendance obligatoire à un service cloud propriétaire.
+- Binary or protocol compatibility with Obsidian Sync.
+- A plugin marketplace before the security model is stabilized.
+- Mandatory artificial intelligence, or relaying notes in plaintext through the
+  Synapse server. An optional Codex chat can run from the unlocked client with
+  the user's key (ADR 0008).
+- A mandatory dependency on a proprietary cloud service.
 
-## Stack retenue — Vue.js, Rust et logiciels libres
+## Chosen stack — Vue.js, Rust and open source
 
-Le projet retient une stack **open source, auto-hébergeable et sans dépendance à un service payant**. Chaque composant de production doit pouvoir être exécuté sur l’infrastructure de l’utilisateur. Les éventuels services managés ne sont ni nécessaires, ni une dépendance du produit.
+The project adopts an **open source, self-hostable stack with no dependency on a
+paid service**. Every production component must be runnable on the user's
+infrastructure. Any managed services are neither required nor a dependency of
+the product.
 
-| Couche                       | Technologies retenues                                                                                                                | Licence / rôle                                                               |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Client lourd                 | **Tauri 2**, **Rust**, **Vue 3**, TypeScript, Vite                                                                                   | Tauri (MIT/Apache-2.0), Vue (MIT) ; application native légère et sécurisée   |
-| Interface web                | **Vue 3**, TypeScript, Vite, Vue Router, Pinia                                                                                       | MIT ; SPA statique servie par le serveur ou un proxy inverse                 |
-| Design système               | Tailwind CSS ou UnoCSS, composants Vue internes                                                                                      | MIT ; aucun kit UI propriétaire requis                                       |
-| Éditeur Markdown             | Vditor 3 en mode IR + prévisualisation markdown-it                                                                                   | MIT ; rendu instantané CommonMark/GFM, ressources embarquées localement      |
-| Serveur                      | **Rust**, Axum, Tokio, Tower                                                                                                         | MIT ; API HTTP et synchronisation temps réel à faible empreinte              |
-| Contrats API                 | OpenAPI, JSON Schema, génération de clients TypeScript                                                                               | Standards ouverts ; protocole versionné et documenté                         |
-| Temps réel                   | WebSocket sécurisé, opérations idempotentes, synchronisation delta                                                                   | Standard ouvert ; protocole applicatif documenté                             |
-| Collaboration avancée        | Automerge ou yrs/Yjs, uniquement si les benchmarks le justifient                                                                     | MIT ; CRDT auto-hébergeable, sans service tiers                              |
-| Métadonnées                  | **PostgreSQL**                                                                                                                       | PostgreSQL License ; comptes, droits, index et historique de synchronisation |
-| Stockage et recherche client | **IndexedDB** chiffré et recherche dans les notes déverrouillées en mémoire ; SQLite/FTS5 reste dans les composants Rust historiques | Stockage local ; aucun index de contenu en clair sur le serveur              |
-| Stockage de fichiers         | Système de fichiers local par défaut ; **MinIO** pour le stockage objet S3-compatible distribué                                      | AGPLv3 ; entièrement auto-hébergeable                                        |
-| Proxy et TLS                 | **Caddy**                                                                                                                            | Apache-2.0 ; certificats TLS automatisés et reverse proxy                    |
-| Conteneurs                   | Docker Engine + Docker Compose                                                                                                       | Déploiement reproductible ; possibilité Podman/Compose compatible            |
-| Observabilité                | OpenTelemetry, Prometheus, Grafana, Loki                                                                                             | Apache-2.0/AGPLv3 ; métriques, traces et logs locaux                         |
-| CI locale                    | Forgejo Actions ou Woodpecker CI                                                                                                     | GPLv3/Apache-2.0 ; aucune plateforme SaaS obligatoire                        |
+| Layer                     | Chosen technologies                                                                                                   | License / role                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Desktop client            | **Tauri 2**, **Rust**, **Vue 3**, TypeScript, Vite                                                                    | Tauri (MIT/Apache-2.0), Vue (MIT); lightweight, secure native application |
+| Web interface             | **Vue 3**, TypeScript, Vite, Vue Router, Pinia                                                                        | MIT; static SPA served by the server or a reverse proxy                   |
+| Design system             | Tailwind CSS or UnoCSS, in-house Vue components                                                                       | MIT; no proprietary UI kit required                                       |
+| Markdown editor           | Vditor 3 in IR mode + markdown-it preview                                                                             | MIT; instant CommonMark/GFM rendering, assets bundled locally             |
+| Server                    | **Rust**, Axum, Tokio, Tower                                                                                          | MIT; low-footprint HTTP API and real-time synchronization                 |
+| API contracts             | OpenAPI, JSON Schema, TypeScript client generation                                                                    | Open standards; versioned and documented protocol                         |
+| Real time                 | Secure WebSocket, idempotent operations, delta synchronization                                                        | Open standard; documented application protocol                            |
+| Advanced collaboration    | Automerge or yrs/Yjs, only if benchmarks justify it                                                                   | MIT; self-hostable CRDT, no third-party service                           |
+| Metadata                  | **PostgreSQL**                                                                                                        | PostgreSQL License; accounts, rights, indexes and sync history            |
+| Client storage and search | Encrypted **IndexedDB** and search in unlocked in-memory notes; SQLite/FTS5 remains in the historical Rust components | Local storage; no plaintext content index on the server                   |
+| File storage              | Local filesystem by default; **MinIO** for distributed S3-compatible object storage                                   | AGPLv3; fully self-hostable                                               |
+| Proxy and TLS             | **Caddy**                                                                                                             | Apache-2.0; automated TLS certificates and reverse proxy                  |
+| Containers                | Docker Engine + Docker Compose                                                                                        | Reproducible deployment; compatible Podman/Compose possible               |
+| Observability             | OpenTelemetry, Prometheus, Grafana, Loki                                                                              | Apache-2.0/AGPLv3; local metrics, traces and logs                         |
+| Local CI                  | Forgejo Actions or Woodpecker CI                                                                                      | GPLv3/Apache-2.0; no mandatory SaaS platform                              |
 
-### Décisions d’architecture
+### Architecture decisions
 
-- **Vue.js plutôt que React** : Vue 3 est le framework d’interface commun au client lourd et au web. L’équipe bénéficie d’un modèle de composants cohérent, d’une bonne ergonomie TypeScript et d’un bundle maîtrisable.
-- **Rust pour le cœur sensible** : le serveur de synchronisation, le moteur de coffre partagé et les chemins critiques du client Tauri sont écrits en Rust. Cela réduit l’empreinte mémoire et apporte des garanties de sûreté mémoire sans garbage collector.
-- **Tauri plutôt qu’Electron** : le client lourd s’appuie sur le WebView natif et un binaire Rust, afin de limiter la taille de distribution, la consommation de mémoire et la surface d’attaque.
-- **PostgreSQL + système de fichiers par défaut** : un seul serveur suffit pour une installation personnelle. MinIO est uniquement proposé lorsque plusieurs nœuds ou un stockage objet sont nécessaires.
-- **Pas de dépendance cloud** : pas de Firebase, Supabase Cloud, Auth0, Sentry SaaS, Algolia Cloud, Vercel, GitHub obligatoire, ni autre API commerciale dans le chemin de production.
-- **Protocoles ouverts** : API HTTP documentée par OpenAPI, WebSocket documenté et formats Markdown/JSON standards. Les données restent exportables sans outil propriétaire.
+- **Vue.js rather than React**: Vue 3 is the interface framework shared by the desktop and web clients. It gives the team a consistent component model, good TypeScript ergonomics and a controllable bundle.
+- **Rust for the sensitive core**: the synchronization server, the shared vault engine and the critical paths of the Tauri client are written in Rust. This reduces the memory footprint and provides memory-safety guarantees without a garbage collector.
+- **Tauri rather than Electron**: the desktop client relies on the native WebView and a Rust binary, to limit distribution size, memory usage and attack surface.
+- **PostgreSQL + filesystem by default**: a single server is enough for a personal installation. MinIO is only offered when multiple nodes or object storage are needed.
+- **No cloud dependency**: no Firebase, Supabase Cloud, Auth0, Sentry SaaS, Algolia Cloud, Vercel, mandatory GitHub, or any other commercial API on the production path.
+- **Open protocols**: HTTP API documented with OpenAPI, documented WebSocket and standard Markdown/JSON formats. Data stays exportable without a proprietary tool.
 
-### Contraintes de licence et d’exploitation
+### License and operational constraints
 
-- Les dépendances doivent être open source et compatibles avec la licence finale du projet ; leur licence doit être vérifiée dans la CI.
-- Les composants sous AGPLv3, tels que MinIO ou Grafana, sont utilisés comme services autonomes et ne doivent pas être intégrés ou redistribués sans évaluer les obligations correspondantes.
-- Un déploiement minimal ne requiert que le serveur Rust, PostgreSQL, le volume de fichiers local et Caddy. Les métriques, MinIO et Forgejo sont optionnels.
-- Les intégrations externes restent facultatives, désactivées par défaut et remplaçables par une implémentation auto-hébergée.
+- Dependencies must be open source and compatible with the project's final license; their license must be verified in CI.
+- AGPLv3 components such as MinIO or Grafana are used as standalone services and must not be integrated or redistributed without assessing the corresponding obligations.
+- A minimal deployment only requires the Rust server, PostgreSQL, the local file volume and Caddy. Metrics, MinIO and Forgejo are optional.
+- External integrations remain optional, disabled by default and replaceable by a self-hosted implementation.
 
-### Justification
+### Rationale
 
-Cette stack privilégie les standards ouverts, la sobriété des ressources et l’autonomie opérationnelle. Elle permet de livrer rapidement une interface Vue.js moderne tout en réservant Rust aux composants où la performance, la concurrence et la sécurité sont déterminantes. L’ensemble peut être distribué sous forme de binaires et de conteneurs, sans abonnement ni compte chez un fournisseur tiers.
+This stack favors open standards, resource frugality and operational autonomy. It
+makes it possible to ship a modern Vue.js interface quickly while reserving Rust
+for the components where performance, concurrency and security are decisive. The
+whole can be distributed as binaries and containers, without a subscription or a
+third-party provider account.
 
-## Contribuer
+## Contributing
 
-Les contributions sont bienvenues. Lire d’abord
-[CONTRIBUTING.md](CONTRIBUTING.md) : développement piloté par les tests,
-petites tranches verticales, un commit conventionnel atomique par tâche verte,
-et aucun contenu de coffre en clair dans les tests, journaux, métriques ou
-artefacts. Ce projet applique le [code de conduite](CODE_OF_CONDUCT.md).
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first:
+test-driven development, small vertical slices, one atomic conventional commit
+per green task, and no vault content in plaintext in tests, logs, metrics or
+artifacts. This project follows the [code of conduct](CODE_OF_CONDUCT.md).
 
-## Signaler une vulnérabilité
+## Reporting a vulnerability
 
-Ne pas ouvrir d’issue publique pour un problème de sécurité : suivre la
-procédure privée décrite dans [SECURITY.md](SECURITY.md).
+Do not open a public issue for a security problem: follow the private process
+described in [SECURITY.md](SECURITY.md).
 
-## Licence
+## License
 
-Synapse est distribué sous **GNU Affero General Public License v3.0 ou
-ultérieure** (`AGPL-3.0-or-later`) — voir [LICENSE](LICENSE). Le serveur pouvant
-être exploité en service réseau, l’AGPL impose de rendre disponible le code
-source des modifications déployées. Les dépendances doivent rester compatibles
-avec cette licence ; la CI vérifie leurs licences et leurs vulnérabilités.
+Synapse is distributed under the **GNU Affero General Public License v3.0 or
+later** (`AGPL-3.0-or-later`) — see [LICENSE](LICENSE). Because the server can be
+run as a network service, the AGPL requires making the source code of deployed
+modifications available. Dependencies must remain compatible with this license;
+CI verifies their licenses and vulnerabilities.
