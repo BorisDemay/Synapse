@@ -319,7 +319,11 @@ textarea[data-pc-name="textarea"]:enabled:focus {
   outline: 0;
 }
 
-/* Select: PrimeVue runs unstyled, so it only emits data-pc-* attributes. */
+/* Select: PrimeVue runs unstyled, so it only emits data-pc-* attributes. The
+   overlay is teleported to <body> and only carries data-pc-section (PrimeVue
+   emits data-pc-name on roots only), so overlay rules cannot be scoped by
+   [data-pc-name="select"]; :has() keeps the panel look limited to overlays
+   that render an option list. */
 [data-pc-name="select"][data-pc-section="root"] {
   position: relative;
   display: inline-flex;
@@ -374,7 +378,7 @@ textarea[data-pc-name="textarea"]:enabled:focus {
   transform: translateY(-50%);
 }
 
-[data-pc-name="select"][data-pc-section="overlay"] {
+[data-pc-section="overlay"]:has([data-pc-section="list"]) {
   position: absolute;
   z-index: 1100;
   max-block-size: 16rem;
@@ -388,29 +392,29 @@ textarea[data-pc-name="textarea"]:enabled:focus {
   overflow: auto;
 }
 
-[data-pc-name="select"] [data-pc-section="list"] {
+[data-pc-section="overlay"] [data-pc-section="list"] {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-[data-pc-name="select"] [data-pc-section="option"] {
+[data-pc-section="overlay"] [data-pc-section="option"] {
   padding: 0.55rem 0.7rem;
   border-radius: calc(var(--synapse-radius-sm) - 0.2rem);
   cursor: pointer;
 }
 
-[data-pc-name="select"] [data-pc-section="option"][data-p-focused="true"] {
+[data-pc-section="overlay"] [data-pc-section="option"][data-p-focused="true"] {
   background: var(--synapse-color-surface-muted);
 }
 
-[data-pc-name="select"] [data-pc-section="option"][data-p-selected="true"] {
+[data-pc-section="overlay"] [data-pc-section="option"][data-p-selected="true"] {
   color: var(--synapse-color-accent-strong);
   background: var(--synapse-color-surface-accent);
   font-weight: 600;
 }
 
-[data-pc-name="select"] [data-pc-section="emptymessage"] {
+[data-pc-section="overlay"] [data-pc-section="emptymessage"] {
   padding: 0.55rem 0.7rem;
   color: var(--synapse-color-text-muted);
 }
