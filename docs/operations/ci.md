@@ -6,7 +6,7 @@ commande locale unique `just verify`.
 ## Prérequis locaux
 
 - Rust stable avec `rustfmt` et `clippy`
-- `pnpm` 11.x et Node 22.17.x
+- `pnpm` 11.x et Node 22.23.x
 - Outils Rust : `just`, `cargo-nextest`, `cargo-deny` (`cargo install … --locked`)
 - PostgreSQL de test/dev : `just db` (ou `docker compose -f infra/docker/compose.test.yml up -d`)
 - Navigateurs Playwright

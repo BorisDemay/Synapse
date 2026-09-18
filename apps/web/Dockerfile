@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22.17.0-bookworm AS builder
+FROM node:22.23.2-bookworm AS builder
 ARG SYNAPSE_VERSION=0.1.0
 ARG SYNAPSE_COMMIT_SHA=development
 ENV VITE_SYNAPSE_VERSION=$SYNAPSE_VERSION \
