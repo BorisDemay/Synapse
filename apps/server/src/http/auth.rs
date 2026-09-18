@@ -66,6 +66,8 @@ pub struct SessionResponse {
 #[serde(deny_unknown_fields)]
 pub struct InvitationRequest {
     email: String,
+    #[serde(default)]
+    is_admin: bool,
 }
 
 #[derive(Serialize)]
@@ -84,7 +86,9 @@ pub struct UserListResponse {
 #[derive(Serialize)]
 pub struct InvitationResponse {
     email: String,
+    email_sent: bool,
     expires_at: String,
+    is_admin: bool,
     token: String,
 }
 
@@ -197,6 +201,7 @@ pub async fn signup(
         Err(error) => return password_hash_status(error),
     };
 
+    let mut invited_admin = false;
     let mut transaction = match pool.begin().await {
         Ok(transaction) => transaction,
         Err(_) => return signup_error(),
@@ -205,22 +210,24 @@ pub async fn signup(
         let Some(invitation_token) = request.invitation_token else {
             return signup_error();
         };
-        let invitation = sqlx::query_scalar::<_, String>("UPDATE invites SET accepted_at = CURRENT_TIMESTAMP WHERE token_hash = $1 AND lower(email) = $2 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP RETURNING id::text")
+        let invitation = sqlx::query_scalar::<_, bool>("UPDATE invites SET accepted_at = CURRENT_TIMESTAMP WHERE token_hash = $1 AND lower(email) = $2 AND accepted_at IS NULL AND expires_at > CURRENT_TIMESTAMP RETURNING is_admin")
             .bind(opaque_hash(&invitation_token))
             .bind(&email)
             .fetch_optional(&mut *transaction)
             .await;
-        let Ok(Some(_)) = invitation else {
-            return signup_error();
-        };
+        match invitation {
+            Ok(Some(is_admin)) => invited_admin = is_admin,
+            _ => return signup_error(),
+        }
     }
     let user_id = Uuid::new_v4();
     let created = sqlx::query(
-        "INSERT INTO users (id, email, password_hash, activated_at) VALUES ($1::uuid, $2, $3, NULL)",
+        "INSERT INTO users (id, email, password_hash, is_admin, activated_at) VALUES ($1::uuid, $2, $3, $4, NULL)",
     )
     .bind(user_id.to_string())
     .bind(&email)
     .bind(password_hash.as_bytes())
+    .bind(invited_admin)
     .execute(&mut *transaction)
     .await;
     if created.is_err() {
@@ -475,19 +482,28 @@ pub async fn create_invitation(
     let email = normalized_email(&request.email).ok_or(StatusCode::BAD_REQUEST)?;
     let token = random_token();
     let expires_at = sqlx::query_scalar::<_, String>(
-        "INSERT INTO invites (id, email, token_hash, expires_at) VALUES ($1::uuid, $2, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours') RETURNING expires_at::text",
+        "INSERT INTO invites (id, email, token_hash, is_admin, expires_at) VALUES ($1::uuid, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '24 hours') RETURNING expires_at::text",
     )
     .bind(Uuid::new_v4().to_string())
     .bind(&email)
     .bind(opaque_hash(&token))
+    .bind(request.is_admin)
     .fetch_one(&pool)
     .await
     .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    // Delivery is best effort: when no mailer is configured the administrator
+    // still receives the one-time link to forward manually.
+    let email_sent =
+        send_invitation_mail(state.mailer.as_ref(), &state.public_origin, &email, &token)
+            .await
+            .is_ok();
     Ok((
         StatusCode::CREATED,
         Json(InvitationResponse {
             email,
+            email_sent,
             expires_at,
+            is_admin: request.is_admin,
             token,
         }),
     ))
@@ -743,6 +759,24 @@ async fn send_activation_mail(
             subject: "Activate your Synapse account".to_owned(),
             body: format!(
                 "Open this link to activate your account:\n{origin}/activate?token={token}\n"
+            ),
+        })
+        .await
+}
+
+async fn send_invitation_mail(
+    mailer: &dyn Mailer,
+    public_origin: &str,
+    email: &str,
+    token: &str,
+) -> Result<(), MailError> {
+    let origin = public_origin.trim_end_matches('/');
+    mailer
+        .send(MailMessage {
+            to: email.to_owned(),
+            subject: "Your Synapse invitation".to_owned(),
+            body: format!(
+                "Open this link to create your Synapse account:\n{origin}/register?invitation={token}\n"
             ),
         })
         .await

@@ -337,6 +337,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(&mut *transaction)
     .await
     .map(|_| ())?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0007_invites_admin_role.sql"
+    ))
+    .execute(&mut *transaction)
+    .await
+    .map(|_| ())?;
     transaction.commit().await
 }
 

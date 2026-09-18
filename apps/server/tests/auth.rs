@@ -1198,6 +1198,117 @@ async fn auth_rate_limit_ignores_untrusted_forwarded_client_address() {
     assert_eq!(different_client.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
+#[tokio::test]
+async fn admin_invitation_emails_a_link_and_grants_the_admin_role() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+
+    let mailer = Arc::new(RecordingMailer::default());
+    let app =
+        synapse_server::router_with_settings(test_settings(Some(pool.clone()), mailer.clone()));
+
+    let hash = synapse_server::auth::password::hash_async("a secure password".to_owned())
+        .await
+        .expect("password hashes");
+    sqlx::query(
+        "INSERT INTO users (id, email, password_hash, is_admin, activated_at) VALUES ($1::uuid, $2, $3, TRUE, CURRENT_TIMESTAMP)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind("admin-inviter@example.test")
+    .bind(hash.as_bytes())
+    .execute(&pool)
+    .await
+    .expect("administrator is stored");
+
+    let login = app
+        .clone()
+        .oneshot(request_json(
+            "/auth/login",
+            r#"{"email":"admin-inviter@example.test","password":"a secure password"}"#,
+        ))
+        .await
+        .expect("login responds");
+    assert_eq!(login.status(), StatusCode::NO_CONTENT);
+    let cookie = login
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .expect("session cookie")
+        .to_owned();
+
+    let invitation = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/invitations")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::COOKIE, &cookie)
+                .header(header::ORIGIN, "https://synapse.local")
+                .body(Body::from(
+                    r#"{"email":"invitee-admin@example.test","is_admin":true}"#,
+                ))
+                .expect("valid request"),
+        )
+        .await
+        .expect("invitation responds");
+    assert_eq!(invitation.status(), StatusCode::CREATED);
+    let body: serde_json::Value = serde_json::from_slice(
+        &invitation
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
+    )
+    .expect("invitation body is json");
+    assert_eq!(body["is_admin"], serde_json::json!(true));
+    assert_eq!(body["email_sent"], serde_json::json!(true));
+
+    let messages = mailer.messages();
+    let invitation_mail = messages
+        .iter()
+        .find(|message| message.subject == "Your Synapse invitation")
+        .expect("invitation email is sent");
+    assert_eq!(invitation_mail.to, "invitee-admin@example.test");
+    assert!(
+        invitation_mail
+            .body
+            .contains("https://synapse.local/register?invitation=")
+    );
+    let token = invitation_mail
+        .body
+        .split("invitation=")
+        .nth(1)
+        .expect("link carries the token")
+        .split_whitespace()
+        .next()
+        .expect("token")
+        .to_owned();
+
+    let signup = app
+        .clone()
+        .oneshot(dynamic_json(
+            "/auth/signup",
+            &format!(
+                r#"{{"email":"invitee-admin@example.test","password":"a secure password","invitation_token":"{token}"}}"#
+            ),
+        ))
+        .await
+        .expect("signup responds");
+    assert_eq!(signup.status(), StatusCode::CREATED);
+    assert!(
+        sqlx::query_scalar::<_, bool>(
+            "SELECT is_admin AND activated_at IS NULL FROM users WHERE email = 'invitee-admin@example.test'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("invited administrator")
+    );
+}
+
 fn request_json(uri: &str, body: &'static str) -> Request<Body> {
     Request::builder()
         .method("POST")
