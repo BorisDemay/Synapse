@@ -76,6 +76,7 @@ const emit = defineEmits<{
   revokeSession: [id: string];
   saveVaultPreferences: [templatesPath: string];
   createInvitation: [email: string];
+  openAdmin: [];
 }>();
 
 const currentPassword = ref("");
@@ -694,6 +695,13 @@ function selectInvitationLink(event: Event) {
               Seuls les administrateurs peuvent voir cette section et créer des
               invitations. Les liens expirent après 24 heures.
             </p>
+            <button
+              class="settings-action"
+              type="button"
+              @click="emit('openAdmin')"
+            >
+              Ouvrir la console d’administration
+            </button>
             <form
               class="settings-form"
               data-form="user-invitation"

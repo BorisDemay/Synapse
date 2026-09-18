@@ -1,5 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import PrimeVue from "primevue/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
@@ -24,7 +25,9 @@ async function mountAdmin(): Promise<VueWrapper> {
   });
   await router.push("/admin");
   await router.isReady();
-  const wrapper = mount(AdminView, { global: { plugins: [pinia, router] } });
+  const wrapper = mount(AdminView, {
+    global: { plugins: [pinia, router, PrimeVue] },
+  });
   await flushPromises();
   return wrapper;
 }
@@ -32,6 +35,16 @@ async function mountAdmin(): Promise<VueWrapper> {
 describe("AdminView", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        matches: false,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
+    );
   });
 
   afterEach(() => {
@@ -82,14 +95,17 @@ describe("AdminView", () => {
     await flushPromises();
 
     expect(fetch).toHaveBeenNthCalledWith(2, "/auth/invitations", {
-      body: JSON.stringify({ email: "invitee@example.test" }),
+      body: JSON.stringify({
+        email: "invitee@example.test",
+        is_admin: false,
+      }),
       credentials: "include",
       headers: expect.anything(),
       method: "POST",
     });
-    expect(wrapper.text()).toContain(
-      `${window.location.origin}/register?invitation=one-time-token`,
-    );
+    expect(
+      (wrapper.get("#admin-invite-link").element as HTMLInputElement).value,
+    ).toBe(`${window.location.origin}/register?invitation=one-time-token`);
   });
 
   it("reports a failed account listing instead of showing an empty table", async () => {

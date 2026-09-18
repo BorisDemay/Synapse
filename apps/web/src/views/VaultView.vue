@@ -596,6 +596,11 @@ async function createInvitation(email: string) {
   }
 }
 
+function openAdminConsole() {
+  settingsOpen.value = false;
+  void router.push("/admin");
+}
+
 async function changePassword(current: string, next: string) {
   settingsError.value = "";
   settingsStatus.value = "";
@@ -1362,6 +1367,7 @@ watch(settingsOpen, (open) => {
     @change-password="changePassword"
     @close="settingsOpen = false"
     @create-invitation="createInvitation"
+    @open-admin="openAdminConsole"
     @delete-account="deleteAccount"
     @export-notes="exportNotes"
     @forget-device="forgetDevice"

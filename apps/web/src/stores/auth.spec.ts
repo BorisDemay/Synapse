@@ -76,7 +76,9 @@ describe("auth store", () => {
       new Response(
         JSON.stringify({
           email: "invitee@example.test",
+          email_sent: true,
           expires_at: "2026-09-12T00:00:00+00:00",
+          is_admin: false,
           token: "one-time-invitation-token",
         }),
         { headers: { "content-type": "application/json" }, status: 201 },
@@ -88,7 +90,10 @@ describe("auth store", () => {
     );
 
     expect(fetch).toHaveBeenCalledWith("/auth/invitations", {
-      body: JSON.stringify({ email: "invitee@example.test" }),
+      body: JSON.stringify({
+        email: "invitee@example.test",
+        is_admin: false,
+      }),
       credentials: "include",
       headers: {
         Origin: "https://synapse.local",
@@ -97,6 +102,43 @@ describe("auth store", () => {
       method: "POST",
     });
     expect(invitation.token).toBe("one-time-invitation-token");
+    expect(invitation.emailSent).toBe(true);
+    expect(invitation.isAdmin).toBe(false);
+  });
+
+  it("invites an administrator when the role is requested", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          email: "invitee-admin@example.test",
+          email_sent: false,
+          expires_at: "2026-09-12T00:00:00+00:00",
+          is_admin: true,
+          token: "admin-invitation-token",
+        }),
+        { headers: { "content-type": "application/json" }, status: 201 },
+      ),
+    );
+
+    const invitation = await useAuthStore().createInvitation(
+      "invitee-admin@example.test",
+      true,
+    );
+
+    expect(fetch).toHaveBeenCalledWith("/auth/invitations", {
+      body: JSON.stringify({
+        email: "invitee-admin@example.test",
+        is_admin: true,
+      }),
+      credentials: "include",
+      headers: {
+        Origin: "https://synapse.local",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    expect(invitation.isAdmin).toBe(true);
+    expect(invitation.emailSent).toBe(false);
   });
 
   it("asks the server to remember this device without storing secrets", async () => {

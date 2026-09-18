@@ -43,7 +43,9 @@ export interface ManagedUser {
 
 export interface Invitation {
   email: string;
+  emailSent: boolean;
   expiresAt: string;
+  isAdmin: boolean;
   token: string;
 }
 
@@ -317,9 +319,12 @@ export const useAuthStore = defineStore("auth", {
         ];
       });
     },
-    async createInvitation(email: string): Promise<Invitation> {
+    async createInvitation(
+      email: string,
+      isAdmin = false,
+    ): Promise<Invitation> {
       const response = await fetch("/auth/invitations", {
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, is_admin: isAdmin }),
         credentials: "include",
         headers: jsonCsrfHeaders(),
         method: "POST",
@@ -327,7 +332,9 @@ export const useAuthStore = defineStore("auth", {
       if (!response.ok) throw new Error("Unable to create invitation");
       const body = (await response.json()) as {
         email?: unknown;
+        email_sent?: unknown;
         expires_at?: unknown;
+        is_admin?: unknown;
         token?: unknown;
       };
       if (
@@ -339,7 +346,9 @@ export const useAuthStore = defineStore("auth", {
       }
       return {
         email: body.email,
+        emailSent: body.email_sent === true,
         expiresAt: body.expires_at,
+        isAdmin: body.is_admin === true,
         token: body.token,
       };
     },

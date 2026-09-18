@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import Button from "primevue/button";
+import InputText from "primevue/inputtext";
+import Message from "primevue/message";
+import Select from "primevue/select";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -9,10 +13,18 @@ const router = useRouter();
 
 const users = ref<ManagedUser[]>([]);
 const invitationEmail = ref("");
+const invitationRole = ref<"user" | "admin">("user");
 const invitationLink = ref("");
+const invitationDelivered = ref<boolean | null>(null);
 const status = ref("");
 const error = ref("");
 const loading = ref(true);
+const inviting = ref(false);
+
+const roleOptions = [
+  { label: "Utilisateur", value: "user" },
+  { label: "Administrateur", value: "admin" },
+];
 
 async function loadUsers() {
   error.value = "";
@@ -29,16 +41,26 @@ async function invite() {
   error.value = "";
   status.value = "";
   invitationLink.value = "";
+  invitationDelivered.value = null;
+  inviting.value = true;
   try {
-    const invitation = await auth.createInvitation(invitationEmail.value);
+    const invitation = await auth.createInvitation(
+      invitationEmail.value,
+      invitationRole.value === "admin",
+    );
+    invitationDelivered.value = invitation.emailSent;
     invitationLink.value = `${window.location.origin}/register?invitation=${encodeURIComponent(
       invitation.token,
     )}`;
-    status.value = `Invitation créée pour ${invitation.email}.`;
+    status.value = invitation.emailSent
+      ? `Invitation envoyée par e-mail à ${invitation.email}.`
+      : `Invitation créée pour ${invitation.email}.`;
     invitationEmail.value = "";
     await loadUsers();
   } catch {
     error.value = "Impossible de créer l’invitation.";
+  } finally {
+    inviting.value = false;
   }
 }
 
@@ -51,19 +73,32 @@ onMounted(loadUsers);
 </script>
 
 <template>
-  <main class="synapse-admin">
-    <header class="synapse-admin__header">
+  <div class="admin">
+    <header class="admin__header panel">
       <div>
         <h1>Administration</h1>
-        <p class="synapse-admin__account">{{ auth.email }}</p>
+        <p>{{ auth.email }}</p>
       </div>
-      <button type="button" @click="signOut">Se déconnecter</button>
+      <div class="admin__header-actions">
+        <Button
+          label="Ouvrir le coffre"
+          severity="secondary"
+          @click="router.push('/vault')"
+        />
+        <Button label="Se déconnecter" text @click="signOut" />
+      </div>
     </header>
 
-    <section aria-labelledby="admin-users-title">
-      <h2 id="admin-users-title">Utilisateurs</h2>
-      <p v-if="loading">Chargement…</p>
-      <table v-else class="synapse-admin__users">
+    <section class="panel" aria-labelledby="admin-users-title">
+      <header class="panel__header">
+        <h2 id="admin-users-title">Utilisateurs</h2>
+        <span>{{ users.length }}</span>
+      </header>
+      <p v-if="loading" class="admin__muted">Chargement…</p>
+      <p v-else-if="users.length === 0" class="admin__muted">
+        Aucun utilisateur.
+      </p>
+      <table v-else class="admin__users">
         <thead>
           <tr>
             <th scope="col">Adresse</th>
@@ -75,93 +110,208 @@ onMounted(loadUsers);
         <tbody>
           <tr v-for="user in users" :key="user.email">
             <td>{{ user.email }}</td>
-            <td>{{ user.isAdmin ? "Administrateur" : "Utilisateur" }}</td>
-            <td>{{ user.activated ? "Actif" : "En attente" }}</td>
-            <td>{{ new Date(user.createdAt).toLocaleString() }}</td>
+            <td>
+              <span
+                class="admin__badge"
+                :class="{ 'admin__badge--admin': user.isAdmin }"
+              >
+                {{ user.isAdmin ? "Administrateur" : "Utilisateur" }}
+              </span>
+            </td>
+            <td>{{ user.activated ? "Actif" : "En attente d’activation" }}</td>
+            <td>{{ new Date(user.createdAt).toLocaleDateString() }}</td>
           </tr>
         </tbody>
       </table>
     </section>
 
-    <section aria-labelledby="admin-invite-title">
-      <h2 id="admin-invite-title">Inviter un utilisateur</h2>
-      <form @submit.prevent="invite">
-        <label for="admin-invite-email">Adresse e-mail à inviter</label>
-        <input
-          id="admin-invite-email"
-          v-model="invitationEmail"
-          autocomplete="off"
-          required
-          type="email"
-        />
-        <button type="submit">Créer l’invitation</button>
-      </form>
-      <p v-if="status" role="status">{{ status }}</p>
-      <p v-if="invitationLink">
-        Lien d’invitation :
-        <a :href="invitationLink">{{ invitationLink }}</a>
+    <section class="panel" aria-labelledby="admin-invite-title">
+      <header class="panel__header">
+        <h2 id="admin-invite-title">Inviter un utilisateur</h2>
+      </header>
+      <p class="admin__muted">
+        L’invitation envoie un lien d’inscription à usage unique, valable 24
+        heures. Sans SMTP configuré, copiez le lien pour le transmettre.
       </p>
-    </section>
+      <form class="admin__form" @submit.prevent="invite">
+        <div class="admin__field">
+          <label for="admin-invite-email">Adresse e-mail</label>
+          <InputText
+            id="admin-invite-email"
+            v-model="invitationEmail"
+            autocomplete="email"
+            required
+            type="email"
+          />
+        </div>
+        <div class="admin__field">
+          <label for="admin-invite-role">Rôle</label>
+          <Select
+            id="admin-invite-role"
+            v-model="invitationRole"
+            :options="roleOptions"
+            option-label="label"
+            option-value="value"
+          />
+        </div>
+        <Button
+          :loading="inviting"
+          label="Envoyer l’invitation"
+          type="submit"
+        />
+      </form>
 
-    <p v-if="error" role="alert" class="synapse-admin__error">{{ error }}</p>
-  </main>
+      <Message v-if="status" severity="success" :closable="false">{{
+        status
+      }}</Message>
+      <div v-if="invitationLink" class="admin__link">
+        <label for="admin-invite-link">
+          {{
+            invitationDelivered ? "Lien (email envoyé)" : "Lien à transmettre"
+          }}
+        </label>
+        <InputText
+          id="admin-invite-link"
+          :model-value="invitationLink"
+          readonly
+          type="text"
+          @focus="($event.target as HTMLInputElement).select()"
+        />
+      </div>
+      <Message v-if="error" severity="error" :closable="false">{{
+        error
+      }}</Message>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.synapse-admin {
+.admin {
+  background: var(--synapse-color-surface);
+  color: var(--synapse-color-text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--synapse-space-6);
   margin: 0 auto;
-  max-width: 52rem;
-  padding: 2rem 1.5rem 4rem;
+  max-inline-size: 56rem;
+  min-block-size: 100vh;
+  padding: var(--synapse-space-8) var(--synapse-space-6);
 }
 
-.synapse-admin__header {
+.admin__header {
   align-items: center;
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: var(--synapse-space-4);
   justify-content: space-between;
 }
 
-.synapse-admin__account {
-  color: var(--synapse-text-muted, #64748b);
-  margin: 0.25rem 0 0;
+.admin__header h1 {
+  font-size: 1.5rem;
+  margin: 0;
 }
 
-.synapse-admin__users {
+.admin__header p {
+  color: var(--synapse-color-text-muted);
+  margin: var(--synapse-space-1) 0 0;
+}
+
+.admin__header-actions {
+  display: flex;
+  gap: var(--synapse-space-2);
+}
+
+.panel {
+  background: var(--synapse-color-surface-raised);
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-md);
+  box-shadow: var(--synapse-shadow-sm);
+  padding: var(--synapse-space-5);
+}
+
+.panel__header {
+  align-items: baseline;
+  display: flex;
+  gap: var(--synapse-space-2);
+  justify-content: space-between;
+  margin-block-end: var(--synapse-space-3);
+}
+
+.panel__header h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.panel__header span {
+  color: var(--synapse-color-text-muted);
+}
+
+.admin__muted {
+  color: var(--synapse-color-text-muted);
+  margin: 0 0 var(--synapse-space-3);
+}
+
+.admin__users {
   border-collapse: collapse;
   inline-size: 100%;
 }
 
-.synapse-admin__users th,
-.synapse-admin__users td {
-  border-block-end: 1px solid var(--synapse-border, #334155);
-  padding: 0.5rem 0.75rem;
+.admin__users th,
+.admin__users td {
+  border-block-end: 1px solid var(--synapse-color-border);
+  padding: var(--synapse-space-3);
   text-align: start;
 }
 
-.synapse-admin__error {
-  color: var(--synapse-danger, #dc2626);
+.admin__users tr:last-child td {
+  border-block-end: 0;
 }
 
-form {
+.admin__badge {
+  background: var(--synapse-color-surface-muted);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.6rem;
+}
+
+.admin__badge--admin {
+  background: var(--synapse-color-surface-accent);
+  color: var(--synapse-color-accent-strong);
+  font-weight: 600;
+}
+
+.admin__form {
   align-items: end;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--synapse-space-3);
 }
 
-label {
-  display: block;
+.admin__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--synapse-space-1);
+  min-inline-size: 14rem;
+}
+
+.admin__field label {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.85rem;
+}
+
+.admin__link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--synapse-space-1);
+  margin-block-start: var(--synapse-space-4);
+}
+
+.admin__link label {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.85rem;
+}
+
+.admin__link input {
   inline-size: 100%;
-}
-
-input {
-  font: inherit;
-  padding: 0.4rem 0.6rem;
-}
-
-button {
-  cursor: pointer;
-  font: inherit;
-  padding: 0.45rem 0.9rem;
 }
 </style>
