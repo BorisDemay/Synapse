@@ -65,17 +65,22 @@ describe("web update provider", () => {
 
   it("recharge seulement apres activation explicite", async () => {
     const reload = vi.fn();
+    const status = vi.fn();
     const provider = createWebUpdateProvider(current, vi.fn(), reload);
 
     expect(reload).not.toHaveBeenCalled();
-    await provider.apply({
-      commitSha: "b".repeat(40),
-      publishedAt: "2026-08-31T12:00:00Z",
-      releaseNotes: "Release 42",
-      version: "0.1.42",
-    });
+    await provider.apply(
+      {
+        commitSha: "b".repeat(40),
+        publishedAt: "2026-08-31T12:00:00Z",
+        releaseNotes: "Release 42",
+        version: "0.1.42",
+      },
+      status,
+    );
 
     expect(reload).toHaveBeenCalledOnce();
+    expect(status).toHaveBeenCalledWith("Rechargement de l’application…");
   });
 
   it("refuse une metadonnee incomplete", async () => {

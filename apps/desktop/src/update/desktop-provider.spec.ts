@@ -46,6 +46,7 @@ describe("desktop update provider", () => {
       }
     });
     const progress = vi.fn();
+    const status = vi.fn();
 
     await createDesktopUpdateProvider().prepare!(
       {
@@ -55,24 +56,31 @@ describe("desktop update provider", () => {
         version: "0.1.42",
       },
       progress,
+      status,
     );
 
     expect(invoke).toHaveBeenCalledWith("download_desktop_update", {
       onEvent: expect.anything(),
     });
+    expect(status).toHaveBeenCalledWith("Téléchargement de la mise à jour…");
     expect(progress).toHaveBeenLastCalledWith(1);
   });
 
   it("installe seulement via la commande native", async () => {
     invoke.mockResolvedValue(undefined);
+    const status = vi.fn();
 
-    await createDesktopUpdateProvider().apply({
-      commitSha: "c".repeat(40),
-      publishedAt: "2026-08-31T12:00:00Z",
-      releaseNotes: "Release native",
-      version: "0.1.42",
-    });
+    await createDesktopUpdateProvider().apply(
+      {
+        commitSha: "c".repeat(40),
+        publishedAt: "2026-08-31T12:00:00Z",
+        releaseNotes: "Release native",
+        version: "0.1.42",
+      },
+      status,
+    );
 
     expect(invoke).toHaveBeenCalledWith("install_desktop_update");
+    expect(status).toHaveBeenCalledWith("Installation et redémarrage…");
   });
 });

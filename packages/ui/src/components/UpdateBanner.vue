@@ -1,42 +1,58 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import type { UpdateCoordinator } from "../update/coordinator";
 
 const props = defineProps<{ coordinator: UpdateCoordinator }>();
 
 const showNotes = ref(false);
+const dismissed = ref(false);
+
+const state = computed(() => props.coordinator.snapshot.value.state);
+const snapshot = computed(() => props.coordinator.snapshot.value);
+const percent = computed(() =>
+  Math.round((snapshot.value.progress ?? 0) * 100),
+);
+const visible = computed(() => {
+  if (state.value === "ready") return !dismissed.value;
+  if (state.value === "downloading" || state.value === "applying") return true;
+  // A failed check (e.g. offline) stays silent; only a known update that could
+  // not be applied surfaces an error.
+  return state.value === "error" && snapshot.value.metadata !== null;
+});
 
 function applyUpdate() {
   void props.coordinator.apply();
+}
+
+function retry() {
+  dismissed.value = false;
+  void props.coordinator.check();
 }
 </script>
 
 <template>
   <aside
-    v-if="
-      coordinator.snapshot.value.state === 'ready' ||
-      coordinator.snapshot.value.state === 'downloading'
-    "
+    v-if="visible"
     class="synapse-update-toast"
     role="status"
     aria-live="polite"
   >
-    <template v-if="coordinator.snapshot.value.state === 'ready'">
+    <template v-if="state === 'ready'">
       <strong>Une mise à jour est disponible</strong>
       <span class="synapse-update-toast__version">
-        Version {{ coordinator.snapshot.value.metadata?.version }}
+        Version {{ snapshot.metadata?.version }}
       </span>
       <p
-        v-if="showNotes && coordinator.snapshot.value.metadata?.releaseNotes"
+        v-if="showNotes && snapshot.metadata?.releaseNotes"
         class="synapse-update-toast__notes"
       >
-        {{ coordinator.snapshot.value.metadata.releaseNotes }}
+        {{ snapshot.metadata.releaseNotes }}
       </p>
       <div class="synapse-update-toast__actions">
         <button
           type="button"
-          class="synapse-update-toast__notes-toggle"
+          class="synapse-update-toast__secondary"
           :aria-expanded="showNotes"
           @click="showNotes = !showNotes"
         >
@@ -47,13 +63,44 @@ function applyUpdate() {
         </button>
       </div>
     </template>
-    <template v-else>
-      <strong>Téléchargement de la mise à jour</strong>
+
+    <template v-else-if="state === 'downloading' || state === 'applying'">
+      <strong>
+        {{
+          state === "applying"
+            ? "Mise à jour en cours"
+            : "Téléchargement de la mise à jour"
+        }}
+      </strong>
+      <span class="synapse-update-toast__status">{{ snapshot.status }}</span>
       <progress
-        :value="coordinator.snapshot.value.progress ?? 0"
+        v-if="state === 'downloading'"
+        :value="snapshot.progress ?? 0"
         max="1"
         aria-label="Progression du téléchargement"
       />
+      <progress v-else aria-label="Progression de la mise à jour" />
+      <span
+        v-if="state === 'downloading'"
+        class="synapse-update-toast__version"
+      >
+        {{ percent }} %
+      </span>
+    </template>
+
+    <template v-else>
+      <strong>Échec de la mise à jour</strong>
+      <span class="synapse-update-toast__status">{{ snapshot.error }}</span>
+      <div class="synapse-update-toast__actions">
+        <button
+          type="button"
+          class="synapse-update-toast__secondary"
+          @click="dismissed = true"
+        >
+          Fermer
+        </button>
+        <button type="button" @click="retry">Réessayer</button>
+      </div>
     </template>
   </aside>
 </template>
@@ -77,6 +124,11 @@ function applyUpdate() {
 }
 
 .synapse-update-toast__version {
+  color: var(--synapse-color-text-muted, #94a3b8);
+  font-size: 0.85rem;
+}
+
+.synapse-update-toast__status {
   color: var(--synapse-color-text-muted, #94a3b8);
   font-size: 0.85rem;
 }
@@ -109,12 +161,12 @@ function applyUpdate() {
   padding: 0.4rem 0.75rem;
 }
 
-.synapse-update-toast button:not(.synapse-update-toast__notes-toggle) {
+.synapse-update-toast button:not(.synapse-update-toast__secondary) {
   background: var(--synapse-color-accent, #60a5fa);
   color: #07101f;
 }
 
-.synapse-update-toast__notes-toggle {
+.synapse-update-toast__secondary {
   background: transparent;
   color: var(--synapse-color-text, #f8fafc);
   font-weight: 500;
@@ -123,5 +175,20 @@ function applyUpdate() {
 
 .synapse-update-toast progress {
   inline-size: 100%;
+}
+
+.synapse-update-toast progress:not([value]) {
+  animation: synapse-update-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes synapse-update-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 </style>

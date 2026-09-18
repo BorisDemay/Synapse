@@ -88,8 +88,51 @@ describe("update coordinator", () => {
     await coordinator.check();
     await coordinator.apply();
 
-    expect(apply).toHaveBeenCalledWith(update);
+    expect(apply).toHaveBeenCalledWith(update, expect.any(Function));
     expect(coordinator.snapshot.value.state).toBe("applying");
+  });
+
+  it("expose les etapes d'application signalees par le fournisseur", async () => {
+    const apply = vi.fn(
+      async (_metadata: UpdateMetadata, onStatus: (status: string) => void) => {
+        onStatus("Activation de la mise à jour…");
+      },
+    );
+    const coordinator = createUpdateCoordinator({
+      apply,
+      check: vi.fn().mockResolvedValue(update),
+    });
+
+    await coordinator.check();
+    await coordinator.apply();
+
+    expect(coordinator.snapshot.value.status).toBe(
+      "Activation de la mise à jour…",
+    );
+  });
+
+  it("affiche une etape par defaut des le debut de l'application", async () => {
+    let release!: () => void;
+    const apply = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const coordinator = createUpdateCoordinator({
+      apply,
+      check: vi.fn().mockResolvedValue(update),
+    });
+
+    await coordinator.check();
+    const applying = coordinator.apply();
+
+    expect(coordinator.snapshot.value.status).toBe(
+      "Application de la mise à jour…",
+    );
+
+    release();
+    await applying;
   });
 });
 

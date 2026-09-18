@@ -43,8 +43,14 @@ function isWebManifest(value: unknown): value is WebManifest {
 async function waitForWorker(
   worker: ServiceWorker,
   target: "installed" | "activated",
+  onStatus: (status: string) => void,
 ): Promise<void> {
   if (worker.state === target || worker.state === "activated") return;
+  onStatus(
+    target === "installed"
+      ? "Téléchargement de la nouvelle version…"
+      : "Activation de la mise à jour…",
+  );
   await new Promise<void>((resolve, reject) => {
     const finish = () => {
       if (worker.state === target || worker.state === "activated") {
@@ -68,16 +74,20 @@ async function waitForWorker(
   });
 }
 
-export async function activateWaitingWebUpdate(): Promise<void> {
+export async function activateWaitingWebUpdate(
+  onStatus: (status: string) => void = () => {},
+): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
+  onStatus("Préparation de la mise à jour…");
   const registration = await navigator.serviceWorker.getRegistration();
   if (!registration) return;
+  onStatus("Recherche de la nouvelle version…");
   await registration.update();
   if (registration.installing)
-    await waitForWorker(registration.installing, "installed");
+    await waitForWorker(registration.installing, "installed", onStatus);
   const waiting = registration.waiting;
   if (!waiting) return;
-  const activated = waitForWorker(waiting, "activated");
+  const activated = waitForWorker(waiting, "activated", onStatus);
   waiting.postMessage({ type: "SYNAPSE_ACTIVATE_UPDATE" });
   await activated;
 }
@@ -110,8 +120,9 @@ export function createWebUpdateProvider(
         version: manifest.version,
       };
     },
-    async apply() {
-      await activateWaitingWebUpdate();
+    async apply(_metadata, onStatus) {
+      await activateWaitingWebUpdate(onStatus);
+      onStatus("Rechargement de l’application…");
       reload();
     },
   };
