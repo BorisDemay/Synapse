@@ -14,7 +14,7 @@ describe("AiChat", () => {
     });
 
     expect(wrapper.get('[role="note"]').text()).toContain("serveur Synapse");
-    await wrapper.get("button").trigger("click");
+    await wrapper.get(".ai-chat-primary-lg").trigger("click");
     expect(wrapper.emitted("connectChatgpt")).toHaveLength(1);
 
     await wrapper.get('input[name="codex-token"]').setValue("sk-test");
@@ -36,6 +36,19 @@ describe("AiChat", () => {
     });
 
     expect(wrapper.get('[role="status"]').text()).toContain("ABCD-EFGH");
+  });
+
+  it("permet de fermer le panneau même hors ligne", async () => {
+    const wrapper = mount(AiChat, {
+      props: {
+        attachments: [],
+        connected: false,
+        messages: [],
+      },
+    });
+
+    await wrapper.get('button[name="close-codex-panel"]').trigger("click");
+    expect(wrapper.emitted("closePanel")).toHaveLength(1);
   });
 
   it("envoie un prompt sans proposer d'actions d'écriture manuelles", async () => {

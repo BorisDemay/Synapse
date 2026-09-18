@@ -133,8 +133,9 @@ function submitPrompt() {
         <span class="ai-chat-status-dot" aria-hidden="true" />
         {{ connected ? "Connecté" : "Hors ligne" }}
       </span>
-      <div v-if="connected" class="ai-chat-panel-controls">
+      <div class="ai-chat-panel-controls">
         <button
+          v-if="connected"
           :aria-pressed="Boolean(conversationsPanelOpen)"
           aria-label="Afficher ou masquer les conversations"
           class="ai-chat-icon-button"
@@ -146,6 +147,7 @@ function submitPrompt() {
           ☷
         </button>
         <button
+          v-if="connected"
           :aria-pressed="Boolean(historyPanelOpen)"
           aria-label="Afficher ou masquer l’historique de la note"
           class="ai-chat-icon-button"
