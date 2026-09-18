@@ -46,7 +46,7 @@ signalées comme telles.
       Observé par 31 tests `deploy-release` et par `release_drill.sh`.
 - [x] `just e2e-recovery` — le scénario `update-ready.spec.ts` ouvre une page
       construite, sert un `web.json` plus récent, déclenche `focus` et observe
-      la bannière « Mise à jour prête » dans Chromium réel. Les clients desktop
+      la notification « Une mise à jour est disponible » dans Chromium réel. Les clients desktop
       partagent le coordinateur, la bannière et le déclencheur (tests
       unitaires) ; leur exécution native reste dans le job CI.
 - [x] `bash tests/integration/release_drill.sh` — projet Compose jetable,

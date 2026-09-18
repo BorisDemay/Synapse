@@ -73,15 +73,15 @@ test("an already-open tab announces a newly published web update", async ({
     );
     await page.goto(`http://127.0.0.1:${port}/`);
     await initialCheck;
-    await expect(page.locator(".synapse-update-banner")).toHaveCount(0);
+    await expect(page.locator(".synapse-update-toast")).toHaveCount(0);
 
     manifestVersion = "9.9.9";
     await page.evaluate(() => {
       window.dispatchEvent(new Event("focus"));
     });
 
-    const banner = page.locator(".synapse-update-banner");
-    await expect(banner).toContainText("Mise à jour prête");
+    const banner = page.locator(".synapse-update-toast");
+    await expect(banner).toContainText("Une mise à jour est disponible");
     await expect(banner).toContainText("9.9.9");
     expect(
       requested.filter((path) => path === "/updates/stable/web.json").length,

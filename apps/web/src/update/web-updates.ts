@@ -9,7 +9,7 @@ const currentBuild = {
 
 export const webUpdateCoordinator = createUpdateCoordinator(
   createWebUpdateProvider(currentBuild),
-  { activationLabel: "Recharger" },
+  { activationLabel: "Mettre à jour" },
 );
 
 export function startWebUpdateChecks(): () => void {
