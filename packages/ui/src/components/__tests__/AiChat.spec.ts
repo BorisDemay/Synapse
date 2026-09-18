@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
 import AiChat from "../AiChat.vue";
@@ -14,12 +14,68 @@ describe("AiChat", () => {
     });
 
     expect(wrapper.get('[role="note"]').text()).toContain("serveur Synapse");
-    await wrapper.get(".ai-chat-primary-lg").trigger("click");
-    expect(wrapper.emitted("connectChatgpt")).toHaveLength(1);
 
     await wrapper.get('input[name="codex-token"]').setValue("sk-test");
     await wrapper.get("form").trigger("submit");
-    expect(wrapper.emitted("connect")?.[0]).toEqual(["sk-test"]);
+    expect(wrapper.emitted("connect")?.[0]).toEqual([
+      { provider: "codex", token: "sk-test" },
+    ]);
+  });
+
+  it("propose la connexion ChatGPT quand ce fournisseur est choisi", async () => {
+    const wrapper = mount(AiChat, {
+      props: {
+        attachments: [],
+        connected: false,
+        messages: [],
+        providers: [
+          { id: "codex", label: "OpenAI — clé API" },
+          {
+            id: "chatgpt",
+            label: "ChatGPT (connexion appareil)",
+            deviceLogin: true,
+          },
+        ],
+      },
+    });
+
+    await wrapper.get('select[name="codex-provider"]').setValue("chatgpt");
+    await flushPromises();
+    await wrapper.get(".ai-chat-primary-lg").trigger("click");
+    expect(wrapper.emitted("connectChatgpt")).toHaveLength(1);
+  });
+
+  it("exige une URL d’API pour un fournisseur personnalisé", async () => {
+    const wrapper = mount(AiChat, {
+      props: {
+        attachments: [],
+        connected: false,
+        messages: [],
+        providers: [
+          { id: "codex", label: "OpenAI — clé API" },
+          {
+            id: "custom",
+            label: "Autre (URL compatible OpenAI)",
+            needsBaseUrl: true,
+          },
+        ],
+      },
+    });
+
+    await wrapper.get('select[name="codex-provider"]').setValue("custom");
+    await flushPromises();
+    await wrapper
+      .get('input[name="codex-base-url"]')
+      .setValue("https://exemple.tld/v1");
+    await wrapper.get('input[name="codex-token"]').setValue("key-123");
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("connect")?.[0]).toEqual([
+      {
+        baseUrl: "https://exemple.tld/v1",
+        provider: "custom",
+        token: "key-123",
+      },
+    ]);
   });
 
   it("affiche le code d'appareil ChatGPT pendant la connexion", () => {

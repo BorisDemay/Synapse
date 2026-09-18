@@ -18,6 +18,7 @@ import {
   startChatgptDeviceLogin,
   type ChatgptDeviceSession,
 } from "../ai/codex-oauth";
+import { findAssistantProvider, resolveProviderBaseUrl } from "../ai/providers";
 import type {
   AssistantConversation,
   AssistantConversationMessage,
@@ -176,6 +177,8 @@ export const useAssistantStore = defineStore("assistant", () => {
   let accountId: string | undefined;
   let expiresAt: number | undefined;
   let authKind: "api_key" | "chatgpt" = "api_key";
+  let provider = "codex";
+  let providerBaseUrl = "";
   let chatgptAbort: AbortController | undefined;
   let conversationPersistence = Promise.resolve();
 
@@ -325,6 +328,8 @@ export const useAssistantStore = defineStore("assistant", () => {
     accountId = undefined;
     expiresAt = undefined;
     authKind = "api_key";
+    provider = "codex";
+    providerBaseUrl = "";
     connected.value = false;
     busy.value = false;
     error.value = "";
@@ -387,10 +392,11 @@ export const useAssistantStore = defineStore("assistant", () => {
     await useVaultStore().persistAssistantCredential({
       accountId,
       authKind,
+      baseUrl: providerBaseUrl || undefined,
       expiresAt,
       fast: fast.value || undefined,
       model: model.value,
-      provider: "codex",
+      provider,
       reasoningEffort: reasoningEffort.value || undefined,
       refreshToken,
       token,
@@ -415,6 +421,8 @@ export const useAssistantStore = defineStore("assistant", () => {
     try {
       models.value = await listCodexModels({
         accountId,
+        baseUrl: providerBaseUrl || undefined,
+        defaultModels: findAssistantProvider(provider)?.defaultModels,
         token,
         transport: authKind === "chatgpt" ? "chatgpt" : "platform",
       });
@@ -474,11 +482,24 @@ export const useAssistantStore = defineStore("assistant", () => {
     }
   }
 
-  async function connect(nextToken: string) {
+  async function connect(
+    nextToken: string,
+    options: { baseUrl?: string; provider?: string } = {},
+  ) {
     error.value = "";
     const credentialToken = nextToken.trim();
     if (!credentialToken) {
-      throw new Error("Clé ou jeton Codex manquant.");
+      throw new Error("Clé API manquante.");
+    }
+    provider = options.provider?.trim() || "codex";
+    // "codex" keeps the dedicated OpenAI Responses path; every other
+    // provider speaks the OpenAI-compatible chat-completions API.
+    providerBaseUrl =
+      provider === "codex"
+        ? ""
+        : resolveProviderBaseUrl(provider, options.baseUrl);
+    if (!providerBaseUrl && findAssistantProvider(provider)?.needsBaseUrl) {
+      throw new Error("URL de l’API manquante pour ce fournisseur.");
     }
     token = credentialToken;
     refreshToken = undefined;
@@ -547,6 +568,11 @@ export const useAssistantStore = defineStore("assistant", () => {
       accountId = credential.accountId;
       expiresAt = credential.expiresAt;
       authKind = credential.authKind;
+      provider = credential.provider || "codex";
+      providerBaseUrl =
+        provider === "codex"
+          ? ""
+          : credential.baseUrl || resolveProviderBaseUrl(provider);
       model.value = credential.model;
       reasoningEffort.value = credential.reasoningEffort ?? "";
       fast.value = credential.fast === true;
@@ -637,6 +663,7 @@ export const useAssistantStore = defineStore("assistant", () => {
     try {
       const response = await completeCodexAgent({
         accountId,
+        baseUrl: providerBaseUrl || undefined,
         instructions: ASSISTANT_INSTRUCTIONS,
         messages: messages.value.map((message) => ({
           content:

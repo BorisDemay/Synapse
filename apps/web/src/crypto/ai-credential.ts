@@ -7,10 +7,11 @@ export type AssistantAuthKind = "api_key" | "chatgpt";
 export interface AssistantCredential {
   accountId?: string;
   authKind: AssistantAuthKind;
+  baseUrl?: string;
   expiresAt?: number;
   fast?: boolean;
   model: string;
-  provider: "codex";
+  provider?: string;
   reasoningEffort?: string;
   refreshToken?: string;
   token: string;

@@ -22,6 +22,13 @@ export interface AiChatReasoningLevel {
   label: string;
 }
 
+export interface AiChatProviderOption {
+  deviceLogin?: boolean;
+  id: string;
+  label: string;
+  needsBaseUrl?: boolean;
+}
+
 const props = defineProps<{
   attachments: AiChatAttachment[];
   busy?: boolean;
@@ -36,13 +43,14 @@ const props = defineProps<{
   messages: AiChatMessage[];
   model?: string;
   models?: AiChatModelOption[];
+  providers?: AiChatProviderOption[];
   reasoningEffort?: string;
   reasoningLevels?: AiChatReasoningLevel[];
 }>();
 
 const emit = defineEmits<{
   cancelChatgpt: [];
-  connect: [token: string];
+  connect: [credentials: { baseUrl?: string; provider: string; token: string }];
   connectChatgpt: [];
   closePanel: [];
   detach: [id: string];
@@ -56,6 +64,8 @@ const emit = defineEmits<{
 }>();
 
 const token = ref("");
+const selectedProvider = ref("");
+const baseUrlInput = ref("");
 const model = ref(props.model ?? "");
 const draft = ref("");
 const modelOptions = computed(() => props.models ?? []);
@@ -84,9 +94,49 @@ watch(
 );
 
 function submitConnect() {
-  emit("connect", token.value);
+  const credentials: {
+    baseUrl?: string;
+    provider: string;
+    token: string;
+  } = {
+    provider: selectedProvider.value || apiKeyProviders.value[0]?.id || "codex",
+    token: token.value,
+  };
+  if (baseUrlInput.value) {
+    credentials.baseUrl = baseUrlInput.value;
+  }
+  emit("connect", credentials);
   token.value = "";
 }
+
+const providerOptions = computed(() => props.providers ?? []);
+const apiKeyProviders = computed(() =>
+  providerOptions.value.filter((provider) => !provider.deviceLogin),
+);
+const selectedProviderOption = computed(() =>
+  providerOptions.value.find(
+    (provider) => provider.id === selectedProvider.value,
+  ),
+);
+const selectedNeedsDeviceLogin = computed(
+  () => selectedProviderOption.value?.deviceLogin === true,
+);
+const selectedNeedsBaseUrl = computed(
+  () => selectedProviderOption.value?.needsBaseUrl === true,
+);
+watch(
+  providerOptions,
+  (options) => {
+    if (
+      !selectedProvider.value &&
+      options.some((provider) => !provider.deviceLogin)
+    ) {
+      selectedProvider.value =
+        options.find((provider) => !provider.deviceLogin)?.id ?? "";
+    }
+  },
+  { immediate: true },
+);
 
 function onModelChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value;
@@ -186,43 +236,76 @@ function submitPrompt() {
     </p>
 
     <div v-if="!connected" class="ai-chat-connect">
-      <button
-        class="ai-chat-primary ai-chat-primary-lg"
-        :disabled="Boolean(deviceLogin)"
-        type="button"
-        @click="emit('connectChatgpt')"
-      >
-        Se connecter avec ChatGPT
-      </button>
-      <p v-if="deviceLogin" class="ai-chat-device" role="status">
-        <span class="ai-chat-device-label">Ouvrez</span>
-        <a
-          class="ai-chat-device-link"
-          :href="deviceLogin.verificationUrl"
-          rel="noopener noreferrer"
-          target="_blank"
-          >auth.openai.com/codex/device</a
-        >
-        <span class="ai-chat-device-label">et saisissez le code</span>
-        <strong>{{ deviceLogin.userCode }}</strong>
+      <label class="ai-chat-field">
+        <span>Fournisseur</span>
+        <select v-model="selectedProvider" name="codex-provider">
+          <option
+            v-for="provider in apiKeyProviders"
+            :key="provider.id"
+            :value="provider.id"
+          >
+            {{ provider.label }}
+          </option>
+          <option
+            v-for="provider in providerOptions.filter(
+              (candidate) => candidate.deviceLogin,
+            )"
+            :key="provider.id"
+            :value="provider.id"
+          >
+            {{ provider.label }}
+          </option>
+        </select>
+      </label>
+
+      <template v-if="selectedNeedsDeviceLogin || Boolean(deviceLogin)">
         <button
-          class="ai-chat-text-button"
+          class="ai-chat-primary ai-chat-primary-lg"
+          :disabled="Boolean(deviceLogin)"
           type="button"
-          @click="emit('cancelChatgpt')"
+          @click="emit('connectChatgpt')"
         >
-          Annuler
+          Se connecter avec ChatGPT
         </button>
-      </p>
-      <p class="ai-chat-hint">
-        Utilise votre abonnement Codex. Activez le code d’appareil dans les
-        paramètres ChatGPT si la connexion est refusée.
-      </p>
+        <p v-if="deviceLogin" class="ai-chat-device" role="status">
+          <span class="ai-chat-device-label">Ouvrez</span>
+          <a
+            class="ai-chat-device-link"
+            :href="deviceLogin.verificationUrl"
+            rel="noopener noreferrer"
+            target="_blank"
+            >auth.openai.com/codex/device</a
+          >
+          <span class="ai-chat-device-label">et saisissez le code</span>
+          <strong>{{ deviceLogin.userCode }}</strong>
+          <button
+            class="ai-chat-text-button"
+            type="button"
+            @click="emit('cancelChatgpt')"
+          >
+            Annuler
+          </button>
+        </p>
+        <p class="ai-chat-hint">
+          Utilise votre abonnement Codex. Activez le code d’appareil dans les
+          paramètres ChatGPT si la connexion est refusée.
+        </p>
+      </template>
 
-      <div class="ai-chat-divider"><span>ou</span></div>
-
-      <form class="ai-chat-connect" @submit.prevent="submitConnect">
+      <form v-else class="ai-chat-connect" @submit.prevent="submitConnect">
+        <label v-if="selectedNeedsBaseUrl" class="ai-chat-field">
+          <span>URL de l’API (compatible OpenAI)</span>
+          <input
+            v-model="baseUrlInput"
+            autocomplete="off"
+            name="codex-base-url"
+            placeholder="https://exemple.tld/v1"
+            required
+            type="url"
+          />
+        </label>
         <label class="ai-chat-field">
-          <span>Clé API Platform</span>
+          <span>Clé API</span>
           <input
             v-model="token"
             autocomplete="off"
@@ -232,9 +315,7 @@ function submitPrompt() {
             type="password"
           />
         </label>
-        <button class="ai-chat-secondary" type="submit">
-          Connecter avec une clé
-        </button>
+        <button class="ai-chat-secondary" type="submit">Connecter</button>
       </form>
     </div>
 

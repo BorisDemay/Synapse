@@ -44,6 +44,7 @@ import Button from "primevue/button";
 
 import { isTrustedDeviceSupported } from "../crypto/trusted-device";
 import { uuidV7 } from "../crypto/vault-key";
+import { ASSISTANT_PROVIDERS } from "../ai/providers";
 import { buildMarkdownZip } from "../export/markdown-zip";
 import { applyMarkdownImport, type ImportProgress } from "../import/apply";
 import {
@@ -329,10 +330,24 @@ function attachNote(id: string) {
   assistantOpen.value = true;
 }
 
-async function connectAssistant(token: string) {
+const assistantProviders = ASSISTANT_PROVIDERS.map((provider) => ({
+  deviceLogin: provider.deviceLogin === true,
+  id: provider.id,
+  label: provider.label,
+  needsBaseUrl: provider.needsBaseUrl === true,
+}));
+
+async function connectAssistant(credentials: {
+  baseUrl?: string;
+  provider: string;
+  token: string;
+}) {
   formError.value = "";
   try {
-    await assistant.connect(token);
+    await assistant.connect(credentials.token, {
+      baseUrl: credentials.baseUrl,
+      provider: credentials.provider,
+    });
   } catch (error) {
     formError.value =
       error instanceof Error ? error.message : "Connexion Codex impossible.";
@@ -1324,6 +1339,7 @@ watch(settingsOpen, (open) => {
         :connected="assistant.connected"
         :conversations-panel-open="assistantHistoryOpen"
         :device-login="assistant.deviceLogin"
+        :providers="assistantProviders"
         :error="assistant.error"
         :fast="assistant.fast"
         :fast-available="Boolean(assistant.fastTier)"

@@ -14,6 +14,10 @@ export interface CodexChatMessage {
 
 export interface CodexCompleteInput {
   accountId?: string;
+  /** OpenAI-compatible base URL; enables the chat-completions path. */
+  baseUrl?: string;
+  /** Fallback model ids when listing is unavailable for the provider. */
+  defaultModels?: string[];
   instructions: string;
   messages: CodexChatMessage[];
   model?: string;
@@ -533,6 +537,8 @@ function parseModelList(body: unknown): CodexModelOption[] {
 
 export async function listCodexModels(input: {
   accountId?: string;
+  baseUrl?: string;
+  defaultModels?: string[];
   token: string;
   transport?: "chatgpt" | "platform";
 }): Promise<CodexModelOption[]> {
@@ -541,31 +547,55 @@ export async function listCodexModels(input: {
     throw assistantError("Clé ou jeton Codex manquant.");
   }
   const chatgpt = input.transport === "chatgpt";
-  let response: Response;
-  try {
-    response = await fetch(
-      chatgpt ? chatgptModelsUrl() : CODEX_PLATFORM_MODELS_URL,
-      {
-        headers: chatgpt
-          ? chatgptHeaders(token, input.accountId, "application/json")
-          : { Authorization: `Bearer ${token}` },
+  const modelsUrl = input.baseUrl ? `${input.baseUrl}/models` : undefined;
+  let response: Response | undefined;
+  if (modelsUrl) {
+    try {
+      response = await fetch(modelsUrl, {
+        headers: { Authorization: `Bearer ${token}` },
         method: "GET",
-      },
-    );
-  } catch {
-    throw assistantError("Impossible de lister les modèles Codex.");
+      });
+    } catch {
+      response = undefined;
+    }
+  } else {
+    try {
+      response = await fetch(
+        chatgpt ? chatgptModelsUrl() : CODEX_PLATFORM_MODELS_URL,
+        {
+          headers: chatgpt
+            ? chatgptHeaders(token, input.accountId, "application/json")
+            : { Authorization: `Bearer ${token}` },
+          method: "GET",
+        },
+      );
+    } catch {
+      throw assistantError("Impossible de lister les modèles Codex.");
+    }
   }
-  if (!response.ok) {
-    throw assistantError("Impossible de lister les modèles Codex.");
-  }
-  let models: CodexModelOption[];
-  try {
-    models = parseModelList(await response.json());
-  } catch {
-    throw assistantError("Impossible de lister les modèles Codex.");
+  let models: CodexModelOption[] = [];
+  if (response?.ok) {
+    try {
+      models = parseModelList(await response.json());
+    } catch {
+      models = [];
+    }
   }
   if (models.length === 0) {
-    throw assistantError("Aucun modèle Codex n’est disponible.");
+    const fallback = (input.defaultModels ?? [])
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .map((id) => ({
+        id,
+        label: modelLabel(id),
+        priority: 99,
+        reasoningLevels: [],
+        serviceTiers: [],
+      }));
+    if (fallback.length === 0) {
+      throw assistantError("Aucun modèle Codex n’est disponible.");
+    }
+    return fallback;
   }
   return models;
 }
@@ -588,6 +618,9 @@ export async function completeCodexAgent(
   }
 
   const chatgpt = input.transport === "chatgpt";
+  if (input.baseUrl && !chatgpt) {
+    return completeChatCompletionsAgent(input);
+  }
   const payload: Record<string, unknown> = {
     input: chatgpt
       ? typedInput(messages)
@@ -677,4 +710,101 @@ export async function completeCodexChat(
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
   return response.text;
+}
+
+interface ChatCompletionsToolCall {
+  function?: { arguments?: unknown; name?: unknown };
+  id?: unknown;
+}
+
+interface ChatCompletionsChoice {
+  message?: {
+    content?: unknown;
+    tool_calls?: ChatCompletionsToolCall[];
+  };
+}
+
+/**
+ * Agent completion against any OpenAI-compatible /chat/completions endpoint
+ * (GLM, DeepSeek, Mistral, OpenRouter, self-hosted gateways…).
+ */
+async function completeChatCompletionsAgent(
+  input: CodexAgentInput,
+): Promise<CodexAgentResponse> {
+  const messages: Array<{ content: string; role: string }> = [
+    { content: input.instructions, role: "system" },
+    ...input.messages.map((message) => ({
+      content: message.content,
+      role: message.role,
+    })),
+  ];
+  const payload: Record<string, unknown> = {
+    messages,
+    model: input.model,
+  };
+  if (input.tools?.length) {
+    payload.tools = input.tools.map((tool) => ({
+      function: {
+        description: tool.description,
+        name: tool.name,
+        parameters: tool.parameters,
+      },
+      type: "function",
+    }));
+    payload.tool_choice = input.toolChoice ?? "auto";
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${input.baseUrl}/chat/completions`, {
+      body: JSON.stringify(payload),
+      headers: {
+        Authorization: `Bearer ${input.token.trim()}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+  } catch {
+    throw assistantError("Impossible de joindre le fournisseur IA.");
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw assistantError("Clé API refusée par le fournisseur.");
+  }
+  if (response.status === 429) {
+    throw assistantError("Quota du fournisseur dépassé.");
+  }
+  if (!response.ok) {
+    throw assistantError(
+      response.status === 400 || response.status === 404
+        ? "Le fournisseur a refusé la requête. Vérifiez l’URL et le modèle."
+        : "L’assistant n’a pas pu répondre.",
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  const choices = (body as { choices?: unknown }).choices;
+  const choice = Array.isArray(choices)
+    ? (choices[0] as ChatCompletionsChoice | undefined)
+    : undefined;
+  if (!choice) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  const text =
+    typeof choice.message?.content === "string" ? choice.message.content : "";
+  const functionCalls: CodexFunctionCall[] = (choice.message?.tool_calls ?? [])
+    .map((call) => ({
+      arguments:
+        typeof call.function?.arguments === "string"
+          ? call.function.arguments
+          : "",
+      callId: typeof call.id === "string" ? call.id : "",
+      name: typeof call.function?.name === "string" ? call.function.name : "",
+    }))
+    .filter((call) => call.name);
+  return { functionCalls, text };
 }
