@@ -70,17 +70,22 @@ async function activate() {
         <p class="subtitle">
           Confirmez l’activation du compte associé à ce lien.
         </p>
-        <Button
-          v-if="!activated"
-          :disabled="busy"
-          label="Activer le compte"
-          type="button"
-          @click="activate"
-        />
+        <div class="form-actions">
+          <Button
+            v-if="!activated"
+            :disabled="busy"
+            label="Activer le compte"
+            type="button"
+            @click="activate"
+          />
+          <RouterLink to="/login" class="form-actions-link">
+            <Button
+              label="Se connecter"
+              :severity="activated ? undefined : 'secondary'"
+            />
+          </RouterLink>
+        </div>
         <p v-if="status" role="status" class="form-hint">{{ status }}</p>
-        <p class="form-footer">
-          <RouterLink to="/login">Se connecter</RouterLink>
-        </p>
       </div>
     </section>
   </main>

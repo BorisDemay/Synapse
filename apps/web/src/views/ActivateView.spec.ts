@@ -6,7 +6,7 @@ import ActivateView from "./ActivateView.vue";
 
 function mountActivate(router: ReturnType<typeof createRouter>) {
   return mount(ActivateView, {
-    global: { plugins: [router, [PrimeVue, { unstyled: true }]] },
+    global: { plugins: [router, PrimeVue] },
   });
 }
 afterEach(() => vi.unstubAllGlobals());
@@ -58,8 +58,14 @@ it("uses the shared auth card layout with styled headings and links", () => {
 
   expect(wrapper.find("h2").text()).toContain("Activer votre compte");
   expect(wrapper.get(".subtitle").text()).toContain("activation");
-  const footer = wrapper.get(".form-footer");
-  expect(footer.get("a").text()).toBe("Se connecter");
+  const actions = wrapper.get(".form-actions");
+  const buttons = actions.findAll("button");
+  expect(buttons).toHaveLength(2);
+  expect(buttons[0]!.text()).toBe("Activer le compte");
+  expect(buttons[1]!.text()).toBe("Se connecter");
+  expect(buttons[0]!.classes().join(" ")).not.toContain("secondary");
+  expect(buttons[1]!.classes().join(" ")).toContain("secondary");
+  expect(buttons[1]!.classes().join(" ")).not.toContain("p-disabled");
   wrapper.unmount();
 });
 
