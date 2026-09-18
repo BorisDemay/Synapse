@@ -4,6 +4,8 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import Button from "primevue/button";
 
+import { ThemeToggle } from "@synapse/ui";
+
 const route = useRoute();
 const router = useRouter();
 let token = typeof route.query.token === "string" ? route.query.token : "";
@@ -40,8 +42,30 @@ async function activate() {
 </script>
 <template>
   <main class="auth-page">
+    <section class="auth-aside" aria-label="À propos de Synapse">
+      <div>
+        <div class="auth-brand">
+          <span class="brand-symbol" aria-hidden="true">S</span>
+          <span>Synapse</span>
+        </div>
+        <h1>Vos idées, enfin à leur place.</h1>
+        <p>
+          Un espace Markdown local-first, privé et synchronisé. Écrivez sans
+          perdre le fil, même lorsque le réseau disparaît.
+        </p>
+      </div>
+      <small>Chiffré localement. Auto-hébergeable. Ouvert.</small>
+    </section>
+
     <section class="auth-content">
       <div class="auth-card">
+        <div class="page-toolbar">
+          <span class="brand-mark"
+            ><span class="brand-symbol" aria-hidden="true">S</span
+            >Activation</span
+          >
+          <ThemeToggle />
+        </div>
         <h2>Activer votre compte</h2>
         <p class="subtitle">
           Confirmez l’activation du compte associé à ce lien.
