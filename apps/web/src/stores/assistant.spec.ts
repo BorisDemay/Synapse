@@ -396,6 +396,34 @@ describe("assistant store", () => {
     expect(useVaultStore().notes.size).toBe(notesBefore);
   });
 
+  it("tells the model which model and provider it runs as", async () => {
+    await unlockVault();
+    const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const href = String(url);
+      if (href === `${glmBaseUrl}/models`) {
+        return jsonResponse({ data: [{ id: "glm-4.6" }] });
+      }
+      if (href === `${glmBaseUrl}/chat/completions`) {
+        return jsonResponse({
+          choices: [{ message: { content: "D’accord." } }],
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    const assistant = useAssistantStore();
+    await assistant.connect(token, { provider: "glm" });
+
+    await assistant.send("Quel modèle es-tu ?");
+
+    const body = JSON.parse(
+      String(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body),
+    ) as { messages?: Array<{ content?: string; role?: string }> };
+    const system = body.messages?.find((message) => message.role === "system");
+    expect(system?.content).toContain("glm-4.6");
+    expect(system?.content).toContain("GLM (Zhipu)");
+  });
+
   it("fails when the provider answers neither with tools nor text", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";

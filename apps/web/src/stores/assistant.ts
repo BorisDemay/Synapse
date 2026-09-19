@@ -634,6 +634,16 @@ export const useAssistantStore = defineStore("assistant", () => {
     };
   }
 
+  function assistantInstructions(): string {
+    const modelId = model.value.trim();
+    if (!modelId) {
+      return ASSISTANT_INSTRUCTIONS;
+    }
+    const providerLabel = findAssistantProvider(provider)?.label ?? provider;
+    return `${ASSISTANT_INSTRUCTIONS}
+Tu exécutes le modèle ${modelId}, fourni par ${providerLabel}. Si on te demande quel modèle tu es, réponds avec cette information.`;
+  }
+
   async function send(prompt: string): Promise<string> {
     const trimmed = prompt.trim();
     if (!trimmed) {
@@ -667,7 +677,7 @@ export const useAssistantStore = defineStore("assistant", () => {
       const response = await completeCodexAgent({
         accountId,
         baseUrl: providerBaseUrl || undefined,
-        instructions: ASSISTANT_INSTRUCTIONS,
+        instructions: assistantInstructions(),
         messages: messages.value.map((message) => ({
           content:
             message === messages.value.at(-1) &&
