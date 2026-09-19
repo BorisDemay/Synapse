@@ -1,5 +1,3 @@
-export type EditorViewMode = "ir" | "sv";
-
 export type MarkdownMenuCommand = {
   checked?: boolean;
   destructive?: boolean;
@@ -39,26 +37,6 @@ export const TOOLBAR_LABELS: Readonly<Record<string, string>> = {
   redo: "Rétablir",
 };
 
-const HEADING_ITEMS: readonly MarkdownMenuCommand[] = [
-  { type: "item", id: "h1", label: "Titre 1" },
-  { type: "item", id: "h2", label: "Titre 2" },
-  { type: "item", id: "h3", label: "Titre 3" },
-  { type: "item", id: "h4", label: "Titre 4" },
-  { type: "item", id: "h5", label: "Titre 5" },
-  { type: "item", id: "h6", label: "Titre 6" },
-];
-
-const STRUCTURE_TOOL_IDS = [
-  "list",
-  "ordered-list",
-  "check",
-  "quote",
-  "table",
-  "line",
-  "outdent",
-  "indent",
-] as const;
-
 const STYLE_TOOL_IDS = [
   "bold",
   "italic",
@@ -96,49 +74,17 @@ const TABLE_ITEMS: readonly MarkdownMenuCommand[] = [
 ];
 
 function toolbarItem(
-  id:
-    | (typeof STRUCTURE_TOOL_IDS)[number]
-    | (typeof STYLE_TOOL_IDS)[number]
-    | "emoji"
-    | "undo"
-    | "redo",
+  id: (typeof STYLE_TOOL_IDS)[number] | "emoji" | "undo" | "redo",
 ): MarkdownMenuCommand {
   return { type: "item", id, label: TOOLBAR_LABELS[id] ?? id };
 }
 
-export function markdownContextMenuGroups(options: {
+export function markdownContextMenuGroups({
+  inTable,
+}: {
   inTable: boolean;
-  viewMode: EditorViewMode;
 }): MarkdownMenuGroup[] {
-  const { inTable, viewMode } = options;
   const groups: MarkdownMenuGroup[] = [
-    {
-      id: "view",
-      label: "Affichage",
-      items: [
-        {
-          type: "item",
-          id: "markdown",
-          label: "Markdown",
-          checked: viewMode === "ir",
-        },
-        {
-          type: "item",
-          id: "source",
-          label: "Texte brut",
-          checked: viewMode === "sv",
-        },
-      ],
-    },
-    {
-      id: "structure",
-      label: "Structure",
-      items: [
-        ...HEADING_ITEMS,
-        { type: "separator" },
-        ...STRUCTURE_TOOL_IDS.map(toolbarItem),
-      ],
-    },
     {
       id: "style",
       label: "Style",

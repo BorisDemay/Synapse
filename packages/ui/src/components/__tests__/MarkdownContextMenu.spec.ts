@@ -23,7 +23,7 @@ describe("MarkdownContextMenu", () => {
     mount(MarkdownContextMenu, {
       attachTo: document.body,
       props: {
-        groups: markdownContextMenuGroups({ inTable: false, viewMode: "ir" }),
+        groups: markdownContextMenuGroups({ inTable: false }),
         open: true,
         x: 24,
         y: 48,
@@ -33,10 +33,9 @@ describe("MarkdownContextMenu", () => {
     const menu = menuNode();
     expect(menu?.getAttribute("aria-label")).toBe("Outils Markdown");
     const labels = menuItems().map((item) => item.textContent?.trim());
-    expect(labels).toEqual(
-      expect.arrayContaining(["Gras", "Titre 1", "Tableau", "Émojis"]),
-    );
-    expect(labels).toContain("Texte brut");
+    expect(labels).toEqual(expect.arrayContaining(["Gras", "Lien", "Émojis"]));
+    expect(labels).not.toContain("Texte brut");
+    expect(labels).not.toContain("Titre 1");
     expect(labels).not.toContain("Insérer une ligne en dessous");
   });
 
@@ -44,7 +43,7 @@ describe("MarkdownContextMenu", () => {
     const wrapper = mount(MarkdownContextMenu, {
       attachTo: document.body,
       props: {
-        groups: markdownContextMenuGroups({ inTable: false, viewMode: "ir" }),
+        groups: markdownContextMenuGroups({ inTable: false }),
         open: true,
         x: 16,
         y: 16,
@@ -52,7 +51,7 @@ describe("MarkdownContextMenu", () => {
     });
 
     menuItems()[0]?.click();
-    expect(wrapper.emitted("select")?.[0]).toEqual(["markdown"]);
+    expect(wrapper.emitted("select")?.[0]).toEqual(["bold"]);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await wrapper.vm.$nextTick();
@@ -63,7 +62,7 @@ describe("MarkdownContextMenu", () => {
     const wrapper = mount(MarkdownContextMenu, {
       attachTo: document.body,
       props: {
-        groups: markdownContextMenuGroups({ inTable: false, viewMode: "ir" }),
+        groups: markdownContextMenuGroups({ inTable: false }),
         open: true,
         x: 16,
         y: 16,
@@ -78,14 +77,14 @@ describe("MarkdownContextMenu", () => {
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
     );
 
-    expect(wrapper.emitted("select")?.[0]).toEqual(["source"]);
+    expect(wrapper.emitted("select")?.[0]).toEqual(["italic"]);
   });
 
   it("closes on a pointer down outside the menu", async () => {
     const wrapper = mount(MarkdownContextMenu, {
       attachTo: document.body,
       props: {
-        groups: markdownContextMenuGroups({ inTable: true, viewMode: "sv" }),
+        groups: markdownContextMenuGroups({ inTable: true }),
         open: true,
         x: 16,
         y: 16,
@@ -93,7 +92,7 @@ describe("MarkdownContextMenu", () => {
     });
 
     expect(menuItems().map((item) => item.textContent?.trim())).toEqual(
-      expect.arrayContaining(["Markdown", "Insérer une ligne en dessous"]),
+      expect.arrayContaining(["Gras", "Insérer une ligne en dessous"]),
     );
 
     document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -105,7 +104,7 @@ describe("MarkdownContextMenu", () => {
     const wrapper = mount(MarkdownContextMenu, {
       attachTo: document.body,
       props: {
-        groups: markdownContextMenuGroups({ inTable: false, viewMode: "ir" }),
+        groups: markdownContextMenuGroups({ inTable: false }),
         open: true,
         x: 16,
         y: 16,

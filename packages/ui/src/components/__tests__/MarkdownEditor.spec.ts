@@ -337,9 +337,9 @@ describe("MarkdownEditor", () => {
 
     const labels = menuItems().map((item) => item.textContent?.trim());
     expect(menuNode()?.getAttribute("aria-label")).toBe("Outils Markdown");
-    expect(labels).toEqual(
-      expect.arrayContaining(["Gras", "Titre 1", "Tableau", "Émojis"]),
-    );
+    expect(labels).toEqual(expect.arrayContaining(["Gras", "Lien", "Émojis"]));
+    expect(labels).not.toContain("Titre 1");
+    expect(labels).not.toContain("Tableau");
     wrapper.unmount();
   });
 

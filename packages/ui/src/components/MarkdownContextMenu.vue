@@ -224,29 +224,29 @@ onBeforeUnmount(() => {
 <style scoped>
 .synapse-markdown-context-menu {
   position: fixed;
-  z-index: 20;
+  z-index: 1100;
   display: grid;
-  min-width: 15rem;
-  max-width: min(22rem, calc(100vw - 1rem));
-  max-height: min(28rem, calc(100vh - 1rem));
+  min-width: 13.5rem;
+  max-width: min(19rem, calc(100vw - 1rem));
+  max-height: min(24rem, calc(100vh - 1rem));
   overflow: auto;
-  padding: 0.3rem;
+  padding: 0.25rem;
   border: 1px solid var(--synapse-color-border);
-  border-radius: 0.5rem;
+  border-radius: var(--synapse-radius-sm);
   background: var(--synapse-color-surface-raised);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+  box-shadow: var(--synapse-shadow-md);
 }
 
 .synapse-markdown-context-group + .synapse-markdown-context-group {
-  margin-top: 0.2rem;
-  padding-top: 0.2rem;
+  margin-top: 0.15rem;
+  padding-top: 0.15rem;
   border-top: 1px solid var(--synapse-color-border);
 }
 
 .synapse-markdown-context-group-label {
-  margin: 0.2rem 0.45rem 0.15rem;
+  margin: 0.15rem 0.4rem 0.1rem;
   color: var(--synapse-color-text-muted);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -254,31 +254,35 @@ onBeforeUnmount(() => {
 
 .synapse-markdown-context-item {
   width: 100%;
-  padding: 0.45rem 0.65rem;
+  padding: 0.4rem 0.6rem;
   border: 0;
-  border-radius: 0.3rem;
+  border-radius: calc(var(--synapse-radius-sm) - 0.2rem);
   color: var(--synapse-color-text);
   background: transparent;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
   text-align: start;
   cursor: pointer;
 }
 
 .synapse-markdown-context-item--active,
-.synapse-markdown-context-item:hover,
-.synapse-markdown-context-item:focus-visible {
+.synapse-markdown-context-item:hover {
   background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
-  outline: none;
+}
+
+.synapse-markdown-context-item:focus-visible {
+  outline: 2px solid var(--synapse-color-accent);
+  outline-offset: -2px;
 }
 
 .synapse-markdown-context-item--destructive {
-  color: var(--synapse-color-danger, #b42318);
+  color: var(--synapse-color-danger);
 }
 
 .synapse-markdown-context-separator {
   height: 1px;
-  margin: 0.25rem;
+  margin: 0.2rem;
   background: var(--synapse-color-border);
 }
 </style>

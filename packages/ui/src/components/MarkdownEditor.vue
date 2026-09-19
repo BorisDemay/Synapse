@@ -60,10 +60,7 @@ const contextMenuY = ref(0);
 const contextMenuInTable = ref(false);
 
 const contextMenuGroups = computed(() =>
-  markdownContextMenuGroups({
-    inTable: contextMenuInTable.value,
-    viewMode: viewMode.value,
-  }),
+  markdownContextMenuGroups({ inTable: contextMenuInTable.value }),
 );
 
 let editor: Vditor | undefined;
@@ -362,10 +359,6 @@ function runEditorCommand(id: string) {
     id === "column-delete"
   ) {
     runTableAction(id);
-    return;
-  }
-  if (/^h[1-6]$/u.test(id)) {
-    clickToolbarButton(`.vditor-toolbar button[data-tag="${id}"]`);
     return;
   }
   clickToolbarButton(`.vditor-toolbar button[data-type="${id}"]`);
