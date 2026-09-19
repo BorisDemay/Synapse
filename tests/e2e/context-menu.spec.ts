@@ -30,10 +30,6 @@ test("context menu survives scrolling", async ({ page }) => {
   await editor.click({ button: "right", position: { x: 200, y: 120 } });
   const menu = page.getByRole("menu", { name: "Outils Markdown" });
   await expect(menu).toBeVisible();
-  await page.screenshot({
-    path: ".screens/context-menu-1-open.png",
-    fullPage: false,
-  });
 
   // Scroll the content underneath (pointer over the page, not the menu):
   // the menu must stay open.
@@ -41,16 +37,8 @@ test("context menu survives scrolling", async ({ page }) => {
   await page.mouse.wheel(0, 400);
   await page.waitForTimeout(300);
   await expect(menu).toBeVisible();
-  await page.screenshot({
-    path: ".screens/context-menu-2-after-scroll.png",
-    fullPage: false,
-  });
 
   // Scrolling must remain the only non-dismissal: a click outside still closes.
   await page.mouse.click(40, 640);
   await expect(menu).toBeHidden();
-  await page.screenshot({
-    path: ".screens/context-menu-3-after-outside-click.png",
-    fullPage: false,
-  });
 });
