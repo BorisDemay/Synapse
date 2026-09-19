@@ -850,5 +850,8 @@ async function completeChatCompletionsAgent(
     toolCalls === undefined
       ? []
       : extractChatCompletionsFunctionCalls(toolCalls);
+  if (functionCalls.length > 0 && text.trim()) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
   return rejectMultipleFunctionCalls({ functionCalls, text });
 }

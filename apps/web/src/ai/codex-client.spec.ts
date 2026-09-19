@@ -636,6 +636,45 @@ describe("completeCodexAgent over chat completions", () => {
     ).rejects.toThrow("L’assistant n’a pas pu répondre.");
   });
 
+  it("rejects text mixed with a local tool call from OpenAI-compatible providers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Une action est prête.",
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      function: { arguments: "{}", name: "create_note" },
+                      id: "call-mixed-1",
+                      type: "function",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Effectue une action.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }),
+    ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+  });
+
   it("rejects ambiguous choices from OpenAI-compatible providers", async () => {
     vi.stubGlobal(
       "fetch",
