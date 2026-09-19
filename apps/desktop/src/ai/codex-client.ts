@@ -231,7 +231,15 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       type?: unknown;
     };
     try {
-      event = JSON.parse(data) as typeof event;
+      const parsedEvent: unknown = JSON.parse(data);
+      if (
+        !parsedEvent ||
+        typeof parsedEvent !== "object" ||
+        Array.isArray(parsedEvent)
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      event = parsedEvent as typeof event;
     } catch {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }

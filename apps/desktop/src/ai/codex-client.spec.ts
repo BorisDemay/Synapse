@@ -258,6 +258,46 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    { label: "null", payload: null },
+    { label: "an array", payload: [] },
+    { label: "a string", payload: "not an event object" },
+  ])(
+    "rejects structurally invalid SSE JSON $label before a valid local tool call",
+    async ({ payload }) => {
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-valid-after-invalid-json-structure",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              [
+                `data: ${JSON.stringify(payload)}`,
+                `data: ${JSON.stringify(validCall)}`,
+              ].join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+    },
+  );
+
   it.each(["", "   "])(
     "rejects blank function call arguments from every Responses API flow",
     async (argumentsValue) => {
