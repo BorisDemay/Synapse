@@ -523,7 +523,7 @@ describe("assistant store", () => {
     await assistant.connect(token, { provider: "glm" });
 
     await expect(assistant.send("Crée une note.")).rejects.toThrow(
-      "L’assistant n’a pas choisi d’action.",
+      "L’assistant n’a pas pu répondre.",
     );
   });
 

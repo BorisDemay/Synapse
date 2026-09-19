@@ -587,6 +587,38 @@ describe("completeCodexAgent over chat completions", () => {
     ).rejects.toThrow("L’assistant n’a pas pu répondre.");
   });
 
+  it.each([
+    { label: "absent", message: {} },
+    { label: "null", message: { content: null } },
+    { label: "object", message: { content: {} } },
+    { label: "empty", message: { content: "" } },
+  ])(
+    "rejects $label chat completions text without a tool call",
+    async ({ message }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { role: "assistant", ...message } }],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          baseUrl,
+          instructions: "Réponds brièvement.",
+          messages: [{ content: "Question.", role: "user" }],
+          model: "glm-4.6",
+          token,
+        }),
+      ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+    },
+  );
+
   it.each(["custom", undefined])(
     "rejects a tool call whose type is not function",
     async (type) => {
