@@ -359,7 +359,7 @@ describe("assistant store", () => {
     expect(createdIds.includes(lastNoteId)).toBe(true);
   });
 
-  it("explains when the provider answers without using the tools", async () => {
+  it("surfaces plain-text answers for requests that need no write", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     vi.mocked(fetch).mockImplementation(async (url) => {
@@ -369,8 +369,40 @@ describe("assistant store", () => {
       }
       if (href === `${glmBaseUrl}/chat/completions`) {
         return jsonResponse({
-          choices: [{ message: { content: "# Voici votre note en clair…" } }],
+          choices: [
+            {
+              message: {
+                content: "Je suis l’assistant d’écriture de Synapse.",
+              },
+            },
+          ],
         });
+      }
+      return jsonResponse({}, 404);
+    });
+    const assistant = useAssistantStore();
+    await assistant.connect(token, { provider: "glm" });
+    const notesBefore = useVaultStore().notes.size;
+
+    await expect(assistant.send("Quel modèle es-tu ?")).resolves.toBe("");
+
+    expect(assistant.messages.at(-1)?.content).toBe(
+      "Je suis l’assistant d’écriture de Synapse.",
+    );
+    expect(assistant.messages.at(-1)?.role).toBe("assistant");
+    expect(useVaultStore().notes.size).toBe(notesBefore);
+  });
+
+  it("fails when the provider answers neither with tools nor text", async () => {
+    await unlockVault();
+    const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const href = String(url);
+      if (href === `${glmBaseUrl}/models`) {
+        return jsonResponse({ data: [{ id: "glm-4.6" }] });
+      }
+      if (href === `${glmBaseUrl}/chat/completions`) {
+        return jsonResponse({ choices: [{ message: { content: "" } }] });
       }
       return jsonResponse({}, 404);
     });
@@ -378,7 +410,7 @@ describe("assistant store", () => {
     await assistant.connect(token, { provider: "glm" });
 
     await expect(assistant.send("Crée une note.")).rejects.toThrow(
-      "L’assistant a répondu sans utiliser les outils. Reformulez la demande.",
+      "L’assistant n’a pas choisi d’action.",
     );
   });
 

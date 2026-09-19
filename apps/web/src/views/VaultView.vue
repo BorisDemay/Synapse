@@ -367,7 +367,8 @@ async function connectChatgpt() {
 
 async function sendAssistant(prompt: string) {
   try {
-    showNote(await assistant.send(prompt));
+    const noteId = await assistant.send(prompt);
+    if (noteId) showNote(noteId);
   } catch {
     // The store already exposes a safe, redacted error.
   }

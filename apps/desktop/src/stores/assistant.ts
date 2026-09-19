@@ -27,8 +27,9 @@ function uuidV7(): string {
 
 export const ASSISTANT_INSTRUCTIONS = `Tu es l'assistant d'écriture de Synapse.
 Tu pilotes le coffre local uniquement à travers les outils fournis.
-Choisis exactement un outil d'écriture pour chaque demande : crée une note quand l'utilisateur demande un nouveau document, remplace une note liée pour une réécriture complète, ou ajoute du contenu pour un complément ciblé.
+Pour toute demande d'écriture, choisis exactement un outil : crée une note quand l'utilisateur demande un nouveau document, remplace une note liée pour une réécriture complète, ou ajoute du contenu pour un complément ciblé.
 Ne réponds jamais avec le Markdown demandé dans le texte : transmets-le à l'outil choisi.
+Si la demande ne requiert aucune écriture (question, salutation, demande d'information), réponds brièvement en texte sans appeler d'outil.
 Les notes liées constituent le seul contexte de coffre disponible. Pour les modifier, utilise exclusivement leur identifiant opaque fourni dans le contexte ; n'invente jamais d'identifiant ni de fichier absent.
 Ne crée pas de note pour une demande qui porte sur une note liée : choisis l'outil qui la modifie.
 Ne révèle jamais de clés, jetons ou secrets.`;
@@ -751,16 +752,23 @@ export const useAssistantStore = defineStore("assistant", () => {
         reasoningEffort: reasoningEffort.value || undefined,
         serviceTier: fast.value ? fastTier.value?.id : undefined,
         token,
-        toolChoice: "required",
+        toolChoice: "auto",
         tools: ASSISTANT_TOOLS,
         transport: authKind === "chatgpt" ? "chatgpt" : "platform",
       });
       if (response.functionCalls.length === 0) {
-        throw new Error(
-          response.text.trim()
-            ? "L’assistant a répondu sans utiliser les outils. Reformulez la demande."
-            : "L’assistant n’a pas choisi d’action.",
-        );
+        const answer = response.text.trim();
+        if (!answer) {
+          throw new Error("L’assistant n’a pas choisi d’action.");
+        }
+        // Informational request: the model answered in plain text instead of
+        // calling a write tool, which is valid for non-writing requests.
+        messages.value = [
+          ...messages.value,
+          { content: answer, id: uuidV7(), role: "assistant" },
+        ];
+        await saveCurrentConversation();
+        return "";
       }
       let actionMessage = "";
       let actionNoteId = "";
