@@ -32,9 +32,12 @@ const vditorMock = vi.hoisted(() => {
   let options: Options | undefined;
   let root: HTMLElement | undefined;
   const instance = {
+    deleteValue: vi.fn(),
     destroy: vi.fn(),
     getCurrentMode: vi.fn(() => options?.mode ?? "ir"),
+    getSelection: vi.fn(() => ""),
     getValue: vi.fn(() => options?.value ?? ""),
+    insertValue: vi.fn(),
     setTheme: vi.fn(),
     setValue: vi.fn(),
   };
@@ -86,7 +89,11 @@ const vditorMock = vi.hoisted(() => {
       options = undefined;
       root = undefined;
       Constructor.mockClear();
-      Object.values(instance).forEach((mock) => mock.mockClear());
+      Object.values(instance).forEach((value) => {
+        if (typeof value === "function") {
+          value.mockClear();
+        }
+      });
     },
     root: () => root,
   };
@@ -95,13 +102,25 @@ const vditorMock = vi.hoisted(() => {
 vi.mock("vditor", () => ({ default: vditorMock.Constructor }));
 
 function menuNode() {
-  return document.body.querySelector<HTMLElement>('[role="menu"]');
+  return document.body.querySelector<HTMLElement>(
+    '[role="menu"][aria-label="Outils Markdown"]',
+  );
 }
 
-function menuItems() {
-  return [
-    ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-  ];
+function submenuNode(label: string) {
+  return document.body.querySelector<HTMLElement>(
+    `[role="menu"][aria-label="${label}"]`,
+  );
+}
+
+function menuItems(scope: ParentNode = document.body) {
+  return [...scope.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+}
+
+async function openSubmenu(label: string) {
+  menuItems()
+    .find((item) => item.textContent?.trim() === label)
+    ?.dispatchEvent(new Event("pointerenter", { bubbles: true }));
 }
 
 describe("MarkdownEditor", () => {
@@ -337,9 +356,17 @@ describe("MarkdownEditor", () => {
 
     const labels = menuItems().map((item) => item.textContent?.trim());
     expect(menuNode()?.getAttribute("aria-label")).toBe("Outils Markdown");
-    expect(labels).toEqual(expect.arrayContaining(["Gras", "Lien", "Émojis"]));
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "Ajouter un lien",
+        "Formater",
+        "Paragraphe",
+        "Insérer",
+        "Tout sélectionner",
+      ]),
+    );
+    expect(labels).not.toContain("Gras");
     expect(labels).not.toContain("Titre 1");
-    expect(labels).not.toContain("Tableau");
     wrapper.unmount();
   });
 
@@ -354,13 +381,59 @@ describe("MarkdownEditor", () => {
 
     await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
     await wrapper.vm.$nextTick();
-    menuItems()
+    await openSubmenu("Formater");
+    await wrapper.vm.$nextTick();
+    menuItems(submenuNode("Formater")!)
       .find((item) => item.textContent?.trim() === "Gras")
       ?.click();
     await wrapper.vm.$nextTick();
 
     expect(click).toHaveBeenCalledOnce();
     expect(menuNode()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("inserts a footnote with its definition from the Insérer submenu", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "Corps" },
+    });
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    await openSubmenu("Insérer");
+    await wrapper.vm.$nextTick();
+    menuItems(submenuNode("Insérer")!)
+      .find((item) => item.textContent?.trim() === "Note de bas de page")
+      ?.click();
+    await wrapper.vm.$nextTick();
+
+    expect(vditorMock.instance.insertValue).toHaveBeenCalledWith(
+      "[^1]\n\n[^1]: ",
+    );
+    wrapper.unmount();
+  });
+
+  it("wraps the selection in a comment from the Formater submenu", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    vditorMock.instance.getSelection.mockReturnValue("à garder");
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    await openSubmenu("Formater");
+    await wrapper.vm.$nextTick();
+    menuItems(submenuNode("Formater")!)
+      .find((item) => item.textContent?.trim() === "Commentaire")
+      ?.click();
+    await wrapper.vm.$nextTick();
+
+    expect(vditorMock.instance.deleteValue).toHaveBeenCalled();
+    expect(vditorMock.instance.insertValue).toHaveBeenCalledWith(
+      "%%à garder%%",
+    );
     wrapper.unmount();
   });
 
@@ -441,9 +514,18 @@ describe("MarkdownEditor", () => {
 
     await wrapper.get("td").trigger("contextmenu");
     await wrapper.vm.$nextTick();
+    await openSubmenu("Tableau");
+    await wrapper.vm.$nextTick();
 
-    expect(menuItems().map((item) => item.textContent?.trim())).toEqual(
-      expect.arrayContaining(["Gras", "Insérer une ligne en dessous"]),
+    expect(
+      menuItems(submenuNode("Tableau")!).map((item) =>
+        item.textContent?.trim(),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "Insérer une ligne en dessous",
+        "Supprimer la ligne",
+      ]),
     );
     wrapper.unmount();
   });

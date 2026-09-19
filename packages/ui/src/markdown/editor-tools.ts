@@ -1,6 +1,7 @@
 export type MarkdownMenuCommand = {
   checked?: boolean;
   destructive?: boolean;
+  disabled?: boolean;
   id: string;
   label: string;
   type: "item";
@@ -8,13 +9,17 @@ export type MarkdownMenuCommand = {
 
 export type MarkdownMenuSeparator = { type: "separator" };
 
-export type MarkdownMenuItem = MarkdownMenuCommand | MarkdownMenuSeparator;
-
-export type MarkdownMenuGroup = {
+export type MarkdownMenuSubmenu = {
   id: string;
   items: MarkdownMenuItem[];
   label: string;
+  type: "submenu";
 };
+
+export type MarkdownMenuItem =
+  | MarkdownMenuCommand
+  | MarkdownMenuSeparator
+  | MarkdownMenuSubmenu;
 
 export const TOOLBAR_LABELS: Readonly<Record<string, string>> = {
   emoji: "Émojis",
@@ -36,15 +41,6 @@ export const TOOLBAR_LABELS: Readonly<Record<string, string>> = {
   undo: "Annuler",
   redo: "Rétablir",
 };
-
-const STYLE_TOOL_IDS = [
-  "bold",
-  "italic",
-  "strike",
-  "inline-code",
-  "code",
-  "link",
-] as const;
 
 const TABLE_ITEMS: readonly MarkdownMenuCommand[] = [
   {
@@ -73,59 +69,102 @@ const TABLE_ITEMS: readonly MarkdownMenuCommand[] = [
   },
 ];
 
-function toolbarItem(
-  id: (typeof STYLE_TOOL_IDS)[number] | "emoji" | "undo" | "redo",
-): MarkdownMenuCommand {
-  return { type: "item", id, label: TOOLBAR_LABELS[id] ?? id };
+const SEPARATOR: MarkdownMenuSeparator = { type: "separator" };
+
+function command(id: string, label: string): MarkdownMenuCommand {
+  return { type: "item", id, label };
 }
 
-export function markdownContextMenuGroups({
+function headingItems(headingLevel: number): MarkdownMenuCommand[] {
+  return [1, 2, 3, 4, 5, 6].map((level) => ({
+    type: "item" as const,
+    id: `h${level}`,
+    label: `Titre ${level}`,
+    checked: headingLevel === level,
+  }));
+}
+
+export function markdownContextMenuItems({
+  headingLevel = 0,
   inTable,
+  selectionEmpty = false,
 }: {
+  headingLevel?: number;
   inTable: boolean;
-}): MarkdownMenuGroup[] {
-  const groups: MarkdownMenuGroup[] = [
+  selectionEmpty?: boolean;
+}): MarkdownMenuItem[] {
+  const items: MarkdownMenuItem[] = [
+    command("add-link", "Ajouter un lien"),
+    command("add-external-link", "Ajouter un lien externe"),
     {
-      id: "style",
-      label: "Style",
-      items: STYLE_TOOL_IDS.map(toolbarItem),
-    },
-    {
-      id: "insert",
-      label: "Insérer",
-      items: [toolbarItem("emoji")],
-    },
-    {
-      id: "edit",
-      label: "Édition",
+      id: "formater",
       items: [
-        toolbarItem("undo"),
-        toolbarItem("redo"),
-        { type: "separator" },
-        { type: "item", id: "copy", label: "Copier" },
-        { type: "item", id: "cut", label: "Couper" },
-        { type: "item", id: "paste", label: "Coller" },
+        command("bold", "Gras"),
+        command("italic", "Italique"),
+        command("strike", "Barré"),
+        SEPARATOR,
+        command("inline-code", "Code"),
+        command("math-inline", "Mathématiques"),
+        command("comment", "Commentaire"),
+        SEPARATOR,
+        command("remove-format", "Supprimer le formatage"),
       ],
+      label: "Formater",
+      type: "submenu",
+    },
+    {
+      id: "paragraphe",
+      items: [
+        command("list", "Liste à puces"),
+        command("ordered-list", "Liste numérotée"),
+        command("check", "Liste de tâches"),
+        SEPARATOR,
+        ...headingItems(headingLevel),
+        {
+          type: "item",
+          id: "body",
+          label: "Corps",
+          checked: headingLevel === 0,
+        },
+        SEPARATOR,
+        command("quote", "Citation"),
+      ],
+      label: "Paragraphe",
+      type: "submenu",
+    },
+    {
+      id: "inserer",
+      items: [
+        command("footnote", "Note de bas de page"),
+        command("table", "Tableau"),
+        command("callout", "Mise en avant"),
+        command("line", "Ligne horizontale"),
+        SEPARATOR,
+        command("code-block", "Bloc de code"),
+        command("math-block", "Bloc mathématiques"),
+      ],
+      label: "Insérer",
+      type: "submenu",
     },
   ];
 
   if (inTable) {
-    groups.push({
-      id: "table",
-      label: "Tableau",
+    items.push({
+      id: "tableau",
       items: [...TABLE_ITEMS],
+      label: "Tableau",
+      type: "submenu",
     });
   }
 
-  return groups;
-}
-
-export function flattenMenuCommands(
-  groups: readonly MarkdownMenuGroup[],
-): MarkdownMenuCommand[] {
-  return groups.flatMap((group) =>
-    group.items.filter(
-      (item): item is MarkdownMenuCommand => item.type === "item",
-    ),
+  items.push(
+    SEPARATOR,
+    { type: "item", id: "cut", label: "Couper", disabled: selectionEmpty },
+    { type: "item", id: "copy", label: "Copier", disabled: selectionEmpty },
+    command("paste", "Coller"),
+    command("paste-plain", "Coller en texte brut"),
+    command("select-all", "Tout sélectionner"),
   );
+
+  return items;
 }

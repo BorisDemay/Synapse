@@ -5,7 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { useEditorMode } from "../editor-mode";
 import {
-  markdownContextMenuGroups,
+  markdownContextMenuItems,
   TOOLBAR_LABELS,
 } from "../markdown/editor-tools";
 import { useTheme } from "../theme";
@@ -58,9 +58,15 @@ const contextMenuOpen = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuInTable = ref(false);
+const contextMenuHeadingLevel = ref(0);
+const contextMenuSelectionEmpty = ref(false);
 
-const contextMenuGroups = computed(() =>
-  markdownContextMenuGroups({ inTable: contextMenuInTable.value }),
+const contextMenuItems = computed(() =>
+  markdownContextMenuItems({
+    headingLevel: contextMenuHeadingLevel.value,
+    inTable: contextMenuInTable.value,
+    selectionEmpty: contextMenuSelectionEmpty.value,
+  }),
 );
 
 let editor: Vditor | undefined;
@@ -296,6 +302,146 @@ function clickToolbarButton(selector: string) {
   editorRoot.value?.querySelector<HTMLButtonElement>(selector)?.click();
 }
 
+function editorSelection(): string {
+  return editor?.getSelection() ?? "";
+}
+
+function insertWrapped(prefix: string, suffix: string, placeholder: string) {
+  const selected = editorSelection();
+  if (selected) {
+    editor?.deleteValue();
+  }
+  editor?.insertValue(`${prefix}${selected || placeholder}${suffix}`);
+}
+
+function replaceSelection(replace: (selected: string) => string) {
+  const selected = editorSelection();
+  if (!selected) {
+    return false;
+  }
+  editor?.deleteValue();
+  editor?.insertValue(replace(selected));
+  return true;
+}
+
+function clearHeading() {
+  // IR mode renders the current block as an <h1>..<h6> holding a heading
+  // marker span; emptying it and notifying the input pipeline removes the
+  // heading. Source mode falls back to stripping the hashes of the selection.
+  const anchor = window.getSelection()?.anchorNode;
+  const element = anchor instanceof Element ? anchor : anchor?.parentElement;
+  const heading = element?.closest<HTMLElement>("h1,h2,h3,h4,h5,h6");
+  if (
+    heading &&
+    editorRoot.value?.contains(heading) &&
+    editor?.getCurrentMode() === "ir"
+  ) {
+    const marker = heading.querySelector<HTMLElement>(
+      ".vditor-ir__marker--heading",
+    );
+    if (marker) {
+      marker.textContent = "";
+      heading.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      return;
+    }
+  }
+  replaceSelection((selected) => selected.replace(/^#{1,6} /gmu, ""));
+}
+
+function insertFootnote() {
+  const value = editor?.getValue() ?? "";
+  const used = [...value.matchAll(/\[\^(\d+)\]/gmu)].map((match) =>
+    Number(match[1]),
+  );
+  const next = (used.length ? Math.max(...used) : 0) + 1;
+  editor?.insertValue(`[^${next}]\n\n[^${next}]: `);
+}
+
+async function pastePlainText() {
+  try {
+    const text = await navigator.clipboard.readText();
+    document.execCommand("insertText", false, text);
+  } catch {
+    // Clipboard read refused (permission or focus): leave the content alone
+    // rather than inserting an untrusted fallback.
+  }
+}
+
+function selectAllInEditor() {
+  const editable = editor?.vditor?.ir?.element ?? editor?.vditor?.sv?.element;
+  editable?.focus();
+  document.execCommand("selectAll");
+}
+
+function runEditorCommand(id: string) {
+  if (id === "add-link") {
+    clickToolbarButton('.vditor-toolbar button[data-type="link"]');
+    return;
+  }
+  if (id === "add-external-link") {
+    insertWrapped("[", "](https://)", "texte");
+    return;
+  }
+  if (id === "math-inline") {
+    insertWrapped("$", "$", "E=mc^2");
+    return;
+  }
+  if (id === "comment") {
+    insertWrapped("%%", "%%", "commentaire");
+    return;
+  }
+  if (id === "remove-format") {
+    replaceSelection((selected) =>
+      selected.replace(/(\*\*|\*|__|~~|==|`)/gu, "").replace(/^#{1,6} /gmu, ""),
+    );
+    return;
+  }
+  if (id === "body") {
+    clearHeading();
+    return;
+  }
+  if (id === "footnote") {
+    insertFootnote();
+    return;
+  }
+  if (id === "callout") {
+    editor?.insertValue("> [!note] Titre\n> Contenu");
+    return;
+  }
+  if (id === "math-block") {
+    editor?.insertValue("$$\n\n$$");
+    return;
+  }
+  if (id === "paste-plain") {
+    void pastePlainText();
+    return;
+  }
+  if (id === "select-all") {
+    selectAllInEditor();
+    return;
+  }
+  if (id === "copy" || id === "cut" || id === "paste") {
+    document.execCommand(id);
+    return;
+  }
+  if (
+    id === "row-add" ||
+    id === "row-add-above" ||
+    id === "row-delete" ||
+    id === "column-add" ||
+    id === "column-add-before" ||
+    id === "column-delete"
+  ) {
+    runTableAction(id);
+    return;
+  }
+  if (/^h[1-6]$/u.test(id)) {
+    clickToolbarButton(`.vditor-toolbar button[data-tag="${id}"]`);
+    return;
+  }
+  clickToolbarButton(`.vditor-toolbar button[data-type="${id}"]`);
+}
+
 function runTableAction(
   action: TableAction,
   targetCell = activeOrSelectedTableCell(),
@@ -337,33 +483,6 @@ function applyViewMode(mode: "ir" | "sv") {
   applyAccessibility();
 }
 
-function runEditorCommand(id: string) {
-  if (id === "markdown") {
-    applyViewMode("ir");
-    return;
-  }
-  if (id === "source") {
-    applyViewMode("sv");
-    return;
-  }
-  if (id === "copy" || id === "cut" || id === "paste") {
-    document.execCommand(id);
-    return;
-  }
-  if (
-    id === "row-add" ||
-    id === "row-add-above" ||
-    id === "row-delete" ||
-    id === "column-add" ||
-    id === "column-add-before" ||
-    id === "column-delete"
-  ) {
-    runTableAction(id);
-    return;
-  }
-  clickToolbarButton(`.vditor-toolbar button[data-type="${id}"]`);
-}
-
 function handleTableFocus(event: FocusEvent) {
   const cell = tableCellFromTarget(event.target);
   if (cell) {
@@ -382,6 +501,13 @@ function onEditorContextMenu(event: MouseEvent) {
     activeTableCell = cell;
   }
   contextMenuInTable.value = Boolean(cell);
+  const anchor = event.target instanceof Element ? event.target : undefined;
+  const heading = anchor?.closest<HTMLElement>("h1,h2,h3,h4,h5,h6");
+  contextMenuHeadingLevel.value =
+    heading && editorRoot.value?.contains(heading)
+      ? Number(heading.tagName.charAt(1))
+      : 0;
+  contextMenuSelectionEmpty.value = window.getSelection()?.isCollapsed ?? true;
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
   contextMenuOpen.value = true;
@@ -648,7 +774,7 @@ onBeforeUnmount(() => {
       data-editor-engine="vditor"
     />
     <MarkdownContextMenu
-      :groups="contextMenuGroups"
+      :items="contextMenuItems"
       :open="contextMenuOpen"
       :x="contextMenuX"
       :y="contextMenuY"
