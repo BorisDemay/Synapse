@@ -743,7 +743,7 @@ interface ChatCompletionsChoice {
 function extractChatCompletionsFunctionCalls(
   toolCalls: unknown,
 ): CodexFunctionCall[] {
-  if (!Array.isArray(toolCalls)) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
   return toolCalls.map((call) => {

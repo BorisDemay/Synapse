@@ -569,6 +569,24 @@ describe("completeCodexAgent over chat completions", () => {
     );
   });
 
+  it("rejects an empty chat completions tool call array", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(chatCompletionsToolCallResponse([])),
+    );
+
+    await expect(
+      completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Effectue une action.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }),
+    ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+  });
+
   it.each(["custom", undefined])(
     "rejects a tool call whose type is not function",
     async (type) => {
