@@ -851,11 +851,11 @@ async function completeChatCompletionsAgent(
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
-  const text = typeof message.content === "string" ? message.content : "";
-  const toolCalls = message.tool_calls;
-  if (toolCalls !== undefined && message.role !== "assistant") {
+  if (message.role !== "assistant") {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
+  const text = typeof message.content === "string" ? message.content : "";
+  const toolCalls = message.tool_calls;
   const functionCalls =
     toolCalls === undefined
       ? []

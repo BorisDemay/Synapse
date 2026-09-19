@@ -455,6 +455,7 @@ describe("assistant store", () => {
             {
               message: {
                 content: "Je suis l’assistant d’écriture de Synapse.",
+                role: "assistant",
               },
             },
           ],
@@ -485,7 +486,7 @@ describe("assistant store", () => {
       }
       if (href === `${glmBaseUrl}/chat/completions`) {
         return jsonResponse({
-          choices: [{ message: { content: "D’accord." } }],
+          choices: [{ message: { content: "D’accord.", role: "assistant" } }],
         });
       }
       return jsonResponse({}, 404);
@@ -512,7 +513,9 @@ describe("assistant store", () => {
         return jsonResponse({ data: [{ id: "glm-4.6" }] });
       }
       if (href === `${glmBaseUrl}/chat/completions`) {
-        return jsonResponse({ choices: [{ message: { content: "" } }] });
+        return jsonResponse({
+          choices: [{ message: { content: "", role: "assistant" } }],
+        });
       }
       return jsonResponse({}, 404);
     });
