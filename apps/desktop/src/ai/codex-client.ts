@@ -839,13 +839,16 @@ async function completeChatCompletionsAgent(
   if (!Array.isArray(choices) || choices.length !== 1) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
-  const choice = choices[0] as ChatCompletionsChoice | undefined;
-  if (!choice) {
+  const choice = choices[0];
+  if (!choice || typeof choice !== "object" || Array.isArray(choice)) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
-  const text =
-    typeof choice.message?.content === "string" ? choice.message.content : "";
-  const toolCalls = choice.message?.tool_calls;
+  const message = (choice as ChatCompletionsChoice).message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  const text = typeof message.content === "string" ? message.content : "";
+  const toolCalls = message.tool_calls;
   const functionCalls =
     toolCalls === undefined
       ? []
