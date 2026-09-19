@@ -22,7 +22,7 @@
 - Appliquer TDD : écrire un test qui échoue pour la bonne raison, l’exécuter, écrire le minimum pour le faire passer, exécuter le test ciblé puis la suite concernée, refactoriser seulement quand tout est vert.
 - Travailler par petites tranches verticales. Une tâche du plan peut être subdivisée, mais ne pas être fusionnée avec des fonctionnalités non demandées.
 - Ne jamais déclarer une fonctionnalité terminée sans sortie réelle des commandes de validation.
-- Un commit Conventional Commit atomique termine chaque tâche verte. Ne pas committer secrets, données de test sensibles, binaires ou fichiers générés non reproductibles.
+- Un commit Conventional Commit atomique termine chaque tâche verte, suivi immédiatement d’un `git push` : chaque session d’agent doit committer et pousser dès qu’un travail est terminé et validé, jamais laisser des changements verts locaux non poussés. Ne pas committer secrets, données de test sensibles, binaires ou fichiers générés non reproductibles.
 - Préférer les dépendances open source compatibles AGPLv3. Ajouter une dépendance seulement si l’alternative standard est insuffisante et documenter son rôle et sa licence.
 
 ## Invariants de sécurité
