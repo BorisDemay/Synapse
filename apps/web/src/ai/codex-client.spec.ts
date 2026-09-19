@@ -220,6 +220,40 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("rejects conflicting streamed calls sharing a call id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              "event: response.function_call_arguments.done",
+              'data: {"type":"response.function_call_arguments.done","call_id":"call-stream-2","name":"create_note","arguments":"{\\\"value\\\":\\\"first\\\"}"}',
+              "",
+              "event: response.function_call_arguments.done",
+              'data: {"type":"response.function_call_arguments.done","call_id":"call-stream-2","name":"create_note","arguments":"{\\\"value\\\":\\\"second\\\"}"}',
+              "",
+              "event: response.completed",
+              'data: {"type":"response.completed"}',
+              "",
+            ].join("\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Effectue une action.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        transport: "chatgpt",
+      }),
+    ).rejects.toThrow("L’assistant a fourni plusieurs actions.");
+  });
+
   it("does not leak the token or note content in thrown errors", async () => {
     vi.stubGlobal(
       "fetch",

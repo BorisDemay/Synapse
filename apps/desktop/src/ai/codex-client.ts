@@ -249,11 +249,16 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     }
   }
   const text = (completed || deltas).trim();
-  const responseCalls = calls.filter(
-    (call, index) =>
-      calls.findIndex((candidate) => candidate.callId === call.callId) ===
-      index,
-  );
+  const responseCalls = calls.filter((call) => {
+    const first = calls.find((candidate) => candidate.callId === call.callId);
+    if (!first || first === call) {
+      return true;
+    }
+    if (first.name !== call.name || first.arguments !== call.arguments) {
+      throw assistantError("L’assistant a fourni plusieurs actions.");
+    }
+    return false;
+  });
   if (!text && responseCalls.length === 0) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
