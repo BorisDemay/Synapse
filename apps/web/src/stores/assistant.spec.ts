@@ -296,7 +296,7 @@ describe("assistant store", () => {
     expect(assistant.connected).toBe(true);
   });
 
-  it("executes every tool call when a provider answers with several", async () => {
+  it("refuses every tool call when a provider answers with several", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     vi.mocked(fetch).mockImplementation(async (url) => {
@@ -342,21 +342,24 @@ describe("assistant store", () => {
     const assistant = useAssistantStore();
     await assistant.connect(token, { provider: "glm" });
 
-    const lastNoteId = await assistant.send("Crée deux notes.");
+    const prompt = "Crée deux notes.";
+    const messageCountBeforeRequest = assistant.messages.length;
+    await expect(assistant.send(prompt)).rejects.toThrow(
+      "L’assistant a fourni plusieurs actions.",
+    );
 
     const contents = [...useVaultStore().notes.values()].map(
       (note) => note.content,
     );
-    expect(contents).toContain("# Première note GLM\n\nContenu.");
-    expect(contents).toContain("# Deuxième note GLM\n\nContenu.");
-    expect(
-      assistant.messages.at(-1)?.content.includes("Première note GLM"),
-    ).toBe(true);
-    expect(
-      assistant.messages.at(-1)?.content.includes("Deuxième note GLM"),
-    ).toBe(true);
-    const createdIds = [...useVaultStore().notes.keys()];
-    expect(createdIds.includes(lastNoteId)).toBe(true);
+    expect(contents).not.toContain("# Première note GLM\n\nContenu.");
+    expect(contents).not.toContain("# Deuxième note GLM\n\nContenu.");
+    expect(assistant.messages).toHaveLength(messageCountBeforeRequest + 1);
+    expect(assistant.messages.at(-1)?.content).toBe(prompt);
+    expect(assistant.error).toBe("L’assistant a fourni plusieurs actions.");
+    expect(assistant.error).not.toContain("Première note GLM");
+    expect(assistant.error).not.toContain("Deuxième note GLM");
+    expect(assistant.error).not.toContain(noteId);
+    expect(assistant.error).not.toContain(token);
   });
 
   it("surfaces plain-text answers for requests that need no write", async () => {

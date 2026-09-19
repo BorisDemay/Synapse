@@ -699,25 +699,21 @@ export const useAssistantStore = defineStore("assistant", () => {
         await saveCurrentConversation();
         return "";
       }
-      let actionMessage = "";
-      let actionNoteId = "";
-      for (const call of response.functionCalls) {
-        const action = await executeToolCall(call);
-        actionMessage = actionMessage
-          ? `${actionMessage}\n${action.message}`
-          : action.message;
-        actionNoteId = action.noteId;
+      if (response.functionCalls.length > 1) {
+        throw new Error("L’assistant a fourni plusieurs actions.");
       }
+      const [call] = response.functionCalls;
+      const action = await executeToolCall(call!);
       messages.value = [
         ...messages.value,
         {
-          content: actionMessage,
+          content: action.message,
           id: uuidV7(),
           role: "assistant",
         },
       ];
       await saveCurrentConversation();
-      return actionNoteId;
+      return action.noteId;
     } catch (caught) {
       error.value =
         caught instanceof Error
