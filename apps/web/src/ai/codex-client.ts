@@ -804,10 +804,14 @@ async function completeChatCompletionsAgent(
   } catch {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
-  const choices = (body as { choices?: unknown }).choices;
-  const choice = Array.isArray(choices)
-    ? (choices[0] as ChatCompletionsChoice | undefined)
-    : undefined;
+  const choices =
+    body && typeof body === "object"
+      ? (body as { choices?: unknown }).choices
+      : undefined;
+  if (!Array.isArray(choices) || choices.length !== 1) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  const choice = choices[0] as ChatCompletionsChoice | undefined;
   if (!choice) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }

@@ -601,4 +601,31 @@ describe("completeCodexAgent over chat completions", () => {
       }),
     ).rejects.toThrow("L’assistant a fourni plusieurs actions.");
   });
+
+  it("rejects ambiguous choices from OpenAI-compatible providers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: "Réponse alternative." } },
+              { message: { tool_calls: [{}] } },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        baseUrl,
+        instructions: "Réponds brièvement.",
+        messages: [{ content: "Question.", role: "user" }],
+        model: "glm-4.6",
+        token,
+      }),
+    ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+  });
 });
