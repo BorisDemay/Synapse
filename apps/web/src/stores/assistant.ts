@@ -144,20 +144,39 @@ function toolArguments(call: CodexFunctionCall): {
   } catch {
     throw new Error("L’assistant a demandé une action invalide.");
   }
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("L’assistant a demandé une action invalide.");
   }
-  const { markdown, note_id: noteId } = value as {
-    markdown?: unknown;
-    note_id?: unknown;
-  };
+  const argumentsValue = value as Record<string, unknown>;
+  const expectedKeys =
+    call.name === "create_note"
+      ? ["markdown"]
+      : call.name === "replace_linked_note" ||
+          call.name === "append_to_linked_note"
+        ? ["markdown", "note_id"]
+        : undefined;
+  if (
+    !expectedKeys ||
+    Object.keys(argumentsValue).length !== expectedKeys.length ||
+    !expectedKeys.every((key) => key in argumentsValue)
+  ) {
+    throw new Error("L’assistant a demandé une action invalide.");
+  }
+  const { markdown, note_id: noteId } = argumentsValue;
   if (typeof markdown !== "string" || !markdown.trim()) {
     throw new Error("L’assistant a demandé une action invalide.");
   }
-  if (noteId !== undefined && typeof noteId !== "string") {
+  if (
+    (call.name === "replace_linked_note" ||
+      call.name === "append_to_linked_note") &&
+    (typeof noteId !== "string" || !noteId.trim())
+  ) {
     throw new Error("L’assistant a demandé une action invalide.");
   }
-  return { markdown, noteId };
+  return {
+    markdown,
+    noteId: typeof noteId === "string" ? noteId : undefined,
+  };
 }
 
 export const useAssistantStore = defineStore("assistant", () => {
