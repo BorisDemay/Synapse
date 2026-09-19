@@ -37,6 +37,13 @@ describe("MarkdownContextMenu", () => {
     expect(labels).not.toContain("Texte brut");
     expect(labels).not.toContain("Titre 1");
     expect(labels).not.toContain("Insérer une ligne en dessous");
+    expect(
+      menu?.querySelectorAll(".synapse-markdown-context-group-label"),
+    ).toHaveLength(0);
+    expect(
+      menu?.querySelectorAll(".synapse-markdown-context-item-icon"),
+    ).toHaveLength(menuItems().length);
+    expect(menu?.querySelectorAll('section[role="none"]')).toHaveLength(3);
   });
 
   it("emits the selected command and closes on Escape", async () => {
@@ -56,6 +63,22 @@ describe("MarkdownContextMenu", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("close")).toBeTruthy();
+  });
+
+  it("moves focus to the hovered command", async () => {
+    mount(MarkdownContextMenu, {
+      attachTo: document.body,
+      props: {
+        groups: markdownContextMenuGroups({ inTable: false }),
+        open: true,
+        x: 16,
+        y: 16,
+      },
+    });
+
+    menuItems()[1]?.dispatchEvent(new Event("pointerenter", { bubbles: true }));
+
+    expect(document.activeElement).toBe(menuItems()[1]);
   });
 
   it("moves between items with the arrow keys and activates with Enter", async () => {

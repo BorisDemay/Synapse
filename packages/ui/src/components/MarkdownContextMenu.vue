@@ -4,6 +4,30 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { MarkdownMenuGroup } from "../markdown/editor-tools";
 import { flattenMenuCommands } from "../markdown/editor-tools";
 
+const MENU_ICON_PATHS: Readonly<Record<string, string>> = {
+  bold: "M7 5h6a3 3 0 0 1 0 6H7zm0 6h7a3 3 0 0 1 0 6H7z",
+  italic: "M14 5h4M6 19h4M14 5 10 19",
+  strike:
+    "M5 12h14M15 7.5A4 4 0 0 0 11.5 6C9.5 6 8 7 8 8.5c0 1.3 1.2 2 4 2.7 2.8.7 4 1.4 4 2.8 0 1.6-1.6 2.8-4 2.8a4.8 4.8 0 0 1-4-2",
+  "inline-code": "m8 9-3 3 3 3m8-6 3 3-3 3m-3-7-4 14",
+  code: "M9 5H5v14h4M15 5h4v14h-4M10 9h4M10 12h4M10 15h4",
+  link: "M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1",
+  emoji:
+    "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8.5 10h.01M15.5 10h.01M8 14s1.5 2 4 2 4-2 4-2",
+  undo: "m9 14-4-4 4-4M5 10h8a5 5 0 0 1 5 5v1",
+  redo: "m15 14 4-4-4-4m4 0h-8a5 5 0 0 0-5 5v1",
+  copy: "M8 8h10v11H8zM6 5h10v3M6 5v11h2",
+  cut: "m6 6 12 12m0-12L6 18M7 7a2 2 0 1 0-2-2 2 2 0 0 0 2 2Zm12 12a2 2 0 1 0-2-2 2 2 0 0 0 2 2Z",
+  paste: "M9 5h6M10 3h4v4h-4zM7 5H5v16h14V5h-2M9 12h6M9 16h4",
+  "row-add-above": "M5 5h14v14H5zM5 10h14M12 2v6M9 5h6",
+  "row-add": "M5 5h14v14H5zM5 14h14m-7 2v6m-3-3h6",
+  "column-add-before": "M5 5h14v14H5zm5 0v14M2 12h6M5 9v6",
+  "column-add": "M5 5h14v14H5zm9 0v14m2-7h6m-3-3v6",
+  "row-delete": "M5 5h14v14H5zm0 9h14m-4-12 4 4m0-4-4 4",
+  "column-delete": "M5 5h14v14H5zm9 0v14m-1-4 4 4m0-4-4 4",
+  default: "M5 5h14v14H5z",
+};
+
 const props = defineProps<{
   groups: readonly MarkdownMenuGroup[];
   open: boolean;
@@ -34,6 +58,17 @@ function selectCommand(id: string) {
 
 function commandIndex(id: string) {
   return commands.value.findIndex((item) => item.id === id);
+}
+
+function iconPath(id: string) {
+  return MENU_ICON_PATHS[id] ?? MENU_ICON_PATHS.default;
+}
+
+function focusCommand(id: string, event: Event) {
+  activeIndex.value = commandIndex(id);
+  if (event.currentTarget instanceof HTMLButtonElement) {
+    event.currentTarget.focus({ preventScroll: true });
+  }
 }
 
 async function placeMenu() {
@@ -184,10 +219,8 @@ onBeforeUnmount(() => {
         v-for="group in groups"
         :key="group.id"
         class="synapse-markdown-context-group"
+        role="none"
       >
-        <p class="synapse-markdown-context-group-label" role="presentation">
-          {{ group.label }}
-        </p>
         <template
           v-for="(item, index) in group.items"
           :key="`${group.id}-${index}`"
@@ -211,9 +244,22 @@ onBeforeUnmount(() => {
               item.checked === undefined ? undefined : item.checked
             "
             @click="selectCommand(item.id)"
-            @pointerenter="activeIndex = commandIndex(item.id)"
+            @pointerenter="focusCommand(item.id, $event)"
           >
-            {{ item.label }}
+            <svg
+              aria-hidden="true"
+              class="synapse-markdown-context-item-icon"
+              fill="none"
+              focusable="false"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.75"
+              viewBox="0 0 24 24"
+            >
+              <path :d="iconPath(item.id)" />
+            </svg>
+            <span>{{ item.label }}</span>
           </button>
         </template>
       </section>
@@ -226,13 +272,13 @@ onBeforeUnmount(() => {
   position: fixed;
   z-index: 1100;
   display: grid;
-  min-width: 13.5rem;
-  max-width: min(19rem, calc(100vw - 1rem));
-  max-height: min(24rem, calc(100vh - 1rem));
+  min-width: 12rem;
+  max-width: min(18rem, calc(100vw - 1rem));
+  max-height: min(22rem, calc(100vh - 1rem));
   overflow: auto;
-  padding: 0.25rem;
+  padding: 0.2rem;
   border: 1px solid var(--synapse-color-border);
-  border-radius: var(--synapse-radius-sm);
+  border-radius: calc(var(--synapse-radius-sm) - 0.1rem);
   background: var(--synapse-color-surface-raised);
   box-shadow: var(--synapse-shadow-md);
 }
@@ -243,32 +289,32 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--synapse-color-border);
 }
 
-.synapse-markdown-context-group-label {
-  margin: 0.15rem 0.4rem 0.1rem;
-  color: var(--synapse-color-text-muted);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .synapse-markdown-context-item {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
   width: 100%;
-  padding: 0.4rem 0.6rem;
+  padding: 0.35rem 0.5rem;
   border: 0;
-  border-radius: calc(var(--synapse-radius-sm) - 0.2rem);
+  border-radius: calc(var(--synapse-radius-sm) - 0.25rem);
   color: var(--synapse-color-text);
   background: transparent;
   font: inherit;
   font-size: 0.8rem;
-  line-height: 1.2;
+  line-height: 1.25;
   text-align: start;
   cursor: pointer;
 }
 
+.synapse-markdown-context-item-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
 .synapse-markdown-context-item--active,
 .synapse-markdown-context-item:hover {
-  background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
+  background: var(--synapse-color-surface-muted);
 }
 
 .synapse-markdown-context-item:focus-visible {
