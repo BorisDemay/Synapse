@@ -233,7 +233,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     try {
       event = JSON.parse(data) as typeof event;
     } catch {
-      continue;
+      throw assistantError("L’assistant n’a pas pu répondre.");
     }
     if (
       event.type === "response.failed" ||
