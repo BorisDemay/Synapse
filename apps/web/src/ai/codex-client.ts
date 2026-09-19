@@ -140,10 +140,18 @@ function extractFunctionCalls(
   const calls: CodexFunctionCall[] = [];
   for (const item of items ?? []) {
     if (
+      item.type === "function_call" &&
+      typeof item.arguments === "string" &&
+      !item.arguments.trim()
+    ) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    if (
       item.type !== "function_call" ||
       typeof item.call_id !== "string" ||
       typeof item.name !== "string" ||
-      typeof item.arguments !== "string"
+      typeof item.arguments !== "string" ||
+      !item.arguments.trim()
     ) {
       continue;
     }
@@ -225,9 +233,17 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     }
     if (
       event.type === "response.function_call_arguments.done" &&
+      typeof event.arguments === "string" &&
+      !event.arguments.trim()
+    ) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    if (
+      event.type === "response.function_call_arguments.done" &&
       typeof event.call_id === "string" &&
       typeof event.name === "string" &&
-      typeof event.arguments === "string"
+      typeof event.arguments === "string" &&
+      event.arguments.trim()
     ) {
       calls.push({
         arguments: event.arguments,

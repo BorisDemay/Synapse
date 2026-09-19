@@ -220,6 +220,109 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it.each(["", "   "])(
+    "rejects blank function call arguments from every Responses API flow",
+    async (argumentsValue) => {
+      const functionCall = {
+        arguments: argumentsValue,
+        call_id: "call-blank-response",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        new Response(JSON.stringify({ output: [functionCall] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+        new Response(
+          `data: ${JSON.stringify({
+            ...functionCall,
+            type: "response.function_call_arguments.done",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+        new Response(
+          `data: ${JSON.stringify({
+            item: functionCall,
+            type: "response.output_item.done",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+        new Response(
+          `data: ${JSON.stringify({
+            response: { output: [functionCall] },
+            type: "response.completed",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+        await expect(
+          completeCodexAgent({
+            instructions: "Utilise un outil local.",
+            messages: [{ content: "Crée une note.", role: "user" }],
+            model: "gpt-5.6-luna",
+            token,
+            toolChoice: "required",
+          }),
+        ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+      }
+    },
+  );
+
+  it.each(["", "   "])(
+    "rejects blank Responses arguments even when another call is valid",
+    async (argumentsValue) => {
+      const blankFunctionCall = {
+        arguments: argumentsValue,
+        call_id: "call-blank-response",
+        name: "create_note",
+        type: "function_call",
+      };
+      const validFunctionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-valid-response",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        new Response(
+          JSON.stringify({ output: [blankFunctionCall, validFunctionCall] }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+        new Response(
+          [blankFunctionCall, validFunctionCall]
+            .map(
+              (call) =>
+                `data: ${JSON.stringify({
+                  ...call,
+                  type: "response.function_call_arguments.done",
+                })}`,
+            )
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+        await expect(
+          completeCodexAgent({
+            instructions: "Utilise un outil local.",
+            messages: [{ content: "Crée une note.", role: "user" }],
+            model: "gpt-5.6-luna",
+            token,
+            toolChoice: "required",
+          }),
+        ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+      }
+    },
+  );
+
   it("rejects conflicting streamed calls sharing a call id", async () => {
     vi.stubGlobal(
       "fetch",
