@@ -388,6 +388,7 @@ describe("assistant store", () => {
             {
               message: {
                 content: "",
+                role: "assistant",
                 tool_calls: [
                   {
                     function: {

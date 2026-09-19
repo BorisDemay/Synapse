@@ -734,6 +734,7 @@ interface ChatCompletionsToolCall {
 interface ChatCompletionsChoice {
   message?: {
     content?: unknown;
+    role?: unknown;
     tool_calls?: unknown;
   };
 }
@@ -849,6 +850,9 @@ async function completeChatCompletionsAgent(
   }
   const text = typeof message.content === "string" ? message.content : "";
   const toolCalls = message.tool_calls;
+  if (toolCalls !== undefined && message.role !== "assistant") {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
   const functionCalls =
     toolCalls === undefined
       ? []

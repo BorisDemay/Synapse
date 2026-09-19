@@ -504,7 +504,11 @@ describe("completeCodexAgent over chat completions", () => {
   function chatCompletionsToolCallResponse(toolCalls: unknown[]) {
     return new Response(
       JSON.stringify({
-        choices: [{ message: { content: "", tool_calls: toolCalls } }],
+        choices: [
+          {
+            message: { content: "", role: "assistant", tool_calls: toolCalls },
+          },
+        ],
       }),
       { status: 200 },
     );
@@ -600,6 +604,45 @@ describe("completeCodexAgent over chat completions", () => {
         toolChoice: "required",
       }),
     ).rejects.toThrow("L’assistant a fourni plusieurs actions.");
+  });
+
+  it("rejects tool calls from a non-assistant chat completions message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "",
+                  role: "user",
+                  tool_calls: [
+                    {
+                      function: { arguments: "{}", name: "create_note" },
+                      id: "call-user-1",
+                      type: "function",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Effectue une action.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }),
+    ).rejects.toThrow("L’assistant n’a pas pu répondre.");
   });
 
   it("rejects a malformed tool call mixed with a valid call", async () => {
