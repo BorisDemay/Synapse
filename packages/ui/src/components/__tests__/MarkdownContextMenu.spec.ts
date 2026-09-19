@@ -100,4 +100,24 @@ describe("MarkdownContextMenu", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("close")).toBeTruthy();
   });
+
+  it("stays open while the page or the menu itself scrolls", async () => {
+    const wrapper = mount(MarkdownContextMenu, {
+      attachTo: document.body,
+      props: {
+        groups: markdownContextMenuGroups({ inTable: false, viewMode: "ir" }),
+        open: true,
+        x: 16,
+        y: 16,
+      },
+    });
+
+    // Scrolling inside the menu (it has overflow: auto)…
+    menuNode()?.dispatchEvent(new Event("scroll", { bubbles: true }));
+    // …and scrolling any page-level container must not dismiss it.
+    window.dispatchEvent(new Event("scroll"));
+    document.dispatchEvent(new Event("scroll"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("close")).toBeFalsy();
+  });
 });

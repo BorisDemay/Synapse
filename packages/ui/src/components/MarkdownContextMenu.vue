@@ -127,6 +127,9 @@ function onDocumentKeydown(event: KeyboardEvent) {
 }
 
 function onViewportChange() {
+  // The menu is anchored to the pointer position in the viewport, not to a
+  // moving element, so scrolling content underneath is harmless; only a
+  // viewport resize can push the clamped position off-screen.
   closeMenu();
 }
 
@@ -134,14 +137,12 @@ function bindDismissListeners() {
   document.addEventListener("mousedown", onDocumentPointerDown, true);
   window.addEventListener("keydown", onDocumentKeydown);
   window.addEventListener("resize", onViewportChange);
-  window.addEventListener("scroll", onViewportChange, true);
 }
 
 function unbindDismissListeners() {
   document.removeEventListener("mousedown", onDocumentPointerDown, true);
   window.removeEventListener("keydown", onDocumentKeydown);
   window.removeEventListener("resize", onViewportChange);
-  window.removeEventListener("scroll", onViewportChange, true);
 }
 
 watch(
