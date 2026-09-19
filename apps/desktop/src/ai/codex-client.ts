@@ -729,6 +729,7 @@ export async function completeCodexChat(
 interface ChatCompletionsToolCall {
   function?: { arguments?: unknown; name?: unknown };
   id?: unknown;
+  type?: unknown;
 }
 
 interface ChatCompletionsChoice {
@@ -752,6 +753,8 @@ function extractChatCompletionsFunctionCalls(
     const toolCall = call as ChatCompletionsToolCall;
     const fn = toolCall.function;
     if (
+      typeof toolCall.type !== "string" ||
+      toolCall.type !== "function" ||
       !fn ||
       typeof fn !== "object" ||
       Array.isArray(fn) ||

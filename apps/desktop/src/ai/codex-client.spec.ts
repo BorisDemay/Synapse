@@ -569,6 +569,38 @@ describe("completeCodexAgent over chat completions", () => {
     );
   });
 
+  it.each(["custom", undefined])(
+    "rejects a tool call whose type is not function",
+    async (type) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          chatCompletionsToolCallResponse([
+            {
+              function: {
+                arguments: '{"markdown":"# Note refusée"}',
+                name: "create_note",
+              },
+              id: "call-non-function",
+              ...(type === undefined ? {} : { type }),
+            },
+          ]),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          baseUrl,
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "glm-4.6",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+    },
+  );
+
   it("rejects several tool calls with a fixed local error", async () => {
     vi.stubGlobal(
       "fetch",
