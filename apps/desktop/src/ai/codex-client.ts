@@ -90,6 +90,29 @@ function assistantError(message: string): Error {
   return new Error(message);
 }
 
+function hasRequiredFunctionCallFields<
+  T extends {
+    arguments?: unknown;
+    call_id?: unknown;
+    name?: unknown;
+  },
+>(
+  value: T,
+): value is T & {
+  arguments: string;
+  call_id: string;
+  name: string;
+} {
+  return (
+    typeof value.call_id === "string" &&
+    Boolean(value.call_id.trim()) &&
+    typeof value.name === "string" &&
+    Boolean(value.name.trim()) &&
+    typeof value.arguments === "string" &&
+    Boolean(value.arguments.trim())
+  );
+}
+
 function rejectMultipleFunctionCalls(
   response: CodexAgentResponse,
 ): CodexAgentResponse {
@@ -139,22 +162,11 @@ function extractFunctionCalls(
 ): CodexFunctionCall[] {
   const calls: CodexFunctionCall[] = [];
   for (const item of items ?? []) {
-    if (
-      item.type === "function_call" &&
-      ((typeof item.call_id === "string" && !item.call_id.trim()) ||
-        (typeof item.name === "string" && !item.name.trim()) ||
-        (typeof item.arguments === "string" && !item.arguments.trim()))
-    ) {
-      throw assistantError("L’assistant n’a pas pu répondre.");
-    }
-    if (
-      item.type !== "function_call" ||
-      typeof item.call_id !== "string" ||
-      typeof item.name !== "string" ||
-      typeof item.arguments !== "string" ||
-      !item.arguments.trim()
-    ) {
+    if (item.type !== "function_call") {
       continue;
+    }
+    if (!hasRequiredFunctionCallFields(item)) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
     }
     calls.push({
       arguments: item.arguments,
@@ -232,21 +244,10 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     if (event.type === "response.output_text.delta") {
       deltas += deltaText(event.delta);
     }
-    if (
-      event.type === "response.function_call_arguments.done" &&
-      ((typeof event.call_id === "string" && !event.call_id.trim()) ||
-        (typeof event.name === "string" && !event.name.trim()) ||
-        (typeof event.arguments === "string" && !event.arguments.trim()))
-    ) {
-      throw assistantError("L’assistant n’a pas pu répondre.");
-    }
-    if (
-      event.type === "response.function_call_arguments.done" &&
-      typeof event.call_id === "string" &&
-      typeof event.name === "string" &&
-      typeof event.arguments === "string" &&
-      event.arguments.trim()
-    ) {
+    if (event.type === "response.function_call_arguments.done") {
+      if (!hasRequiredFunctionCallFields(event)) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
       calls.push({
         arguments: event.arguments,
         callId: event.call_id,

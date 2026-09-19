@@ -399,6 +399,97 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each(["call_id", "name", "arguments"] as const)(
+    "rejects malformed Responses %s values from every flow",
+    async (field) => {
+      const malformedValues: Array<{ label: string; value?: unknown }> = [
+        { label: "absent" },
+        { label: "null", value: null },
+        { label: "number", value: 42 },
+        { label: "object", value: {} },
+        { label: "empty", value: "" },
+        { label: "blank", value: "   " },
+      ];
+      const validFunctionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-valid-response",
+        name: "create_note",
+        type: "function_call",
+      };
+
+      for (const { value } of malformedValues) {
+        const malformedFunctionCall: Record<string, unknown> = {
+          arguments: '{"markdown":"# Brouillon"}',
+          call_id: "call-malformed-response",
+          name: "create_note",
+          type: "function_call",
+        };
+        if (value === undefined) {
+          delete malformedFunctionCall[field];
+        } else {
+          malformedFunctionCall[field] = value;
+        }
+        const responses = [
+          new Response(
+            JSON.stringify({
+              output: [malformedFunctionCall, validFunctionCall],
+            }),
+            { headers: { "content-type": "application/json" }, status: 200 },
+          ),
+          new Response(
+            [malformedFunctionCall, validFunctionCall]
+              .map(
+                (call) =>
+                  `data: ${JSON.stringify({
+                    ...call,
+                    type: "response.function_call_arguments.done",
+                  })}`,
+              )
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+          new Response(
+            [malformedFunctionCall, validFunctionCall]
+              .map(
+                (item) =>
+                  `data: ${JSON.stringify({
+                    item,
+                    type: "response.output_item.done",
+                  })}`,
+              )
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+          new Response(
+            `data: ${JSON.stringify({
+              response: {
+                output: [malformedFunctionCall, validFunctionCall],
+              },
+              type: "response.completed",
+            })}\n\n`,
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ];
+
+        for (const response of responses) {
+          vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+          await expect(
+            completeCodexAgent({
+              instructions: "Utilise un outil local.",
+              messages: [{ content: "Crée une note.", role: "user" }],
+              model: "gpt-5.6-luna",
+              token,
+              toolChoice: "required",
+            }),
+          ).rejects.toMatchObject({
+            message: "L’assistant n’a pas pu répondre.",
+          });
+        }
+      }
+    },
+  );
+
   it("rejects conflicting streamed calls sharing a call id", async () => {
     vi.stubGlobal(
       "fetch",
