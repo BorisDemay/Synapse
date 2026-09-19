@@ -141,8 +141,9 @@ function extractFunctionCalls(
   for (const item of items ?? []) {
     if (
       item.type === "function_call" &&
-      typeof item.arguments === "string" &&
-      !item.arguments.trim()
+      ((typeof item.call_id === "string" && !item.call_id.trim()) ||
+        (typeof item.name === "string" && !item.name.trim()) ||
+        (typeof item.arguments === "string" && !item.arguments.trim()))
     ) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
@@ -233,8 +234,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     }
     if (
       event.type === "response.function_call_arguments.done" &&
-      typeof event.arguments === "string" &&
-      !event.arguments.trim()
+      ((typeof event.call_id === "string" && !event.call_id.trim()) ||
+        (typeof event.name === "string" && !event.name.trim()) ||
+        (typeof event.arguments === "string" && !event.arguments.trim()))
     ) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }

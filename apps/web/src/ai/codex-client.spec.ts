@@ -323,6 +323,82 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each(["call_id", "name"] as const)(
+    "rejects blank Responses %s identifiers from every flow",
+    async (identifier) => {
+      for (const identifierValue of ["", "   "]) {
+        const malformedFunctionCall = {
+          arguments: '{"markdown":"# Brouillon"}',
+          call_id: "call-blank-identifier",
+          name: "create_note",
+          type: "function_call",
+          [identifier]: identifierValue,
+        };
+        const validFunctionCall = {
+          arguments: '{"markdown":"# Brouillon"}',
+          call_id: "call-valid-identifier",
+          name: "create_note",
+          type: "function_call",
+        };
+        const responses = [
+          new Response(
+            JSON.stringify({
+              output: [malformedFunctionCall, validFunctionCall],
+            }),
+            { headers: { "content-type": "application/json" }, status: 200 },
+          ),
+          new Response(
+            [malformedFunctionCall, validFunctionCall]
+              .map(
+                (call) =>
+                  `data: ${JSON.stringify({
+                    ...call,
+                    type: "response.function_call_arguments.done",
+                  })}`,
+              )
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+          new Response(
+            [malformedFunctionCall, validFunctionCall]
+              .map(
+                (item) =>
+                  `data: ${JSON.stringify({
+                    item,
+                    type: "response.output_item.done",
+                  })}`,
+              )
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+          new Response(
+            JSON.stringify({
+              response: {
+                output: [malformedFunctionCall, validFunctionCall],
+              },
+              type: "response.completed",
+            }),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ];
+
+        for (const response of responses) {
+          vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+          await expect(
+            completeCodexAgent({
+              instructions: "Utilise un outil local.",
+              messages: [{ content: "Crée une note.", role: "user" }],
+              model: "gpt-5.6-luna",
+              token,
+              toolChoice: "required",
+            }),
+          ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+        }
+      }
+    },
+  );
+
   it("rejects conflicting streamed calls sharing a call id", async () => {
     vi.stubGlobal(
       "fetch",
