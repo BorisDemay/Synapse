@@ -90,6 +90,15 @@ function assistantError(message: string): Error {
   return new Error(message);
 }
 
+function rejectMultipleFunctionCalls(
+  response: CodexAgentResponse,
+): CodexAgentResponse {
+  if (response.functionCalls.length > 1) {
+    throw assistantError("L’assistant a fourni plusieurs actions.");
+  }
+  return response;
+}
+
 function chatgptHeaders(
   token: string,
   accountId?: string,
@@ -259,7 +268,7 @@ function readAgentResponse(
   const isSse =
     contentType.includes("event-stream") || trimmed.includes("data:");
   if (isSse) {
-    return parseResponsesSse(raw);
+    return rejectMultipleFunctionCalls(parseResponsesSse(raw));
   }
   if (trimmed.startsWith("{")) {
     const response = extractAgentResponse(
@@ -268,7 +277,7 @@ function readAgentResponse(
     if (!response.text && response.functionCalls.length === 0) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
-    return response;
+    return rejectMultipleFunctionCalls(response);
   }
   throw assistantError("L’assistant n’a pas pu répondre.");
 }
@@ -809,5 +818,5 @@ async function completeChatCompletionsAgent(
       name: typeof call.function?.name === "string" ? call.function.name : "",
     }))
     .filter((call) => call.name);
-  return { functionCalls, text };
+  return rejectMultipleFunctionCalls({ functionCalls, text });
 }

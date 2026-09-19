@@ -531,7 +531,7 @@ describe("completeCodexAgent over chat completions", () => {
     );
   });
 
-  it("keeps every tool call when a provider answers with several", async () => {
+  it("rejects several tool calls with a fixed local error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -556,19 +556,15 @@ describe("completeCodexAgent over chat completions", () => {
       ),
     );
 
-    const response = await completeCodexAgent({
-      baseUrl,
-      instructions: "Choisis un outil d’écriture.",
-      messages: [{ content: "Crée deux notes.", role: "user" }],
-      model: "glm-4.6",
-      token,
-      toolChoice: "required",
-    });
-
-    expect(response.functionCalls).toHaveLength(2);
-    expect(response.functionCalls.map((call) => call.name)).toEqual([
-      "create_note",
-      "create_note",
-    ]);
+    await expect(
+      completeCodexAgent({
+        baseUrl,
+        instructions: "Choisis un outil d’écriture.",
+        messages: [{ content: "Crée deux notes.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }),
+    ).rejects.toThrow("L’assistant a fourni plusieurs actions.");
   });
 });
