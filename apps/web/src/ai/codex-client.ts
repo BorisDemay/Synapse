@@ -734,8 +734,36 @@ interface ChatCompletionsToolCall {
 interface ChatCompletionsChoice {
   message?: {
     content?: unknown;
-    tool_calls?: ChatCompletionsToolCall[];
+    tool_calls?: unknown;
   };
+}
+
+function extractChatCompletionsFunctionCalls(
+  toolCalls: unknown,
+): CodexFunctionCall[] {
+  if (!Array.isArray(toolCalls)) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  return toolCalls.map((call) => {
+    if (!call || typeof call !== "object" || Array.isArray(call)) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    const toolCall = call as ChatCompletionsToolCall;
+    const fn = toolCall.function;
+    if (
+      !fn ||
+      typeof fn !== "object" ||
+      Array.isArray(fn) ||
+      typeof toolCall.id !== "string" ||
+      !toolCall.id.trim() ||
+      typeof fn.name !== "string" ||
+      !fn.name.trim() ||
+      typeof fn.arguments !== "string"
+    ) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    return { arguments: fn.arguments, callId: toolCall.id, name: fn.name };
+  });
 }
 
 /**
@@ -817,15 +845,10 @@ async function completeChatCompletionsAgent(
   }
   const text =
     typeof choice.message?.content === "string" ? choice.message.content : "";
-  const functionCalls: CodexFunctionCall[] = (choice.message?.tool_calls ?? [])
-    .map((call) => ({
-      arguments:
-        typeof call.function?.arguments === "string"
-          ? call.function.arguments
-          : "",
-      callId: typeof call.id === "string" ? call.id : "",
-      name: typeof call.function?.name === "string" ? call.function.name : "",
-    }))
-    .filter((call) => call.name);
+  const toolCalls = choice.message?.tool_calls;
+  const functionCalls =
+    toolCalls === undefined
+      ? []
+      : extractChatCompletionsFunctionCalls(toolCalls);
   return rejectMultipleFunctionCalls({ functionCalls, text });
 }

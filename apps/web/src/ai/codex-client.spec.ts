@@ -602,6 +602,40 @@ describe("completeCodexAgent over chat completions", () => {
     ).rejects.toThrow("L’assistant a fourni plusieurs actions.");
   });
 
+  it("rejects a malformed tool call mixed with a valid call", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        chatCompletionsToolCallResponse([
+          {
+            function: {
+              arguments: "{}",
+              name: "create_note",
+            },
+            id: "call-valid",
+            type: "function",
+          },
+          {
+            function: {},
+            id: "call-incomplete",
+            type: "function",
+          },
+        ]),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Effectue une action.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }),
+    ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+  });
+
   it("rejects ambiguous choices from OpenAI-compatible providers", async () => {
     vi.stubGlobal(
       "fetch",
