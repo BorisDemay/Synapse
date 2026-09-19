@@ -127,7 +127,7 @@ describe("AiChat", () => {
     expect(wrapper.find(".ai-chat-actions").exists()).toBe(false);
   });
 
-  it("expose des contrôles discrets pour les panneaux et la fermeture de Codex", async () => {
+  it("expose des contrôles discrets pour les panneaux et la fermeture de l’assistant", async () => {
     const wrapper = mount(AiChat, {
       props: {
         attachments: [],

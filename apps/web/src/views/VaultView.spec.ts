@@ -180,13 +180,13 @@ describe("VaultView assistant layout", () => {
 
     const codexButton = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Codex"));
+      .find((button) => button.text().includes("Assistant"));
     expect(codexButton).toBeDefined();
     await codexButton!.trigger("click");
 
-    expect(wrapper.find('[aria-label="Conversations Codex"]').exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
+    ).toBe(false);
     expect(wrapper.find('[aria-label="Relations de la note"]').exists()).toBe(
       false,
     );

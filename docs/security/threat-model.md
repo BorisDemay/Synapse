@@ -20,8 +20,8 @@ l’appartenance à un coffre ou les numéros de révision.
 | Base PostgreSQL et volume de blobs         | Aucun contenu de coffre en clair, sauvegarde restaurable                                                                                                                                    |
 | Cache navigateur                           | IndexedDB ciphertext-only, purge de clé au verrouillage                                                                                                                                     |
 | Enveloppe d’appareil de confiance          | AES-GCM Web Crypto, clé non extractible dans IndexedDB ; jamais de clé de coffre en clair                                                                                                   |
-| Jeton d’assistant Codex                    | Optionnel ; enveloppé avec la clé de coffre, ciphertext IndexedDB sur web et desktop ; appel direct à OpenAI, jamais le serveur Synapse                                                     |
-| Conversations Codex                        | Fils, titres, messages et notes liées chiffrés avec la clé de coffre et un AAD dédié ; stockage local uniquement, purgé de la mémoire au verrouillage                                       |
+| Jeton d’assistant IA                    | Optionnel ; enveloppé avec la clé de coffre, ciphertext IndexedDB sur web et desktop ; appel direct à OpenAI, jamais le serveur Synapse                                                     |
+| Conversations de l’assistant IA                        | Fils, titres, messages et notes liées chiffrés avec la clé de coffre et un AAD dédié ; stockage local uniquement, purgé de la mémoire au verrouillage                                       |
 | Cookie de session desktop                  | Jar mémoire Rust ; copie optionnelle du jeton opaque dans le répertoire de données de l’application si « Se souvenir de cet appareil » (ADR 0014) ; jamais exposé à Vue ni à `localStorage` |
 | Chaîne de mise à jour                      | Clé publique Tauri embarquée, clé privée GitHub protégée, Authenticode Windows, checksums et SBOM ; aucun secret dans les artefacts                                                         |
 
@@ -81,7 +81,7 @@ par une empreinte validée et ne dérivent jamais d’un chemin fourni par un cl
 | XSS et fuite de cache                | HTML brut désactivé, assainissement, CSP et IndexedDB chiffré                                                                                                  |
 | Fuite de diagnostics                 | Redaction testée, logs structurés sans payload, secrets ni cookies                                                                                             |
 | Perte de phrase secrète              | Limite documentée : pas de récupération implicite ni escrow serveur                                                                                            |
-| Assistant Codex optionnel            | Credential fourni par l’utilisateur, `store: false`, historique local chiffré, notes attachées seulement, pas de proxy Synapse ; OpenAI voit le clair choisi   |
+| Assistant IA optionnel            | Credential fourni par l’utilisateur, `store: false`, historique local chiffré, notes attachées seulement, pas de proxy Synapse ; OpenAI voit le clair choisi   |
 | Compromission du feed de mise à jour | TLS, origine d’instance fermée, signature Tauri obligatoire et Authenticode Windows                                                                            |
 | Publication partielle ou prématurée  | Parité Windows/Linux/web, santé et identité vérifiées, manifestes mutables remplacés en dernier                                                                |
 | Vol du compte de déploiement         | Tag Tailscale éphémère, hôte SSH épinglé, compte sans sudo général et commande forcée                                                                          |
@@ -89,7 +89,7 @@ par une empreinte validée et ne dérivent jamais d’un chemin fourni par un cl
 ## Hors périmètre et hypothèses
 
 Le partage E2EE entre comptes, la récupération sans secret et les CRDT sont hors
-MVP. L’assistant Codex est hors du chemin de synchronisation : il n’est jamais
+MVP. L’assistant IA est hors du chemin de synchronisation : il n’est jamais
 requis, et le contenu envoyé à OpenAI n’est plus confidentiel vis-à-vis de ce
 fournisseur. La phrase de wrapping est distincte du mot de passe d’authentification :
 elle est utilisée seulement dans le client pour dériver la clé locale avec

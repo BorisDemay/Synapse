@@ -288,12 +288,98 @@ describe("assistant store", () => {
     vi.mocked(fetch).mockClear();
     stubOpenAi("nope");
     await expect(assistant.send("hello")).rejects.toThrow(
-      "Connectez Codex pour écrire.",
+      "Connectez l’assistant pour écrire.",
     );
     expect(fetch).not.toHaveBeenCalled();
 
     await assistant.restore();
     expect(assistant.connected).toBe(true);
+  });
+
+  it("executes every tool call when a provider answers with several", async () => {
+    await unlockVault();
+    const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const href = String(url);
+      if (href === `${glmBaseUrl}/models`) {
+        return jsonResponse({ data: [{ id: "glm-4.6" }] });
+      }
+      if (href === `${glmBaseUrl}/chat/completions`) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    function: {
+                      arguments: JSON.stringify({
+                        markdown: "# Première note GLM\n\nContenu.",
+                      }),
+                      name: "create_note",
+                    },
+                    id: "call-glm-1",
+                    type: "function",
+                  },
+                  {
+                    function: {
+                      arguments: JSON.stringify({
+                        markdown: "# Deuxième note GLM\n\nContenu.",
+                      }),
+                      name: "create_note",
+                    },
+                    id: "call-glm-2",
+                    type: "function",
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    const assistant = useAssistantStore();
+    await assistant.connect(token, { provider: "glm" });
+
+    const lastNoteId = await assistant.send("Crée deux notes.");
+
+    const contents = [...useVaultStore().notes.values()].map(
+      (note) => note.content,
+    );
+    expect(contents).toContain("# Première note GLM\n\nContenu.");
+    expect(contents).toContain("# Deuxième note GLM\n\nContenu.");
+    expect(
+      assistant.messages.at(-1)?.content.includes("Première note GLM"),
+    ).toBe(true);
+    expect(
+      assistant.messages.at(-1)?.content.includes("Deuxième note GLM"),
+    ).toBe(true);
+    const createdIds = [...useVaultStore().notes.keys()];
+    expect(createdIds.includes(lastNoteId)).toBe(true);
+  });
+
+  it("explains when the provider answers without using the tools", async () => {
+    await unlockVault();
+    const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const href = String(url);
+      if (href === `${glmBaseUrl}/models`) {
+        return jsonResponse({ data: [{ id: "glm-4.6" }] });
+      }
+      if (href === `${glmBaseUrl}/chat/completions`) {
+        return jsonResponse({
+          choices: [{ message: { content: "# Voici votre note en clair…" } }],
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    const assistant = useAssistantStore();
+    await assistant.connect(token, { provider: "glm" });
+
+    await expect(assistant.send("Crée une note.")).rejects.toThrow(
+      "L’assistant a répondu sans utiliser les outils. Reformulez la demande.",
+    );
   });
 
   it("connects a ChatGPT subscription through the Codex device-code flow", async () => {

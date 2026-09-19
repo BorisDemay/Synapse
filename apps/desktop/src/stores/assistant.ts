@@ -12,6 +12,7 @@ import {
   type CodexServiceTier,
   type CodexTool,
 } from "../ai/codex-client";
+import { findAssistantProvider, resolveProviderBaseUrl } from "../ai/providers";
 import {
   completeChatgptDeviceLogin,
   refreshChatgptTokens,
@@ -210,20 +211,20 @@ function toolArguments(call: CodexFunctionCall): {
   try {
     value = JSON.parse(call.arguments);
   } catch {
-    throw new Error("Codex a demandé une action invalide.");
+    throw new Error("L’assistant a demandé une action invalide.");
   }
   if (!value || typeof value !== "object") {
-    throw new Error("Codex a demandé une action invalide.");
+    throw new Error("L’assistant a demandé une action invalide.");
   }
   const { markdown, note_id: noteId } = value as {
     markdown?: unknown;
     note_id?: unknown;
   };
   if (typeof markdown !== "string" || !markdown.trim()) {
-    throw new Error("Codex a demandé une action invalide.");
+    throw new Error("L’assistant a demandé une action invalide.");
   }
   if (noteId !== undefined && typeof noteId !== "string") {
-    throw new Error("Codex a demandé une action invalide.");
+    throw new Error("L’assistant a demandé une action invalide.");
   }
   return { markdown, noteId };
 }
@@ -246,6 +247,8 @@ export const useAssistantStore = defineStore("assistant", () => {
   let accountId: string | undefined;
   let expiresAt: number | undefined;
   let authKind: "api_key" | "chatgpt" = "api_key";
+  let provider = "codex";
+  let providerBaseUrl = "";
   let chatgptAbort: AbortController | undefined;
   let conversationPersistence = Promise.resolve();
 
@@ -361,13 +364,13 @@ export const useAssistantStore = defineStore("assistant", () => {
     } catch {
       conversations.value = [];
       activateConversation();
-      error.value = "Historique Codex illisible.";
+      error.value = "Historique de l’assistant illisible.";
     }
   }
 
   async function newConversation(): Promise<string> {
     if (busy.value) {
-      throw new Error("Codex termine l’action en cours.");
+      throw new Error("L’assistant termine l’action en cours.");
     }
     const conversation = createConversation();
     await persistConversations();
@@ -376,13 +379,13 @@ export const useAssistantStore = defineStore("assistant", () => {
 
   async function openConversation(conversationId: string): Promise<void> {
     if (busy.value) {
-      throw new Error("Codex termine l’action en cours.");
+      throw new Error("L’assistant termine l’action en cours.");
     }
     const conversation = conversations.value.find(
       (item) => item.id === conversationId,
     );
     if (!conversation) {
-      throw new Error("Conversation Codex introuvable.");
+      throw new Error("Conversation introuvable.");
     }
     activateConversation(conversation);
     await persistConversations();
@@ -396,6 +399,8 @@ export const useAssistantStore = defineStore("assistant", () => {
     accountId = undefined;
     expiresAt = undefined;
     authKind = "api_key";
+    provider = "codex";
+    providerBaseUrl = "";
     connected.value = false;
     busy.value = false;
     error.value = "";
@@ -417,20 +422,20 @@ export const useAssistantStore = defineStore("assistant", () => {
         (id) => id !== noteId,
       );
       void saveCurrentConversation().catch(() => {
-        error.value = "Impossible d’enregistrer la conversation Codex.";
+        error.value = "Impossible d’enregistrer la conversation.";
       });
       return;
     }
     attachedNoteIds.value = [...attachedNoteIds.value, noteId];
     void saveCurrentConversation().catch(() => {
-      error.value = "Impossible d’enregistrer la conversation Codex.";
+      error.value = "Impossible d’enregistrer la conversation.";
     });
   }
 
   function detachNote(noteId: string) {
     attachedNoteIds.value = attachedNoteIds.value.filter((id) => id !== noteId);
     void saveCurrentConversation().catch(() => {
-      error.value = "Impossible d’enregistrer la conversation Codex.";
+      error.value = "Impossible d’enregistrer la conversation.";
     });
   }
 
@@ -453,15 +458,16 @@ export const useAssistantStore = defineStore("assistant", () => {
 
   async function persistCurrentCredential() {
     if (!token) {
-      throw new Error("Clé ou jeton Codex manquant.");
+      throw new Error("Clé ou jeton de l’assistant manquant.");
     }
     await useVaultStore().persistAssistantCredential({
       accountId,
       authKind,
+      baseUrl: providerBaseUrl || undefined,
       expiresAt,
       fast: fast.value || undefined,
       model: model.value,
-      provider: "codex",
+      provider,
       reasoningEffort: reasoningEffort.value || undefined,
       refreshToken,
       token,
@@ -486,6 +492,8 @@ export const useAssistantStore = defineStore("assistant", () => {
     try {
       models.value = await listCodexModels({
         accountId,
+        baseUrl: providerBaseUrl || undefined,
+        defaultModels: findAssistantProvider(provider)?.defaultModels,
         token,
         transport: authKind === "chatgpt" ? "chatgpt" : "platform",
       });
@@ -504,7 +512,7 @@ export const useAssistantStore = defineStore("assistant", () => {
       error.value =
         caught instanceof Error
           ? caught.message
-          : "Impossible de lister les modèles Codex.";
+          : "Impossible de lister les modèles.";
     }
   }
 
@@ -545,11 +553,24 @@ export const useAssistantStore = defineStore("assistant", () => {
     }
   }
 
-  async function connect(nextToken: string) {
+  async function connect(
+    nextToken: string,
+    options: { baseUrl?: string; provider?: string } = {},
+  ) {
     error.value = "";
     const credentialToken = nextToken.trim();
     if (!credentialToken) {
-      throw new Error("Clé ou jeton Codex manquant.");
+      throw new Error("Clé API manquante.");
+    }
+    provider = options.provider?.trim() || "codex";
+    // "codex" keeps the dedicated OpenAI Responses path; every other
+    // provider speaks the OpenAI-compatible chat-completions API.
+    providerBaseUrl =
+      provider === "codex"
+        ? ""
+        : resolveProviderBaseUrl(provider, options.baseUrl);
+    if (!providerBaseUrl && findAssistantProvider(provider)?.needsBaseUrl) {
+      throw new Error("URL de l’API manquante pour ce fournisseur.");
     }
     token = credentialToken;
     refreshToken = undefined;
@@ -618,6 +639,11 @@ export const useAssistantStore = defineStore("assistant", () => {
       accountId = credential.accountId;
       expiresAt = credential.expiresAt;
       authKind = credential.authKind;
+      provider = credential.provider || "codex";
+      providerBaseUrl =
+        provider === "codex"
+          ? ""
+          : credential.baseUrl || resolveProviderBaseUrl(provider);
       model.value = credential.model;
       reasoningEffort.value = credential.reasoningEffort ?? "";
       fast.value = credential.fast === true;
@@ -653,10 +679,12 @@ export const useAssistantStore = defineStore("assistant", () => {
         call.name !== "append_to_linked_note") ||
       !noteId
     ) {
-      throw new Error("Codex a demandé une action invalide.");
+      throw new Error("L’assistant a demandé une action invalide.");
     }
     if (!attachedNoteIds.value.includes(noteId)) {
-      throw new Error("Codex ne peut modifier qu’une note liée explicitement.");
+      throw new Error(
+        "L’assistant ne peut modifier qu’une note liée explicitement.",
+      );
     }
     const note = vault.notes.get(noteId);
     if (!note) {
@@ -682,7 +710,7 @@ export const useAssistantStore = defineStore("assistant", () => {
       throw new Error("Message vide.");
     }
     if (!token) {
-      throw new Error("Connectez Codex pour écrire.");
+      throw new Error("Connectez l’assistant pour écrire.");
     }
     if (
       authKind === "chatgpt" &&
@@ -708,6 +736,7 @@ export const useAssistantStore = defineStore("assistant", () => {
     try {
       const response = await completeCodexAgent({
         accountId,
+        baseUrl: providerBaseUrl || undefined,
         instructions: ASSISTANT_INSTRUCTIONS,
         messages: messages.value.map((message) => ({
           content:
@@ -726,20 +755,32 @@ export const useAssistantStore = defineStore("assistant", () => {
         tools: ASSISTANT_TOOLS,
         transport: authKind === "chatgpt" ? "chatgpt" : "platform",
       });
-      if (response.functionCalls.length !== 1) {
-        throw new Error("Codex n’a pas choisi une action unique.");
+      if (response.functionCalls.length === 0) {
+        throw new Error(
+          response.text.trim()
+            ? "L’assistant a répondu sans utiliser les outils. Reformulez la demande."
+            : "L’assistant n’a pas choisi d’action.",
+        );
       }
-      const action = await executeToolCall(response.functionCalls[0]);
+      let actionMessage = "";
+      let actionNoteId = "";
+      for (const call of response.functionCalls) {
+        const action = await executeToolCall(call);
+        actionMessage = actionMessage
+          ? `${actionMessage}\n${action.message}`
+          : action.message;
+        actionNoteId = action.noteId;
+      }
       messages.value = [
         ...messages.value,
         {
-          content: action.message,
+          content: actionMessage,
           id: uuidV7(),
           role: "assistant",
         },
       ];
       await saveCurrentConversation();
-      return action.noteId;
+      return actionNoteId;
     } catch (caught) {
       error.value =
         caught instanceof Error

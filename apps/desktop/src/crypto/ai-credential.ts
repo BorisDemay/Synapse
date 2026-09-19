@@ -7,10 +7,11 @@ export type AssistantAuthKind = "api_key" | "chatgpt";
 export interface AssistantCredential {
   accountId?: string;
   authKind: AssistantAuthKind;
+  baseUrl?: string;
   expiresAt?: number;
   fast?: boolean;
   model: string;
-  provider: "codex";
+  provider?: string;
   reasoningEffort?: string;
   refreshToken?: string;
   token: string;
@@ -40,7 +41,8 @@ export function wrapAssistantCredential(
     throw new Error("Unable to store assistant credential");
   }
   const token = credential.token.trim();
-  if (!token || credential.provider !== "codex") {
+  const provider = credential.provider?.trim() || "codex";
+  if (!token || !provider) {
     throw new Error("Unable to store assistant credential");
   }
   const nonce = randomNonce();
@@ -51,7 +53,10 @@ export function wrapAssistantCredential(
       expiresAt: credential.expiresAt,
       ...(credential.fast ? { fast: true } : {}),
       model: credential.model.trim(),
-      provider: "codex",
+      ...(credential.baseUrl?.trim()
+        ? { baseUrl: credential.baseUrl.trim() }
+        : {}),
+      provider,
       ...(credential.reasoningEffort?.trim()
         ? { reasoningEffort: credential.reasoningEffort.trim() }
         : {}),
@@ -88,6 +93,7 @@ export function unwrapAssistantCredential(
     const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as {
       accountId?: unknown;
       authKind?: unknown;
+      baseUrl?: unknown;
       expiresAt?: unknown;
       fast?: unknown;
       model?: unknown;
@@ -96,8 +102,11 @@ export function unwrapAssistantCredential(
       refreshToken?: unknown;
       token?: unknown;
     };
+    const provider =
+      typeof parsed.provider === "string" && parsed.provider.trim()
+        ? parsed.provider.trim()
+        : "codex";
     if (
-      parsed.provider !== "codex" ||
       typeof parsed.token !== "string" ||
       !parsed.token.trim() ||
       typeof parsed.model !== "string"
@@ -112,9 +121,12 @@ export function unwrapAssistantCredential(
       authKind,
       expiresAt:
         typeof parsed.expiresAt === "number" ? parsed.expiresAt : undefined,
+      ...(typeof parsed.baseUrl === "string" && parsed.baseUrl.trim()
+        ? { baseUrl: parsed.baseUrl.trim() }
+        : {}),
       ...(parsed.fast === true ? { fast: true } : {}),
       model: parsed.model,
-      provider: "codex",
+      provider,
       ...(typeof parsed.reasoningEffort === "string" &&
       parsed.reasoningEffort.trim()
         ? { reasoningEffort: parsed.reasoningEffort.trim() }

@@ -73,9 +73,9 @@ describe("AppShell", () => {
       },
     });
 
-    expect(wrapper.get('[aria-label="Conversations Codex"]').text()).toBe(
-      "Fils Codex",
-    );
+    expect(
+      wrapper.get('[aria-label="Conversations de l’assistant"]').text(),
+    ).toBe("Fils Codex");
   });
 
   it("réduit la barre latérale en mini-rail quand sidebarCollapsed est actif", () => {

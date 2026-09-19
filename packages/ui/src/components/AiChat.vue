@@ -167,13 +167,13 @@ function submitPrompt() {
 </script>
 
 <template>
-  <section class="ai-chat" aria-label="Chat Codex">
+  <section class="ai-chat" aria-label="Assistant">
     <header class="ai-chat-header">
       <div class="ai-chat-title">
         <span class="ai-chat-avatar" aria-hidden="true">✦</span>
         <div>
           <span class="ai-chat-eyebrow">ASSISTANT</span>
-          <h2>Codex</h2>
+          <h2>Assistant</h2>
         </div>
       </div>
       <span
@@ -209,10 +209,10 @@ function submitPrompt() {
           ◫
         </button>
         <button
-          aria-label="Fermer Codex"
+          aria-label="Fermer l’assistant"
           class="ai-chat-icon-button"
           name="close-codex-panel"
-          title="Fermer Codex"
+          title="Fermer l’assistant"
           type="button"
           @click="emit('closePanel')"
         >
@@ -231,7 +231,7 @@ function submitPrompt() {
 
     <p class="ai-chat-notice" role="note">
       <span class="ai-chat-notice-icon" aria-hidden="true">🔒</span>
-      Les notes liées quittent cet appareil vers Codex (OpenAI). Elles
+      Les notes liées quittent cet appareil vers le fournisseur IA choisi. Elles
       n’empruntent jamais le serveur Synapse.
     </p>
 
@@ -339,7 +339,7 @@ function submitPrompt() {
         </template>
         <p v-else class="ai-chat-hint ai-chat-hint-chips">
           <span aria-hidden="true">📎</span>
-          Ctrl+clic sur une note pour la lier à Codex.
+          Ctrl+clic sur une note pour la lier à l’assistant.
         </p>
       </div>
 
@@ -404,7 +404,8 @@ function submitPrompt() {
       <div class="ai-chat-thread" role="log" aria-live="polite">
         <p v-if="messages.length === 0" class="ai-chat-empty">
           <span class="ai-chat-empty-icon" aria-hidden="true">✎</span>
-          Décrivez l’action à effectuer. Codex créera ou modifiera la note liée.
+          Décrivez l’action à effectuer. L’assistant créera ou modifiera la note
+          liée.
         </p>
         <article
           v-for="message in messages"
@@ -413,7 +414,7 @@ function submitPrompt() {
           :data-role="message.role"
         >
           <span class="ai-chat-bubble-author">
-            {{ message.role === "user" ? "Vous" : "Codex" }}
+            {{ message.role === "user" ? "Vous" : "Assistant" }}
           </span>
           <pre>{{ message.content }}</pre>
         </article>
@@ -421,7 +422,7 @@ function submitPrompt() {
 
       <form class="ai-chat-composer" @submit.prevent="submitPrompt">
         <label class="ai-chat-field">
-          <span class="visually-hidden">Message pour Codex</span>
+          <span class="visually-hidden">Message pour l’assistant</span>
           <textarea
             v-model="draft"
             :disabled="busy"

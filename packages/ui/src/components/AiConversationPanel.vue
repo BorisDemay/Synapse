@@ -29,10 +29,13 @@ function openAdjacentConversation(offset: number) {
 </script>
 
 <template>
-  <section class="ai-conversation-panel" aria-label="Conversations Codex">
+  <section
+    class="ai-conversation-panel"
+    aria-label="Conversations de l’assistant"
+  >
     <header class="ai-conversation-panel-header">
       <div>
-        <span>Codex</span>
+        <span>Assistant</span>
         <h2>Conversations</h2>
       </div>
       <div class="ai-conversation-panel-actions">
@@ -60,7 +63,7 @@ function openAdjacentConversation(offset: number) {
       v-if="conversations.length"
       class="ai-conversation-tabs"
       role="tablist"
-      aria-label="Fils Codex"
+      aria-label="Fils de l’assistant"
       @keydown.left.prevent="openAdjacentConversation(-1)"
       @keydown.right.prevent="openAdjacentConversation(1)"
     >

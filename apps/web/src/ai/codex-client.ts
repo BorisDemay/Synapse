@@ -544,7 +544,7 @@ export async function listCodexModels(input: {
 }): Promise<CodexModelOption[]> {
   const token = input.token.trim();
   if (!token) {
-    throw assistantError("Clé ou jeton Codex manquant.");
+    throw assistantError("Clé ou jeton de l’assistant manquant.");
   }
   const chatgpt = input.transport === "chatgpt";
   const modelsUrl = input.baseUrl ? `${input.baseUrl}/models` : undefined;
@@ -570,7 +570,7 @@ export async function listCodexModels(input: {
         },
       );
     } catch {
-      throw assistantError("Impossible de lister les modèles Codex.");
+      throw assistantError("Impossible de lister les modèles.");
     }
   }
   let models: CodexModelOption[] = [];
@@ -593,7 +593,7 @@ export async function listCodexModels(input: {
         serviceTiers: [],
       }));
     if (fallback.length === 0) {
-      throw assistantError("Aucun modèle Codex n’est disponible.");
+      throw assistantError("Aucun modèle n’est disponible pour l’assistant.");
     }
     return fallback;
   }
@@ -605,7 +605,7 @@ export async function completeCodexAgent(
 ): Promise<CodexAgentResponse> {
   const token = input.token.trim();
   if (!token) {
-    throw assistantError("Clé ou jeton Codex manquant.");
+    throw assistantError("Clé ou jeton de l’assistant manquant.");
   }
   const messages = input.messages.filter((message) => message.content.trim());
   if (messages.length === 0) {
@@ -614,7 +614,7 @@ export async function completeCodexAgent(
 
   const model = input.model?.trim();
   if (!model) {
-    throw assistantError("Choisissez un modèle Codex.");
+    throw assistantError("Choisissez un modèle pour l’assistant.");
   }
 
   const chatgpt = input.transport === "chatgpt";
@@ -671,19 +671,19 @@ export async function completeCodexAgent(
       },
     );
   } catch {
-    throw assistantError("Impossible de joindre Codex.");
+    throw assistantError("Impossible de joindre l’assistant.");
   }
 
   if (response.status === 401 || response.status === 403) {
-    throw assistantError("Clé ou jeton refusé par Codex.");
+    throw assistantError("Clé ou jeton refusé par le fournisseur.");
   }
   if (response.status === 429) {
-    throw assistantError("Quota Codex dépassé.");
+    throw assistantError("Quota du fournisseur dépassé.");
   }
   if (!response.ok) {
     throw assistantError(
       response.status === 400
-        ? "Codex a refusé la requête. Vérifiez le modèle."
+        ? "Le fournisseur a refusé la requête. Vérifiez le modèle."
         : "L’assistant n’a pas pu répondre.",
     );
   }
@@ -752,6 +752,9 @@ async function completeChatCompletionsAgent(
       type: "function",
     }));
     payload.tool_choice = input.toolChoice ?? "auto";
+    // Mirror the Responses path: one write action per turn, never a
+    // parallel fan-out the agent loop cannot attribute.
+    payload.parallel_tool_calls = false;
   }
 
   let response: Response;

@@ -304,10 +304,11 @@ limits and earlier Rust/k6 benchmarks:
   unlocked client.
 - No vault content in plaintext reaches the server; the decryption passphrase
   stays local.
-- No mandatory SaaS, no remote telemetry. An optional Codex chat can run from
+- No mandatory SaaS, no remote telemetry. An optional AI assistant chat can run from
   the unlocked client with a user-provided key; the linked notes then go to
-  OpenAI, never to the Synapse server (ADR 0008). CI does not validate a live
-  Codex call.
+  the chosen AI provider (OpenAI, GLM, DeepSeek, Mistral, OpenRouter or a
+  custom OpenAI-compatible endpoint), never to the Synapse server (ADR 0008).
+  CI does not validate a live AI provider call.
 - CycloneDX SBOM: `just sbom` writes under `target/sbom/` (not versioned).
 - The web and desktop builds share one update coordinator. The web offers an
   explicit reload; Windows/Linux download a signed Tauri package in the
@@ -346,7 +347,7 @@ limits and earlier Rust/k6 benchmarks:
 - Binary or protocol compatibility with Obsidian Sync.
 - A plugin marketplace before the security model is stabilized.
 - Mandatory artificial intelligence, or relaying notes in plaintext through the
-  Synapse server. An optional Codex chat can run from the unlocked client with
+  Synapse server. An optional AI assistant chat can run from the unlocked client with
   the user's key (ADR 0008).
 - A mandatory dependency on a proprietary cloud service.
 

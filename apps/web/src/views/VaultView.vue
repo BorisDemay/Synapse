@@ -350,7 +350,9 @@ async function connectAssistant(credentials: {
     });
   } catch (error) {
     formError.value =
-      error instanceof Error ? error.message : "Connexion Codex impossible.";
+      error instanceof Error
+        ? error.message
+        : "Connexion à l’assistant impossible.";
   }
 }
 
@@ -1180,7 +1182,7 @@ watch(settingsOpen, (open) => {
           <span class="save-hint">Sauvegarde automatique</span>
           <Button
             v-if="!assistantOpen"
-            label="Codex"
+            label="Assistant"
             outlined
             type="button"
             @click="assistantOpen = true"

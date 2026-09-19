@@ -51,7 +51,7 @@ const { cssVars, resizing } = usePanelLayout();
       v-if="$slots.assistantHistory"
       id="app-shell-assistant-history"
       class="app-shell-assistant-history"
-      aria-label="Conversations Codex"
+      aria-label="Conversations de l’assistant"
     >
       <PanelResizeHandle panel="assistantHistory" edge="start" />
       <slot name="assistantHistory" />

@@ -242,7 +242,7 @@ describe("completeCodexChat", () => {
         model: "gpt-5.6-sol",
         token,
       }),
-    ).rejects.toThrow("Clé ou jeton refusé par Codex.");
+    ).rejects.toThrow("Clé ou jeton refusé par le fournisseur.");
 
     try {
       await completeCodexChat({
@@ -274,7 +274,7 @@ describe("completeCodexChat", () => {
         model: "gpt-5.6-sol",
         token,
       }),
-    ).rejects.toThrow("Impossible de joindre Codex.");
+    ).rejects.toThrow("Impossible de joindre l’assistant.");
   });
 
   it("sends ChatGPT subscription requests as a Codex SSE stream", async () => {
@@ -456,6 +456,119 @@ describe("completeCodexChat", () => {
 
     await expect(
       listCodexModels({ token, transport: "chatgpt" }),
-    ).rejects.toThrow("Aucun modèle Codex n’est disponible.");
+    ).rejects.toThrow("Aucun modèle n’est disponible pour l’assistant.");
+  });
+});
+
+describe("completeCodexAgent over chat completions", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const baseUrl = "https://open.bigmodel.cn/api/paas/v4";
+
+  function chatCompletionsToolCallResponse(toolCalls: unknown[]) {
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "", tool_calls: toolCalls } }],
+      }),
+      { status: 200 },
+    );
+  }
+
+  it("disables parallel tool calls and maps tool calls for OpenAI-compatible providers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        chatCompletionsToolCallResponse([
+          {
+            function: {
+              arguments: '{"markdown":"# Note GLM"}',
+              name: "create_note",
+            },
+            id: "call-glm-1",
+            type: "function",
+          },
+        ]),
+      ),
+    );
+
+    const response = await completeCodexAgent({
+      baseUrl,
+      instructions: "Choisis un outil d’écriture.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "glm-4.6",
+      token,
+      toolChoice: "required",
+      tools: [
+        {
+          description: "Crée une note.",
+          name: "create_note",
+          parameters: { type: "object" },
+        },
+      ],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/chat/completions`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    const body = JSON.parse(
+      String(vi.mocked(fetch).mock.calls[0]?.[1]?.body),
+    ) as {
+      parallel_tool_calls?: boolean;
+      tool_choice?: string;
+      tools?: Array<{ function?: { name?: string }; type?: string }>;
+    };
+    expect(body.parallel_tool_calls).toBe(false);
+    expect(body.tool_choice).toBe("required");
+    expect(body.tools?.[0]?.type).toBe("function");
+    expect(body.tools?.[0]?.function?.name).toBe("create_note");
+    expect(response.functionCalls).toHaveLength(1);
+    expect(response.functionCalls[0]?.name).toBe("create_note");
+    expect(response.functionCalls[0]?.arguments).toBe(
+      '{"markdown":"# Note GLM"}',
+    );
+  });
+
+  it("keeps every tool call when a provider answers with several", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        chatCompletionsToolCallResponse([
+          {
+            function: {
+              arguments: '{"markdown":"# Première"}',
+              name: "create_note",
+            },
+            id: "call-glm-2",
+            type: "function",
+          },
+          {
+            function: {
+              arguments: '{"markdown":"# Deuxième"}',
+              name: "create_note",
+            },
+            id: "call-glm-3",
+            type: "function",
+          },
+        ]),
+      ),
+    );
+
+    const response = await completeCodexAgent({
+      baseUrl,
+      instructions: "Choisis un outil d’écriture.",
+      messages: [{ content: "Crée deux notes.", role: "user" }],
+      model: "glm-4.6",
+      token,
+      toolChoice: "required",
+    });
+
+    expect(response.functionCalls).toHaveLength(2);
+    expect(response.functionCalls.map((call) => call.name)).toEqual([
+      "create_note",
+      "create_note",
+    ]);
   });
 });

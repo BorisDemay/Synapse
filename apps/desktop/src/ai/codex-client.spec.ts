@@ -91,7 +91,7 @@ describe("completeCodexChat", () => {
     ).resolves.toBe("Brouillon.");
   });
 
-  it("returns local function calls for the vault instead of Markdown text", async () => {
+  it("returns a structured local tool call instead of treating it as note text", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -99,9 +99,12 @@ describe("completeCodexChat", () => {
           JSON.stringify({
             output: [
               {
-                arguments: '{"markdown":"# Brouillon"}',
+                arguments: JSON.stringify({
+                  markdown: "# Note modifiée\n\nContenu.",
+                  note_id: "note-1",
+                }),
                 call_id: "call-1",
-                name: "create_note",
+                name: "replace_linked_note",
                 type: "function_call",
               },
             ],
@@ -109,6 +112,79 @@ describe("completeCodexChat", () => {
           { status: 200 },
         ),
       ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Modifie la note liée.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Remplace une note liée.",
+            name: "replace_linked_note",
+            parameters: {
+              additionalProperties: false,
+              properties: {
+                markdown: { type: "string" },
+                note_id: { type: "string" },
+              },
+              required: ["note_id", "markdown"],
+              type: "object",
+            },
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments:
+            '{"markdown":"# Note modifiée\\n\\nContenu.","note_id":"note-1"}',
+          callId: "call-1",
+          name: "replace_linked_note",
+        },
+      ],
+      text: "",
+    });
+
+    const body = JSON.parse(
+      String(vi.mocked(fetch).mock.calls[0]?.[1]?.body),
+    ) as { tool_choice?: unknown; tools?: unknown };
+    expect(body.tool_choice).toBe("required");
+    expect(body.tools).toEqual([
+      {
+        description: "Remplace une note liée.",
+        name: "replace_linked_note",
+        parameters: expect.objectContaining({
+          additionalProperties: false,
+          required: ["note_id", "markdown"],
+        }),
+        strict: true,
+        type: "function",
+      },
+    ]);
+  });
+
+  it("reads a local tool call from a streamed ChatGPT subscription response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              "event: response.function_call_arguments.done",
+              'data: {"type":"response.function_call_arguments.done","call_id":"call-stream-1","name":"create_note","arguments":"{\\\"markdown\\\":\\\"# Brouillon\\\"}"}',
+              "",
+              "event: response.completed",
+              'data: {"type":"response.completed"}',
+              "",
+            ].join("\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
     );
 
     await expect(
@@ -130,12 +206,13 @@ describe("completeCodexChat", () => {
             },
           },
         ],
+        transport: "chatgpt",
       }),
     ).resolves.toEqual({
       functionCalls: [
         {
           arguments: '{"markdown":"# Brouillon"}',
-          callId: "call-1",
+          callId: "call-stream-1",
           name: "create_note",
         },
       ],
@@ -165,7 +242,7 @@ describe("completeCodexChat", () => {
         model: "gpt-5.6-sol",
         token,
       }),
-    ).rejects.toThrow("Clé ou jeton refusé par Codex.");
+    ).rejects.toThrow("Clé ou jeton refusé par le fournisseur.");
 
     try {
       await completeCodexChat({
@@ -197,7 +274,7 @@ describe("completeCodexChat", () => {
         model: "gpt-5.6-sol",
         token,
       }),
-    ).rejects.toThrow("Impossible de joindre Codex.");
+    ).rejects.toThrow("Impossible de joindre l’assistant.");
   });
 
   it("sends ChatGPT subscription requests as a Codex SSE stream", async () => {
@@ -379,6 +456,119 @@ describe("completeCodexChat", () => {
 
     await expect(
       listCodexModels({ token, transport: "chatgpt" }),
-    ).rejects.toThrow("Aucun modèle Codex n’est disponible.");
+    ).rejects.toThrow("Aucun modèle n’est disponible pour l’assistant.");
+  });
+});
+
+describe("completeCodexAgent over chat completions", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const baseUrl = "https://open.bigmodel.cn/api/paas/v4";
+
+  function chatCompletionsToolCallResponse(toolCalls: unknown[]) {
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "", tool_calls: toolCalls } }],
+      }),
+      { status: 200 },
+    );
+  }
+
+  it("disables parallel tool calls and maps tool calls for OpenAI-compatible providers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        chatCompletionsToolCallResponse([
+          {
+            function: {
+              arguments: '{"markdown":"# Note GLM"}',
+              name: "create_note",
+            },
+            id: "call-glm-1",
+            type: "function",
+          },
+        ]),
+      ),
+    );
+
+    const response = await completeCodexAgent({
+      baseUrl,
+      instructions: "Choisis un outil d’écriture.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "glm-4.6",
+      token,
+      toolChoice: "required",
+      tools: [
+        {
+          description: "Crée une note.",
+          name: "create_note",
+          parameters: { type: "object" },
+        },
+      ],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/chat/completions`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    const body = JSON.parse(
+      String(vi.mocked(fetch).mock.calls[0]?.[1]?.body),
+    ) as {
+      parallel_tool_calls?: boolean;
+      tool_choice?: string;
+      tools?: Array<{ function?: { name?: string }; type?: string }>;
+    };
+    expect(body.parallel_tool_calls).toBe(false);
+    expect(body.tool_choice).toBe("required");
+    expect(body.tools?.[0]?.type).toBe("function");
+    expect(body.tools?.[0]?.function?.name).toBe("create_note");
+    expect(response.functionCalls).toHaveLength(1);
+    expect(response.functionCalls[0]?.name).toBe("create_note");
+    expect(response.functionCalls[0]?.arguments).toBe(
+      '{"markdown":"# Note GLM"}',
+    );
+  });
+
+  it("keeps every tool call when a provider answers with several", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        chatCompletionsToolCallResponse([
+          {
+            function: {
+              arguments: '{"markdown":"# Première"}',
+              name: "create_note",
+            },
+            id: "call-glm-2",
+            type: "function",
+          },
+          {
+            function: {
+              arguments: '{"markdown":"# Deuxième"}',
+              name: "create_note",
+            },
+            id: "call-glm-3",
+            type: "function",
+          },
+        ]),
+      ),
+    );
+
+    const response = await completeCodexAgent({
+      baseUrl,
+      instructions: "Choisis un outil d’écriture.",
+      messages: [{ content: "Crée deux notes.", role: "user" }],
+      model: "glm-4.6",
+      token,
+      toolChoice: "required",
+    });
+
+    expect(response.functionCalls).toHaveLength(2);
+    expect(response.functionCalls.map((call) => call.name)).toEqual([
+      "create_note",
+      "create_note",
+    ]);
   });
 });

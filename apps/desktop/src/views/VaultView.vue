@@ -40,6 +40,7 @@ import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
 
+import { ASSISTANT_PROVIDERS } from "../ai/providers";
 import { useAssistantStore } from "../stores/assistant";
 import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
@@ -201,13 +202,29 @@ function attachNote(id: string) {
   assistantOpen.value = true;
 }
 
-async function connectAssistant(token: string) {
+const assistantProviders = ASSISTANT_PROVIDERS.map((provider) => ({
+  deviceLogin: provider.deviceLogin === true,
+  id: provider.id,
+  label: provider.label,
+  needsBaseUrl: provider.needsBaseUrl === true,
+}));
+
+async function connectAssistant(credentials: {
+  baseUrl?: string;
+  provider: string;
+  token: string;
+}) {
   formError.value = "";
   try {
-    await assistant.connect(token);
+    await assistant.connect(credentials.token, {
+      baseUrl: credentials.baseUrl,
+      provider: credentials.provider,
+    });
   } catch (error) {
     formError.value =
-      error instanceof Error ? error.message : "Connexion Codex impossible.";
+      error instanceof Error
+        ? error.message
+        : "Connexion à l’assistant impossible.";
   }
 }
 
@@ -748,7 +765,7 @@ watch(settingsOpen, (open) => {
           <span class="save-hint">Sauvegarde automatique</span>
           <Button
             v-if="!assistantOpen"
-            label="Codex"
+            label="Assistant"
             outlined
             type="button"
             @click="assistantOpen = true"
@@ -834,6 +851,7 @@ watch(settingsOpen, (open) => {
         :messages="assistant.messages"
         :model="assistant.model"
         :models="assistant.models"
+        :providers="assistantProviders"
         :reasoning-effort="assistant.reasoningEffort"
         :reasoning-levels="assistant.reasoningLevels"
         @cancel-chatgpt="assistant.cancelChatgptLogin"
