@@ -42,7 +42,65 @@ it("removes the activation token from the address and submits it only after conf
     }),
   );
   expect(wrapper.get('[role="status"]').text()).toContain("Compte activé");
+  expect(wrapper.get('[role="status"]').text()).toContain("phrase de coffre");
   expect(wrapper.text()).not.toContain("synthetic-activation");
+  wrapper.unmount();
+});
+
+it("distinguishes an unreachable server from a used or expired link", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockRejectedValue(new TypeError("network down")),
+  );
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  await router.push("/activate?token=synthetic-activation");
+  await router.isReady();
+  const wrapper = mountActivate(router);
+  await flushPromises();
+  const activateButton = wrapper
+    .findAll("button")
+    .find((candidate) => candidate.text().includes("Activer le compte"));
+  await activateButton?.trigger("click");
+  await flushPromises();
+
+  expect(wrapper.get('[role="status"]').text()).toContain("injoignable");
+  expect(wrapper.get('[role="status"]').text()).toContain("réessayez");
+  wrapper.unmount();
+});
+
+it("suggests reopening the email link and asking a new one when activation fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(null, { status: 400 })),
+  );
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  await router.push("/activate?token=synthetic-activation");
+  await router.isReady();
+  const wrapper = mountActivate(router);
+  await flushPromises();
+  const activateButton = wrapper
+    .findAll("button")
+    .find((candidate) => candidate.text().includes("Activer le compte"));
+  await activateButton?.trigger("click");
+  await flushPromises();
+
+  const status = wrapper.get('[role="status"]').text();
+  expect(status).toContain("expiré");
+  expect(status).toContain("réessayez");
+  expect(status).toContain("email");
+  expect(status).toContain("administrateur");
   wrapper.unmount();
 });
 

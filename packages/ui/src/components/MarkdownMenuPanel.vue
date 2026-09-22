@@ -251,6 +251,12 @@ defineExpose({
         <span class="synapse-markdown-context-item-label">{{
           item.label
         }}</span>
+        <span
+          v-if="item.type === 'item' && item.shortcut"
+          aria-hidden="true"
+          class="synapse-markdown-context-item-shortcut"
+          >{{ item.shortcut }}</span
+        >
         <svg
           v-if="item.type === 'submenu'"
           aria-hidden="true"
@@ -343,6 +349,13 @@ defineExpose({
 .synapse-markdown-context-item--disabled {
   color: var(--synapse-color-text-muted);
   cursor: default;
+}
+
+.synapse-markdown-context-item-shortcut {
+  justify-self: end;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .synapse-markdown-context-item-chevron,

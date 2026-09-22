@@ -20,6 +20,14 @@ function items(scope: ParentNode) {
   return [...scope.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
 }
 
+function itemLabel(item: HTMLButtonElement) {
+  return (
+    item
+      .querySelector<HTMLSpanElement>(".synapse-markdown-context-item-label")
+      ?.textContent?.trim() ?? ""
+  );
+}
+
 function mountMenu(
   props: Partial<{
     headingLevel: number;
@@ -52,7 +60,7 @@ describe("MarkdownContextMenu", () => {
 
     const root = rootNode();
     expect(root?.getAttribute("aria-label")).toBe("Outils Markdown");
-    const labels = items(root!).map((item) => item.textContent?.trim());
+    const labels = items(root!).map((item) => itemLabel(item));
     expect(labels).toEqual([
       "Ajouter un lien",
       "Ajouter un lien externe",
@@ -77,6 +85,22 @@ describe("MarkdownContextMenu", () => {
       ),
     ).toHaveLength(3);
     expect(submenuNode("Formater")).toBeNull();
+  });
+
+  it("shows the shortcut hint apart from the accessible command name", () => {
+    mountMenu();
+
+    const root = rootNode()!;
+    const addLink = items(root)[0]!;
+    expect(itemLabel(addLink)).toBe("Ajouter un lien");
+    expect(addLink.textContent?.trim()).toContain("Ctrl+Shift+K");
+    const hint = addLink.querySelector<HTMLSpanElement>(
+      ".synapse-markdown-context-item-shortcut",
+    );
+    expect(hint?.getAttribute("aria-hidden")).toBe("true");
+    expect(
+      items(root)[1]?.querySelector(".synapse-markdown-context-item-shortcut"),
+    ).toBeNull();
   });
 
   it("emits the selected command and closes on Escape", async () => {

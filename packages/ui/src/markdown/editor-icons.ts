@@ -2,6 +2,14 @@
 // are decorative duplicates of their item label; keep every path monochrome
 // so it inherits the current text color.
 const MENU_ICON_PATHS: Readonly<Record<string, string>> = {
+  headings: "M5 4v16M19 4v16M5 12h14",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
+  undo: "M9 5 4 10l5 5M4 10h10a5 5 0 0 1 0 10",
+  redo: "m15 5 5 5-5 5M20 10H10a5 5 0 0 0 0 10",
+  emoji:
+    "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20ZM8 8h.01M16 8h.01M7 14c2 4 8 4 10 0",
+  outdent: "M10 5h10M10 12h10M10 19h10M6 8l-4 4 4 4",
+  indent: "M10 5h10M10 12h10M10 19h10M2 8l4 4-4 4",
   "add-link":
     "M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1",
   "add-external-link": "M10 5H5v14h14v-5M14 4h6v6M20 4l-9 9",

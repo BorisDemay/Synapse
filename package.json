@@ -11,6 +11,7 @@
   "scripts": {
     "test": "pnpm --recursive --if-present test",
     "test:e2e": "playwright test",
+    "test:ux": "node --test tests/ux/*.mjs",
     "lint": "pnpm --recursive --if-present lint",
     "format": "pnpm --recursive --if-present format",
     "typecheck": "pnpm --recursive --if-present typecheck",

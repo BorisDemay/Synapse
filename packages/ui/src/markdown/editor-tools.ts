@@ -4,6 +4,8 @@ export type MarkdownMenuCommand = {
   disabled?: boolean;
   id: string;
   label: string;
+  /** Keyboard hint rendered apart from the accessible label, e.g. Ctrl+Shift+K. */
+  shortcut?: string;
   type: "item";
 };
 
@@ -37,10 +39,23 @@ export const TOOLBAR_LABELS: Readonly<Record<string, string>> = {
   line: "Séparateur",
   code: "Bloc code",
   "inline-code": "Code",
+  more: "Plus",
   table: "Tableau",
   undo: "Annuler",
   redo: "Rétablir",
 };
+
+/**
+ * Vditor hotkey for the link toolbar action, written with the engine's own
+ * ⌘/⇧ notation; the engine resolves it to Ctrl+Shift+K (Cmd on macOS) for
+ * both matching and tooltips. Ctrl+K stays reserved for the global search
+ * palette and must never mutate Markdown.
+ */
+export const LINK_TOOLBAR_HOTKEY = "⇧⌘K";
+
+export function insertLinkShortcutHint(): string {
+  return /Mac/i.test(navigator.platform) ? "Cmd+Shift+K" : "Ctrl+Shift+K";
+}
 
 const TABLE_ITEMS: readonly MarkdownMenuCommand[] = [
   {
@@ -94,7 +109,10 @@ export function markdownContextMenuItems({
   selectionEmpty?: boolean;
 }): MarkdownMenuItem[] {
   const items: MarkdownMenuItem[] = [
-    command("add-link", "Ajouter un lien"),
+    {
+      ...command("add-link", "Ajouter un lien"),
+      shortcut: insertLinkShortcutHint(),
+    },
     command("add-external-link", "Ajouter un lien externe"),
     {
       id: "formater",

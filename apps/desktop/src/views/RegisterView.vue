@@ -25,8 +25,8 @@ const invitationToken = ref(
   typeof route.query.invitation === "string" ? route.query.invitation : "",
 );
 const error = ref("");
+const busy = ref(false);
 const registered = ref(false);
-const submitting = ref(false);
 const publicSignup = ref(false);
 const statusLoaded = ref(false);
 
@@ -47,10 +47,9 @@ async function configureInstance() {
 }
 
 async function submit() {
-  if (submitting.value) return;
-
-  submitting.value = true;
+  if (busy.value) return;
   error.value = "";
+  busy.value = true;
   try {
     await configureInstance();
     await auth.register({
@@ -63,9 +62,10 @@ async function submit() {
     registered.value = true;
   } catch {
     password.value = "";
-    error.value = "Inscription impossible.";
+    error.value =
+      "Inscription impossible. Vérifiez votre connexion et les informations saisies, puis réessayez.";
   } finally {
-    submitting.value = false;
+    busy.value = false;
   }
 }
 </script>
@@ -99,13 +99,19 @@ async function submit() {
         <template v-if="registered">
           <h2>Consultez votre messagerie.</h2>
           <p role="status">
-            Un lien d’activation a été envoyé. Activez votre compte, puis
-            connectez-vous.
+            Un lien d’activation a été envoyé à votre adresse (pensez aux
+            spams). Activez votre compte, puis connectez-vous : à la première
+            connexion, vous créerez la phrase de coffre qui chiffre vos notes.
+          </p>
+          <p class="form-footer">
+            <RouterLink to="/login">Aller à la connexion</RouterLink>
           </p>
         </template>
         <template v-else-if="statusLoaded && showForm">
           <h2>Commencez votre espace.</h2>
-          <p class="subtitle">Un compte, puis une phrase pour la sync.</p>
+          <p class="subtitle">
+            Un compte, puis une phrase de coffre locale pour chiffrer vos notes.
+          </p>
           <form class="form-stack" @submit.prevent="submit">
             <div class="form-field">
               <label for="register-instance">URL de l’instance</label>
@@ -137,9 +143,15 @@ async function submit() {
                 :feedback="false"
                 fluid
                 autocomplete="new-password"
+                aria-describedby="register-password-hint"
                 required
                 toggle-mask
               />
+              <p id="register-password-hint" class="form-hint">
+                Ce mot de passe protège l’accès à votre compte. Il est distinct
+                de la phrase de coffre, créée à la première connexion, qui
+                chiffre vos notes.
+              </p>
             </div>
             <div v-if="!publicSignup" class="form-field">
               <label for="register-invitation">Jeton d’invitation</label>
@@ -150,7 +162,12 @@ async function submit() {
                 fluid
               />
             </div>
-            <Button :disabled="submitting" label="S’inscrire" type="submit" />
+            <Button
+              :disabled="busy"
+              :loading="busy"
+              label="S’inscrire"
+              type="submit"
+            />
           </form>
           <p v-if="error" role="alert">
             <Message severity="error" :closable="false">{{ error }}</Message>

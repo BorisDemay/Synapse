@@ -12,15 +12,23 @@ test("edits offline then syncs the encrypted outbox after reconnect", async ({
   await registerAndUnlock(page, email, password, passphrase, "create");
 
   await writeAndSave(page, "# online seed\n\nbody");
-  await expect(page.locator(".sync-pill")).toHaveText("synced", {
-    timeout: 30000,
-  });
+  await expect(page.locator(".sync-pill")).toHaveAttribute(
+    "data-status",
+    "synced",
+    {
+      timeout: 30000,
+    },
+  );
 
   await context.setOffline(true);
   await writeAndSave(page, "# offline edit\n\nstill local");
-  await expect(page.locator(".sync-pill")).toHaveText("offline", {
-    timeout: 30_000,
-  });
+  await expect(page.locator(".sync-pill")).toHaveAttribute(
+    "data-status",
+    "offline",
+    {
+      timeout: 30_000,
+    },
+  );
   await expect(page.getByLabel("Éditeur Markdown")).toContainText(
     "offline edit",
   );
@@ -29,9 +37,13 @@ test("edits offline then syncs the encrypted outbox after reconnect", async ({
   await page.evaluate(async () => {
     window.dispatchEvent(new Event("online"));
   });
-  await expect(page.locator(".sync-pill")).toHaveText("synced", {
-    timeout: 30_000,
-  });
+  await expect(page.locator(".sync-pill")).toHaveAttribute(
+    "data-status",
+    "synced",
+    {
+      timeout: 30_000,
+    },
+  );
 });
 
 test("a fresh browser process reopens an offline encrypted edit from the cached application", async ({
@@ -56,7 +68,10 @@ test("a fresh browser process reopens an offline encrypted edit from the cached 
       "create",
     );
     await writeAndSave(page, "# restart note\n\nonline base");
-    await expect(page.locator(".sync-pill")).toHaveText("synced");
+    await expect(page.locator(".sync-pill")).toHaveAttribute(
+      "data-status",
+      "synced",
+    );
     await page.evaluate(async () => {
       await navigator.serviceWorker.ready;
     });
@@ -82,7 +97,10 @@ test("a fresh browser process reopens an offline encrypted edit from the cached 
     ).toBe(false);
     await context.setOffline(true);
     await writeAndSave(page, "# restart note\n\noffline durable edit");
-    await expect(page.locator(".sync-pill")).toHaveText("offline");
+    await expect(page.locator(".sync-pill")).toHaveAttribute(
+      "data-status",
+      "offline",
+    );
     await context.close();
     context = await playwright.chromium.launchPersistentContext(profile, {
       headless: true,
@@ -103,9 +121,13 @@ test("a fresh browser process reopens an offline encrypted edit from the cached 
     );
     await context.setOffline(false);
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await expect(page.locator(".sync-pill")).toHaveText("synced", {
-      timeout: 30000,
-    });
+    await expect(page.locator(".sync-pill")).toHaveAttribute(
+      "data-status",
+      "synced",
+      {
+        timeout: 30000,
+      },
+    );
   } finally {
     await context.close();
     await rm(profile, { recursive: true, force: true });

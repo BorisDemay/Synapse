@@ -31,10 +31,13 @@ async function activate() {
     if (!response.ok) throw new Error("Activation failed");
     token = "";
     activated.value = true;
-    status.value = "Compte activé. Vous pouvez vous connecter.";
-  } catch {
     status.value =
-      "Activation impossible. Le lien peut avoir expiré ou avoir déjà été utilisé.";
+      "Compte activé. Vous pouvez vous connecter. À la première connexion, vous créerez la phrase de coffre qui chiffre vos notes localement.";
+  } catch (cause) {
+    status.value =
+      cause instanceof TypeError
+        ? "Activation impossible : le serveur est injoignable. Vérifiez votre connexion, puis réessayez en rouvrant le lien reçu par email."
+        : "Activation impossible. Le lien a peut-être expiré ou déjà été utilisé. Vérifiez votre connexion, puis réessayez en rouvrant le lien reçu par email ; sinon, demandez un nouveau lien à l’administrateur de l’instance.";
   } finally {
     busy.value = false;
   }
@@ -74,6 +77,7 @@ async function activate() {
           <Button
             v-if="!activated"
             :disabled="busy"
+            :loading="busy"
             label="Activer le compte"
             type="button"
             @click="activate"

@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { markdownContextMenuItems } from "./editor-tools";
+import {
+  markdownContextMenuItems,
+  type MarkdownMenuCommand,
+} from "./editor-tools";
+
+function commandItem(
+  items: ReturnType<typeof markdownContextMenuItems>,
+  id: string,
+): MarkdownMenuCommand | undefined {
+  return items.find(
+    (item): item is MarkdownMenuCommand =>
+      item.type === "item" && item.id === id,
+  );
+}
 
 function ids(items: ReturnType<typeof markdownContextMenuItems>) {
   return items.map((item) =>
@@ -139,6 +152,30 @@ describe("markdownContextMenuItems", () => {
       (item) => item.type === "item" && item.id === "cut",
     );
     expect(enabledCut?.type === "item" && enabledCut.disabled).toBe(false);
+  });
+
+  it("hints the insert-link shortcut without changing other commands", () => {
+    const items = markdownContextMenuItems({ inTable: false });
+
+    // jsdom reports no Mac platform, so the Windows/Linux hint is expected.
+    expect(commandItem(items, "add-link")?.shortcut).toBe("Ctrl+Shift+K");
+    expect(commandItem(items, "add-external-link")?.shortcut).toBeUndefined();
+    expect(commandItem(items, "cut")?.shortcut).toBeUndefined();
+    expect(commandItem(items, "select-all")?.shortcut).toBeUndefined();
+  });
+
+  it("uses the macOS modifier naming on Mac platforms", () => {
+    Object.defineProperty(window.navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+    try {
+      const items = markdownContextMenuItems({ inTable: false });
+
+      expect(commandItem(items, "add-link")?.shortcut).toBe("Cmd+Shift+K");
+    } finally {
+      delete (window.navigator as { platform?: string }).platform;
+    }
   });
 
   it("keeps table actions in a dedicated submenu inside tables", () => {

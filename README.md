@@ -263,6 +263,30 @@ just e2e-recovery
 
 Pre-release checklist: `docs/testing/release-checklist.md`.
 
+### Writing-first workspace checks
+
+```bash
+pnpm test:ux
+```
+
+Runs isolated Chromium checks with synthetic encrypted local vaults (no real
+account or synchronization API): search versus editor shortcuts, folder-aware
+search, editor focus, recent-note resume, deleted-note recovery after reload,
+keyboard dialogs, and responsive layouts from 390 to 1440 pixels. The real
+server/offline recovery journeys remain covered by `just e2e-recovery`.
+
+The shared workspace exposes search and new-note actions, recent notes,
+folder paths, and backlinks/history independently of the optional assistant.
+Only one secondary tool opens at a time; narrow screens use navigation and
+tool overlays. Vault creation confirms the local passphrase and explains that
+Synapse cannot recover it.
+
+Deletion offers undo and an **Éléments supprimés** view. Recovery uses encrypted
+history already present **on this device**, preserves the original path, and
+creates an ordinary new encrypted revision. It is not a synchronized trash or
+a backup: missing local history cannot be recovered by this interface. See
+[ADR 0017](docs/adr/0017-deleted-item-local-history-recovery.md).
+
 ### Performance
 
 ```bash

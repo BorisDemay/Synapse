@@ -40,4 +40,30 @@ describe("NoteRelationsPanel", () => {
     await wrapper.get('button[name="close-note-relations"]').trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
+
+  it("nomme le bouton de fermeture d’après l’onglet actif, pas toujours Historique", async () => {
+    const wrapper = mount(NoteRelationsPanel, {
+      props: {
+        backlinks: [
+          {
+            id: "notes/lien.md",
+            label: "Note liée",
+          },
+        ],
+        history: [],
+      },
+    });
+
+    const closeButton = wrapper.get('button[name="close-note-relations"]');
+    expect(closeButton.attributes("aria-label")).toBe(
+      "Fermer le panneau des liens entrants",
+    );
+
+    await wrapper
+      .get('[role="tab"][aria-controls="relations-history"]')
+      .trigger("click");
+    expect(closeButton.attributes("aria-label")).toBe(
+      "Fermer le panneau Historique",
+    );
+  });
 });

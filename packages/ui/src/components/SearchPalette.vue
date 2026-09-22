@@ -8,6 +8,8 @@ import {
   watch,
 } from "vue";
 
+import { DialogFocusController, isDialogElementVisible } from "../dialog-focus";
+
 export interface SearchResult {
   hint?: string;
   id: string;
@@ -41,6 +43,37 @@ const emit = defineEmits<{
 const isOpen = ref(false);
 const activeIndex = ref(0);
 const input = ref<HTMLInputElement>();
+const dialogElement = ref<HTMLElement>();
+
+function closePalette() {
+  if (!isOpen.value) {
+    return;
+  }
+  isOpen.value = false;
+  dialogFocus.detach();
+  emit("update:query", "");
+  emit("close");
+}
+
+const dialogFocus = new DialogFocusController({
+  getContainer: () => dialogElement.value ?? null,
+  onEscape: closePalette,
+});
+
+/**
+ * Un autre dialogue modal (paramètres, aperçu, historique) est ouvert : la
+ * recherche ne doit pas s'ouvrir au-dessus de lui.
+ */
+function isAnotherModalOpen(): boolean {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[role="dialog"][aria-modal="true"], dialog[open]',
+    ),
+  ).some(
+    (element) =>
+      element !== dialogElement.value && isDialogElementVisible(element),
+  );
+}
 
 const visibleCommands = computed(() => {
   const needle = props.query.trim().toLowerCase();
@@ -72,27 +105,47 @@ watch(items, () => {
 });
 
 async function openPalette(query = "") {
+  if (isAnotherModalOpen()) return;
+  if (isOpen.value) {
+    emit("update:query", query);
+    input.value?.focus();
+    return;
+  }
   isOpen.value = true;
   emit("update:query", query);
   await nextTick();
+  dialogFocus.attach();
   input.value?.focus();
 }
 
-function closePalette() {
-  isOpen.value = false;
-  emit("update:query", "");
-  emit("close");
+/**
+ * Ctrl+K bascule la palette : ouvrir ne réinitialise pas la requête en cours,
+ * refermer préserve le contrat existant (requête vidée + événement close).
+ */
+async function togglePaletteFromShortcut() {
+  if (isOpen.value) {
+    closePalette();
+    return;
+  }
+  if (isAnotherModalOpen()) {
+    return;
+  }
+  isOpen.value = true;
+  await nextTick();
+  dialogFocus.attach();
+  input.value?.focus();
 }
 
 function openWithShortcut(event: KeyboardEvent) {
   if (
     (event.ctrlKey || event.metaKey) &&
     !event.shiftKey &&
+    !event.altKey &&
     event.key.toLowerCase() === "k"
   ) {
     event.preventDefault();
     event.stopPropagation();
-    void openPalette();
+    void togglePaletteFromShortcut();
   }
   if (event.key === "Escape" && isOpen.value) {
     event.preventDefault();
@@ -127,9 +180,10 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener("keydown", openWithShortcut, true));
-onBeforeUnmount(() =>
-  window.removeEventListener("keydown", openWithShortcut, true),
-);
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", openWithShortcut, true);
+  dialogFocus.detach();
+});
 
 defineExpose({ openPalette, closePalette, isOpen });
 </script>
@@ -142,6 +196,7 @@ defineExpose({ openPalette, closePalette, isOpen });
     @click.self="closePalette"
   >
     <section
+      ref="dialogElement"
       aria-label="Recherche dans le coffre"
       class="search-palette"
       role="dialog"
@@ -164,16 +219,52 @@ defineExpose({ openPalette, closePalette, isOpen });
         class="search-palette-list"
         role="listbox"
       >
-        <li v-for="(item, index) in items" :key="`${item.kind}-${item.id}`">
+        <li
+          v-if="visibleCommands.length"
+          aria-hidden="true"
+          class="search-palette-group"
+          role="presentation"
+        >
+          Commandes
+        </li>
+        <li v-for="command in visibleCommands" :key="`command-${command.id}`">
           <button
-            :aria-selected="index === activeIndex"
+            :aria-selected="
+              items[activeIndex]?.kind === 'command' &&
+              items[activeIndex]?.id === command.id
+            "
             class="search-palette-option"
             role="option"
             type="button"
-            @click="activate(index)"
+            @click="activate(visibleCommands.indexOf(command))"
           >
-            <span>{{ item.label }}</span>
-            <small v-if="item.hint">{{ item.hint }}</small>
+            <span>{{ command.label }}</span>
+            <small v-if="command.hint">{{ command.hint }}</small>
+          </button>
+        </li>
+        <li
+          v-if="props.results.length"
+          aria-hidden="true"
+          class="search-palette-group"
+          role="presentation"
+        >
+          Notes
+        </li>
+        <li v-for="result in props.results" :key="`note-${result.id}`">
+          <button
+            :aria-selected="
+              items[activeIndex]?.kind === 'note' &&
+              items[activeIndex]?.id === result.id
+            "
+            class="search-palette-option"
+            role="option"
+            type="button"
+            @click="
+              activate(visibleCommands.length + props.results.indexOf(result))
+            "
+          >
+            <span>{{ result.label }}</span>
+            <small v-if="result.hint">{{ result.hint }}</small>
           </button>
         </li>
       </ul>
@@ -223,6 +314,15 @@ defineExpose({ openPalette, closePalette, isOpen });
   max-height: 18rem;
   overflow: auto;
   list-style: none;
+}
+
+.search-palette-group {
+  padding: 0.35rem 0.65rem 0.2rem;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .search-palette-option {

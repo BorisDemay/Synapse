@@ -22,6 +22,8 @@ const props = defineProps<{
   attachedIds?: string[];
   nested?: boolean;
   nodes: VaultTreeNode[];
+  /** External selection (palette, recents, backlinks); the tree follows it. */
+  selectedId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -197,6 +199,47 @@ const activeIndex = computed(() => {
   return index === -1 ? 0 : index;
 });
 
+function findTrail(
+  nodes: VaultTreeNode[],
+  id: string,
+  trail: VaultTreeNode[] = [],
+): VaultTreeNode[] | undefined {
+  for (const node of nodes) {
+    const nextTrail = [...trail, node];
+    if (node.id === id) return nextTrail;
+    if (node.children) {
+      const nested = findTrail(node.children, id, nextTrail);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+}
+
+/** Follows an external selection: marks it active, expands ancestors and
+ * scrolls the virtual window to it without stealing focus. */
+async function revealSelected(id: string) {
+  const trail = findTrail(props.nodes, id);
+  if (!trail) return;
+  activeId.value = id;
+  if (trail.length > 1) {
+    const next = new Set(collapsed.value);
+    for (const ancestor of trail.slice(0, -1)) next.delete(ancestor.id);
+    collapsed.value = next;
+  }
+  await nextTick();
+  if (id !== activeId.value) return;
+  const index = findVisibleNodeIndex(id);
+  if (index >= 0) showIndex(index);
+}
+
+watch(
+  () => props.selectedId,
+  (id) => {
+    if (id && id !== activeId.value) void revealSelected(id);
+  },
+  { immediate: true },
+);
+
 watch(
   () => visibleNodeCount.value,
   () => {
@@ -309,6 +352,7 @@ async function selectNext(index: number) {
         entry.node.kind === 'folder' ? isExpanded(entry.node.id) : undefined
       "
       :aria-level="entry.level"
+      :style="{ '--tree-depth': entry.level - 1 }"
       :aria-posinset="entry.posInSet"
       :aria-selected="renderedStart + renderedIndex === activeIndex"
       :aria-setsize="entry.setSize"
@@ -327,6 +371,12 @@ async function selectNext(index: number) {
       @keydown.enter.meta.prevent="attach(renderedStart + renderedIndex)"
     >
       <div class="vault-tree-row">
+        <span
+          v-if="entry.node.kind === 'folder'"
+          class="vault-tree-disclosure"
+          aria-hidden="true"
+          >{{ isExpanded(entry.node.id) ? "▾" : "▸" }}</span
+        >
         <span class="vault-tree-label">{{ entry.node.label }}</span>
         <button
           v-if="entry.node.kind !== 'folder'"
@@ -397,6 +447,7 @@ async function selectNext(index: number) {
   gap: 0.45rem;
   min-height: 2.35rem;
   padding: 0.55rem 0.45rem;
+  padding-inline-start: calc(0.45rem + min(6rem, var(--tree-depth, 0) * 1rem));
   border-radius: var(--synapse-radius-sm);
   transition:
     background 140ms ease,
@@ -416,6 +467,13 @@ async function selectNext(index: number) {
 
 .vault-tree-item[data-attached="true"] {
   box-shadow: inset 3px 0 0 var(--synapse-color-accent);
+}
+
+.vault-tree-item[data-kind="folder"] > .vault-tree-row {
+  font-weight: 650;
+}
+.vault-tree-disclosure {
+  flex-shrink: 0;
 }
 
 .vault-tree-label {

@@ -76,7 +76,25 @@ describe("LoginView", () => {
     expect(wrapper.text()).not.toContain("Connexion impossible");
   });
 
-  it("keeps the generic error for unexpected login failures", async () => {
+  it("keeps the generic error for unexpected server failures", async () => {
+    mockSignupStatus(false);
+    const { wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "login").mockRejectedValue(
+      new AuthError("Authentication failed", 503),
+    );
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "Connexion impossible",
+    );
+  });
+
+  it("names wrong credentials without accusing an unknown account", async () => {
     mockSignupStatus(false);
     const { wrapper } = await mountLogin();
     const auth = useAuthStore();
@@ -90,8 +108,69 @@ describe("LoginView", () => {
     await flushPromises();
 
     expect(wrapper.get('[role="alert"]').text()).toContain(
-      "Connexion impossible",
+      "Email ou mot de passe incorrect",
     );
+  });
+
+  it("distinguishes an unreachable server from a credential rejection", async () => {
+    mockSignupStatus(false);
+    const { wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "login").mockRejectedValue(new TypeError("network down"));
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    const alert = wrapper.get('[role="alert"]').text();
+    expect(alert).toContain("injoignable");
+    expect(alert).not.toContain("Connexion impossible");
+  });
+
+  it("prevents duplicate submissions while a login request is in flight", async () => {
+    mockSignupStatus(false);
+    const { wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    const vault = useVaultStore();
+    let resolveLogin: (() => void) | undefined;
+    const login = vi.spyOn(auth, "login").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLogin = resolve;
+        }),
+    );
+    vi.spyOn(vault, "tryUnlockFromTrustedDevice").mockResolvedValue(false);
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(login).toHaveBeenCalledOnce();
+    const submitButton = wrapper.get('button[type="submit"]');
+    expect(submitButton.attributes("disabled")).toBeDefined();
+
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(login).toHaveBeenCalledOnce();
+
+    resolveLogin?.();
+    await flushPromises();
+
+    expect(
+      wrapper.get('button[type="submit"]').attributes("disabled"),
+    ).toBeUndefined();
+  });
+
+  it("separates the remembered account session from the trusted device and warns shared use", async () => {
+    mockSignupStatus(false);
+    const { wrapper } = await mountLogin();
+
+    const hint = wrapper.get("#login-remember-hint").text();
+    expect(hint).toContain("phrase du coffre");
+    expect(hint).toContain("appareil de confiance");
+    expect(hint).toContain("appareil partagé");
   });
 
   it("hides the register link when public signup is closed", async () => {
@@ -110,11 +189,15 @@ describe("LoginView", () => {
     );
   });
 
-  it("accepts a local fixture identifier that is not an email address", async () => {
+  it("uses an email keyboard without rejecting the development login identifier", async () => {
     mockSignupStatus(false);
     const { wrapper } = await mountLogin();
 
-    expect(wrapper.get("#login-email").attributes("type")).toBe("text");
+    expect(wrapper.get("#login-email").attributes("inputmode")).toBe("email");
+    await wrapper.get("#login-email").setValue("test");
+    expect(
+      (wrapper.get("#login-email").element as HTMLInputElement).checkValidity(),
+    ).toBe(true);
   });
 
   it("opens the vault directly when a trusted device can unlock", async () => {

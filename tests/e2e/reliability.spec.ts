@@ -25,7 +25,10 @@ test("HTTP503 work survives reload and logout before it is acknowledged", async 
     else await route.continue();
   });
   await writeAndSave(page, "# preserved503\n\nunsynced work");
-  await expect(page.locator(".sync-pill")).toHaveText("error");
+  await expect(page.locator(".sync-pill")).toHaveAttribute(
+    "data-status",
+    "error",
+  );
   await page.reload();
   await registerAndUnlock(
     page,

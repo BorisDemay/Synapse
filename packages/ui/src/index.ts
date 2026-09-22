@@ -1,6 +1,7 @@
 export { default as AiChat } from "./components/AiChat.vue";
 export { default as AiConversationPanel } from "./components/AiConversationPanel.vue";
 export { default as AppShell } from "./components/AppShell.vue";
+export { DialogFocusController } from "./dialog-focus";
 export { default as BacklinksPanel } from "./components/BacklinksPanel.vue";
 export { default as ConflictResolver } from "./components/ConflictResolver.vue";
 export { default as HistoryPanel } from "./components/HistoryPanel.vue";

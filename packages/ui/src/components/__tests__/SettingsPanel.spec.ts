@@ -14,8 +14,15 @@ import {
 import { resetThemeState, useTheme } from "../../theme";
 import SettingsPanel from "../SettingsPanel.vue";
 
-function selectCategory(wrapper: ReturnType<typeof mount>, label: string) {
-  return wrapper.get(`[data-settings-category="${label}"]`).trigger("click");
+async function selectCategory(
+  wrapper: ReturnType<typeof mount>,
+  label: string,
+) {
+  await wrapper.get(`[data-settings-category="${label}"]`).trigger("click");
+  // Double attente : la catégorie cliquée doit être rendue même si un effet
+  // de bord retarde le flush d’un tick.
+  await wrapper.vm.$nextTick();
+  await wrapper.vm.$nextTick();
 }
 
 describe("SettingsPanel", () => {
@@ -171,6 +178,50 @@ describe("SettingsPanel", () => {
     await selectCategory(wrapper, "Compte");
     expect(wrapper.find("#settings-sessions").exists()).toBe(false);
     expect(wrapper.find(".settings-sessions").exists()).toBe(false);
+  });
+
+  it("rend #settings-sessions sous Appareil avec et sans support appareil", async () => {
+    // Régression : la section sessions doit rester rendue après sélection
+    // d’Appareil, y compris si la liste des catégories est recalculée.
+    const sessions = [
+      { createdAt: "2026-08-17", current: true, id: "session-current" },
+      { createdAt: "2026-08-16", current: false, id: "session-other" },
+    ];
+
+    const withDevice = mount(SettingsPanel, {
+      props: {
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+        sessions,
+      },
+    });
+    await selectCategory(withDevice, "Appareil");
+    const sessionsSection = withDevice.get(
+      'section[aria-labelledby="settings-sessions"]',
+    );
+    expect(withDevice.get("#settings-sessions").element.tagName).toBe("H3");
+    expect(
+      withDevice.get('[aria-label="Sessions actives"]').findAll("li"),
+    ).toHaveLength(2);
+    withDevice.unmount();
+
+    const withoutDevice = mount(SettingsPanel, {
+      props: {
+        deviceSupported: false,
+        deviceTrusted: false,
+        open: true,
+        sessions,
+      },
+    });
+    await selectCategory(withoutDevice, "Appareil");
+    expect(
+      withoutDevice
+        .find('section[aria-labelledby="settings-sessions"]')
+        .exists(),
+    ).toBe(true);
+    expect(withoutDevice.get("#settings-sessions").element.tagName).toBe("H3");
+    withoutDevice.unmount();
   });
 
   it("marks the active category with aria-current", async () => {
@@ -546,6 +597,155 @@ describe("SettingsPanel", () => {
     expect(
       wrapper.find('[aria-label="Exporter les notes en Markdown"]').exists(),
     ).toBe(false);
+  });
+
+  it("déplace le focus dans le dialogue à l’ouverture et ferme avec Échap", async () => {
+    const wrapper = mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    const dialog = wrapper.get('[role="dialog"]').element as HTMLElement;
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    dialog.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("piège Maj+Tab depuis le premier élément focusable du dialogue", async () => {
+    const wrapper = mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    const dialog = wrapper.get('[role="dialog"]').element as HTMLElement;
+    dialog.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+
+    const focusables = dialog.querySelectorAll<HTMLElement>(
+      "button, input, [tabindex]:not([tabindex='-1'])",
+    );
+    expect(document.activeElement).toBe(focusables[focusables.length - 1]);
+    wrapper.unmount();
+  });
+
+  it("réinitialise l’erreur locale du formulaire au changement de catégorie", async () => {
+    const wrapper = mount(SettingsPanel, {
+      props: {
+        accountEmail: "alice@example.test",
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+
+    await selectCategory(wrapper, "Coffre");
+    await wrapper.get('input[name="current-passphrase"]').setValue("old");
+    await wrapper.get('input[name="new-passphrase"]').setValue("new phrase");
+    await wrapper.get('input[name="confirm-passphrase"]').setValue("different");
+    await wrapper.get('form[data-form="vault-passphrase"]').trigger("submit");
+    expect(wrapper.get('[role="alert"]').text()).toContain("ne correspond pas");
+
+    await selectCategory(wrapper, "Apparence");
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it("efface les secrets saisis quand le panneau se ferme", async () => {
+    const wrapper = mount(SettingsPanel, {
+      props: {
+        accountEmail: "alice@example.test",
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+
+    await selectCategory(wrapper, "Coffre");
+    await wrapper
+      .get('input[name="current-passphrase"]')
+      .setValue("old phrase");
+    await wrapper.get('input[name="new-passphrase"]').setValue("new phrase");
+    await wrapper
+      .get('input[name="confirm-passphrase"]')
+      .setValue("new phrase");
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await selectCategory(wrapper, "Coffre");
+
+    expect(
+      (
+        wrapper.get('input[name="current-passphrase"]')
+          .element as HTMLInputElement
+      ).value,
+    ).toBe("");
+    expect(
+      (wrapper.get('input[name="new-passphrase"]').element as HTMLInputElement)
+        .value,
+    ).toBe("");
+    expect(
+      (
+        wrapper.get('input[name="confirm-passphrase"]')
+          .element as HTMLInputElement
+      ).value,
+    ).toBe("");
+  });
+
+  it("annonce le retour d’erreur et affiche une confirmation d’envoi à retenter", async () => {
+    const wrapper = mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        accountEmail: "alice@example.test",
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+
+    await selectCategory(wrapper, "Compte");
+    await wrapper
+      .get('input[name="current-password"]')
+      .setValue("old password");
+    await wrapper.get('input[name="new-password"]').setValue("new password 12");
+    await wrapper
+      .get('input[name="confirm-password"]')
+      .setValue("new password 12");
+    await wrapper.get('form[data-form="account-password"]').trigger("submit");
+
+    expect(wrapper.get('[data-test="settings-pending"]').text()).toContain(
+      "Demande envoyée",
+    );
+
+    await wrapper.setProps({ errorMessage: "Mot de passe actuel incorrect." });
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-test="settings-pending"]').exists()).toBe(false);
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain("Mot de passe actuel incorrect.");
+    expect(document.activeElement).toBe(alert.element);
+    wrapper.unmount();
   });
 
   it("requires typing the account email before deleting", async () => {

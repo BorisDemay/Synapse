@@ -158,6 +158,21 @@ conserve la hauteur de défilement sans allouer une entrée ARIA par feuille. La
 mesure ci-dessus a été rejouée après cette optimisation, avec les mêmes limites
 de 80 `treeitem` et 584 éléments DOM.
 
+### Interface writing-first — 22 septembre 2026
+
+Après ajout de la recherche visible, des éléments supprimés, des chemins et de
+la navigation adaptative, le même fixture de 10 000 notes matérialise toujours
+**80 lignes d’arbre**, pour **593 éléments DOM**. Le plafond DOM du script passe
+explicitement de 584 à **600** pour ces contrôles fixes ; la limite de lignes
+virtualisées reste 80. Le benchmark sélectionne désormais une feuille de note,
+pas le premier dossier de l’arbre hiérarchique.
+
+Mesure ponctuelle Chromium/Vite sur cette machine : ouverture 801,1 ms, rendu
+113,4 ms, recherche médiane 15,5 ms / p95 19,1 ms, édition → persistance 769 ms,
+action de sauvegarde 168,9 ms, reconnexion simulée 1 337,8 ms / deux GET.
+La réouverture durable et le delta incrémental ont été vérifiés. Le fixture
+(9 425,3 ms) reste exclu. Ces latences ne sont pas des seuils CI absolus.
+
 ### Réplique Markdown native
 
 ```bash

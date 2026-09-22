@@ -62,7 +62,7 @@ const compactToggleLabel = computed(() =>
     </IconActionButton>
     <IconActionButton
       v-if="showImport"
-      label="importer une note"
+      label="Importer un ZIP Markdown (.zip)"
       @click="emit('import')"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -74,7 +74,7 @@ const compactToggleLabel = computed(() =>
     </IconActionButton>
     <IconActionButton
       v-if="showImportFolder"
-      label="importer une vault"
+      label="Importer un dossier Markdown"
       @click="emit('import-folder')"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">

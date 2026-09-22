@@ -62,7 +62,14 @@ export async function registerAndUnlock(
     }
     await expect(unlock).toBeVisible({ timeout: 30000 });
   }
-  await page.getByLabel("Phrase de déchiffrement").fill(passphrase);
+  await page
+    .getByLabel("Phrase de déchiffrement", { exact: true })
+    .fill(passphrase);
+  if (mode === "create") {
+    await page
+      .getByLabel("Confirmer la phrase de déchiffrement", { exact: true })
+      .fill(passphrase);
+  }
   await page
     .getByRole("button", {
       name: mode === "create" ? "Créer et déverrouiller" : "Déverrouiller",
@@ -95,15 +102,23 @@ export async function writeAndSave(page: Page, text: string): Promise<void> {
 }
 
 export async function expectSynced(page: Page): Promise<void> {
-  await expect(page.locator(".sync-pill")).toHaveText("synced", {
-    timeout: 30_000,
-  });
+  await expect(page.locator(".sync-pill")).toHaveAttribute(
+    "data-status",
+    "synced",
+    {
+      timeout: 30_000,
+    },
+  );
 }
 
 export async function expectOffline(page: Page): Promise<void> {
-  await expect(page.locator(".sync-pill")).toHaveText("offline", {
-    timeout: 30_000,
-  });
+  await expect(page.locator(".sync-pill")).toHaveAttribute(
+    "data-status",
+    "offline",
+    {
+      timeout: 30_000,
+    },
+  );
 }
 
 export async function goOnline(page: Page): Promise<void> {

@@ -56,7 +56,12 @@ test("registers, creates a vault, and saves an encrypted note", async ({
   ).toBeVisible({
     timeout: 30_000,
   });
-  await page.getByLabel("Phrase de déchiffrement").fill(passphrase);
+  await page
+    .getByLabel("Phrase de déchiffrement", { exact: true })
+    .fill(passphrase);
+  await page
+    .getByLabel("Confirmer la phrase de déchiffrement", { exact: true })
+    .fill(passphrase);
   await page.getByRole("button", { name: "Créer et déverrouiller" }).click();
 
   await expect(

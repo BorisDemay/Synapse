@@ -38,6 +38,7 @@ import {
   isBlockedAttachmentPath,
   legacyWebNotePath,
   MAX_ITEM_BYTES,
+  type DecodedVaultItem,
 } from "../crypto/vault-item";
 import {
   createWrappedVaultKey,
@@ -61,6 +62,7 @@ import {
   listCachedNotes,
   listCachedVaultIds,
   listNoteRevisions,
+  type CachedNoteRecord,
   putAssistantCredential,
   putAssistantConversations,
   putCachedEnvelope,
@@ -86,6 +88,14 @@ import {
 import { useAuthStore } from "./auth";
 
 export type SyncStatus = "saving" | "synced" | "offline" | "conflict" | "error";
+
+export interface DeletedItemRow {
+  id: string;
+  kind: "note" | "attachment";
+  label: string;
+  path: string;
+  recoverable: boolean;
+}
 
 export interface ActiveConflict {
   base: string;
@@ -136,6 +146,7 @@ function randomNonce(): Uint8Array {
 
 const SKIP_TRUSTED_UNLOCK_KEY = "synapse-skip-trusted-unlock";
 const DELETED_NOTE_SENTINEL = "\u0000synapse/deleted";
+const DELETED_ITEM_PLACEHOLDER_LABEL = "Élément supprimé";
 
 function csrfHeaders(): HeadersInit {
   return {
@@ -628,7 +639,12 @@ export const useVaultStore = defineStore("vault", () => {
       if (!userId) {
         throw new Error("Unable to list vaults");
       }
-      return listCachedVaultIds(userId);
+      const cachedIds = await listCachedVaultIds(userId);
+      if (cachedIds.length === 0) {
+        // An unavailable server does not prove that this account has no vault.
+        throw new Error("Unable to list vaults");
+      }
+      return cachedIds;
     }
   }
 
@@ -1559,6 +1575,207 @@ export const useVaultStore = defineStore("vault", () => {
     return result;
   }
 
+  function isActiveVaultSession(
+    key: Uint8Array,
+    vaultId: string,
+    userId: string,
+  ): boolean {
+    return (
+      vaultKey === key &&
+      currentVaultId.value === vaultId &&
+      useAuthStore().userId === userId
+    );
+  }
+
+  function decryptCachedNote(
+    key: Uint8Array,
+    record: CachedNoteRecord,
+  ): Uint8Array {
+    return xchacha20poly1305(
+      key,
+      Uint8Array.from(record.nonce),
+      aad(record.vaultId, record.noteId, record.revision),
+    ).decrypt(Uint8Array.from(record.ciphertext));
+  }
+
+  /**
+   * Latest encrypted revision that is not a deletion tombstone. Only called
+   * for cached tombstones, so histories stay lazy and never hydrate at open.
+   */
+  async function latestRecoverableRevision(
+    userId: string,
+    vaultId: string,
+    noteId: string,
+    key: Uint8Array,
+  ): Promise<DecodedVaultItem | null> {
+    const records = await listNoteRevisions(userId, vaultId, noteId);
+    if (!isActiveVaultSession(key, vaultId, userId)) {
+      throw new Error("Vault is locked");
+    }
+    for (const record of records) {
+      if (
+        record.userId !== userId ||
+        record.vaultId !== vaultId ||
+        record.noteId !== noteId
+      ) {
+        continue;
+      }
+      try {
+        const plaintext = xchacha20poly1305(
+          key,
+          Uint8Array.from(record.nonce),
+          aad(record.vaultId, record.noteId, record.baseRevision),
+        ).decrypt(Uint8Array.from(record.ciphertext));
+        if (isDeletedNoteContent(new TextDecoder().decode(plaintext))) {
+          continue;
+        }
+        return decodeVaultItem(plaintext);
+      } catch {
+        // Skip revisions that cannot be authenticated with the current key.
+      }
+    }
+    return null;
+  }
+
+  function deletedItemRow(
+    id: string,
+    decoded: DecodedVaultItem | null,
+  ): DeletedItemRow {
+    if (!decoded) {
+      // Without local history the row stays honest: no invented label or path.
+      return {
+        id,
+        kind: "note",
+        label: DELETED_ITEM_PLACEHOLDER_LABEL,
+        path: "",
+        recoverable: false,
+      };
+    }
+    if (decoded.kind === "attachment") {
+      return {
+        id,
+        kind: "attachment",
+        label: decoded.path,
+        path: decoded.path,
+        recoverable: true,
+      };
+    }
+    return {
+      id,
+      kind: "note",
+      label: noteExportTitle(decoded.markdown, id.slice(0, 8)),
+      path: decoded.kind === "note" ? decoded.path : legacyWebNotePath(id),
+      recoverable: true,
+    };
+  }
+
+  async function listDeletedItems(): Promise<DeletedItemRow[]> {
+    const { key, vaultId } = requireUnlockedVault();
+    const userId = requireUserId();
+    const cached = await listCachedNotes(userId, vaultId);
+    if (!isActiveVaultSession(key, vaultId, userId)) {
+      throw new Error("Vault is locked");
+    }
+    const rows: DeletedItemRow[] = [];
+    for (const record of cached) {
+      if (record.vaultId !== vaultId || record.userId !== userId) continue;
+      try {
+        const current = decryptCachedNote(key, record);
+        if (!isDeletedNoteContent(new TextDecoder().decode(current))) continue;
+      } catch {
+        continue;
+      }
+      const decoded = await latestRecoverableRevision(
+        userId,
+        vaultId,
+        record.noteId,
+        key,
+      );
+      if (!isActiveVaultSession(key, vaultId, userId)) {
+        throw new Error("Vault is locked");
+      }
+      rows.push(deletedItemRow(record.noteId, decoded));
+    }
+    return rows;
+  }
+
+  async function restoreDeletedItem(id: string): Promise<void> {
+    const { key, vaultId } = requireUnlockedVault();
+    const userId = requireUserId();
+    const cached = await listCachedNotes(userId, vaultId);
+    if (!isActiveVaultSession(key, vaultId, userId)) {
+      throw new Error("Vault is locked");
+    }
+    const record = cached.find(
+      (row) =>
+        row.noteId === id && row.vaultId === vaultId && row.userId === userId,
+    );
+    if (!record) {
+      throw new Error("Deleted item is missing");
+    }
+    let current: string;
+    try {
+      current = new TextDecoder().decode(decryptCachedNote(key, record));
+    } catch {
+      throw new Error("Deleted item is missing");
+    }
+    if (!isDeletedNoteContent(current)) {
+      throw new Error("Item is no longer deleted");
+    }
+    const decoded = await latestRecoverableRevision(userId, vaultId, id, key);
+    if (!isActiveVaultSession(key, vaultId, userId)) {
+      throw new Error("Vault is locked");
+    }
+    if (!decoded) {
+      throw new Error("No recoverable history for this item");
+    }
+    // History reads yield: another local action or tab may have replaced the
+    // tombstone. Never restore an old snapshot over that newer live item.
+    const latest = (await listCachedNotes(userId, vaultId)).find(
+      (row) =>
+        row.noteId === id && row.vaultId === vaultId && row.userId === userId,
+    );
+    if (!isActiveVaultSession(key, vaultId, userId)) {
+      throw new Error("Vault is locked");
+    }
+    if (
+      notes.has(id) ||
+      attachments.has(id) ||
+      !latest ||
+      latest.revision !== record.revision ||
+      latest.ciphertextHash !== record.ciphertextHash ||
+      latest.nonce.length !== record.nonce.length ||
+      !latest.nonce.every((byte, index) => byte === record.nonce[index]) ||
+      !isDeletedNoteContent(
+        new TextDecoder().decode(decryptCachedNote(key, latest)),
+      )
+    ) {
+      throw new Error("Item is no longer deleted");
+    }
+    const path =
+      decoded.kind === "attachment"
+        ? decoded.path
+        : decoded.kind === "note"
+          ? decoded.path
+          : legacyWebNotePath(id);
+    const pathTaken =
+      [...notes.values()].some((note) => note.path === path) ||
+      [...attachments.values()].some((file) => file.path === path);
+    if (pathTaken) {
+      throw new Error("Path already in use");
+    }
+    if (decoded.kind === "attachment") {
+      await saveAttachment({
+        bytes: decoded.bytes,
+        contentType: decoded.contentType,
+        id,
+        path: decoded.path,
+      });
+    } else {
+      await saveNote({ content: decoded.markdown, id, path });
+    }
+  }
+
   async function resolveConflict(content: string) {
     const current = activeConflict.value;
     if (!current || !vaultKey || !currentVaultId.value) {
@@ -1634,6 +1851,7 @@ export const useVaultStore = defineStore("vault", () => {
     isUnlocked,
     lastError,
     listVaultIds,
+    listDeletedItems,
     loadAssistantCredential,
     loadAssistantConversations,
     loadNotes,
@@ -1658,6 +1876,7 @@ export const useVaultStore = defineStore("vault", () => {
     renameNote,
     resolveConflict,
     restoreRevision,
+    restoreDeletedItem,
     restorePointsFor,
     saveAttachment,
     savePreferences,

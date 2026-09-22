@@ -28,7 +28,11 @@ const activeTab = ref<"backlinks" | "history">("backlinks");
     <header class="note-relations-header">
       <span>Note active</span>
       <button
-        aria-label="Fermer le panneau Historique"
+        :aria-label="
+          activeTab === 'backlinks'
+            ? 'Fermer le panneau des liens entrants'
+            : 'Fermer le panneau Historique'
+        "
         name="close-note-relations"
         type="button"
         @click="emit('close')"
