@@ -25,15 +25,19 @@ const vditorMock = vi.hoisted(() => {
       render?: { media?: { enable?: boolean } };
     };
     tab?: string;
-    toolbar?: Array<string | { name: string }>;
+    toolbar?: Array<
+      string | { name: string; hotkey?: string; toolbar?: Array<string> }
+    >;
     value?: string;
   };
 
   let options: Options | undefined;
   let root: HTMLElement | undefined;
+  let autoAfter = true;
   const instance = {
     deleteValue: vi.fn(),
     destroy: vi.fn(),
+    focus: vi.fn(),
     getCurrentMode: vi.fn(() => options?.mode ?? "ir"),
     getSelection: vi.fn(() => ""),
     getValue: vi.fn(() => options?.value ?? ""),
@@ -67,6 +71,9 @@ const vditorMock = vi.hoisted(() => {
         <div class="vditor-toolbar__item">
           <button data-type="table" aria-label="Tableau"></button>
         </div>
+        <div class="vditor-toolbar__item">
+          <button data-type="more" aria-label="Plus"></button>
+        </div>
         <div class="vditor-toolbar__item synapse-edit-mode-host">
           <button data-type="edit-mode" aria-label="Mode"></button>
           <button data-mode="ir">Markdown</button>
@@ -80,7 +87,9 @@ const vditorMock = vi.hoisted(() => {
         </div>
       </div>
     `;
-    nextOptions.after?.();
+    if (autoAfter) {
+      nextOptions.after?.();
+    }
     return instance;
   });
 
@@ -91,6 +100,7 @@ const vditorMock = vi.hoisted(() => {
     reset() {
       options = undefined;
       root = undefined;
+      autoAfter = true;
       Constructor.mockClear();
       Object.values(instance).forEach((value) => {
         if (typeof value === "function") {
@@ -99,6 +109,13 @@ const vditorMock = vi.hoisted(() => {
       });
     },
     root: () => root,
+    deferAfter() {
+      autoAfter = false;
+    },
+    flushAfter() {
+      autoAfter = true;
+      options?.after?.();
+    },
   };
 });
 
@@ -238,6 +255,89 @@ describe("MarkdownEditor", () => {
     expect(toolbar.attributes("role")).toBe("toolbar");
   });
 
+  it("reserves Ctrl+K for global search by moving insert-link to Ctrl+Shift+K", () => {
+    mount(MarkdownEditor, { props: { modelValue: "" } });
+
+    const toolbar = vditorMock.options()?.toolbar ?? [];
+    const link = toolbar.find(
+      (item): item is { name: string; hotkey: string } =>
+        typeof item !== "string" && item.name === "link",
+    );
+    expect(link).toEqual({ name: "link", hotkey: "⇧⌘K" });
+    expect(
+      toolbar.some((item) => typeof item !== "string" && item.hotkey === "⌘K"),
+    ).toBe(false);
+  });
+
+  it("keeps common formatting actions upfront behind a secondary overflow", () => {
+    mount(MarkdownEditor, { props: { modelValue: "" } });
+
+    const toolbar = vditorMock.options()?.toolbar ?? [];
+    expect(
+      toolbar.map((item) => (typeof item === "string" ? item : item.name)),
+    ).toEqual([
+      "headings",
+      "bold",
+      "italic",
+      "strike",
+      "link",
+      "list",
+      "quote",
+      "|",
+      "undo",
+      "redo",
+      "|",
+      "more",
+      "edit-mode",
+    ]);
+
+    const overflow = toolbar.find(
+      (item): item is { name: string; toolbar: Array<string> } =>
+        typeof item !== "string" && item.name === "more",
+    );
+    expect(overflow?.toolbar).toEqual([
+      "emoji",
+      "|",
+      "ordered-list",
+      "check",
+      "outdent",
+      "indent",
+      "|",
+      "code",
+      "inline-code",
+      "|",
+      "line",
+      "table",
+    ]);
+  });
+
+  it("labels the overflow entry in French", () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
+
+    expect(wrapper.get('.vditor-toolbar button[data-type="more"]').text()).toBe(
+      "Plus",
+    );
+  });
+
+  it("exposes focus() targeting the writing area once ready", () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
+
+    wrapper.vm.focus();
+
+    expect(vditorMock.instance.focus).toHaveBeenCalledOnce();
+  });
+
+  it("defers focus() until the engine signals readiness", () => {
+    vditorMock.deferAfter();
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
+
+    wrapper.vm.focus();
+    expect(vditorMock.instance.focus).not.toHaveBeenCalled();
+
+    vditorMock.flushAfter();
+    expect(vditorMock.instance.focus).toHaveBeenCalledOnce();
+  });
+
   it("keeps table actions out of the formatting toolbar", () => {
     const wrapper = mount(MarkdownEditor, {
       props: { modelValue: "" },
@@ -357,7 +457,15 @@ describe("MarkdownEditor", () => {
       .trigger("contextmenu", { clientX: 32, clientY: 64 });
     await wrapper.vm.$nextTick();
 
-    const labels = menuItems().map((item) => item.textContent?.trim());
+    const labels = menuItems()
+      .map((item) =>
+        item
+          .querySelector<HTMLSpanElement>(
+            ".synapse-markdown-context-item-label",
+          )
+          ?.textContent?.trim(),
+      )
+      .filter(Boolean) as string[];
     expect(menuNode()?.getAttribute("aria-label")).toBe("Outils Markdown");
     expect(labels).toEqual(
       expect.arrayContaining([

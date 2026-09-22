@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import LocalFolderPanel from "./LocalFolderPanel.vue";
+import DeletedItemsPanel from "./DeletedItemsPanel.vue";
 import {
   AiChat,
   AiConversationPanel,
   AppShell,
   BacklinksPanel,
   ConflictResolver,
+  DialogFocusController,
   GraphPanel,
   NoteRelationsPanel,
   MarkdownEditor,
@@ -16,7 +18,6 @@ import {
   VaultNotesSectionHeader,
   VaultTree,
   useSidebarLayout,
-  defaultAssistantSidePanelsOpen,
   useCompactAssistantLayout,
   backlinksFor,
   buildLocalGraph,
@@ -37,7 +38,15 @@ import {
   type SettingsUser,
   type VaultTreeNode,
 } from "@synapse/ui";
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -54,7 +63,7 @@ import {
 } from "../import/markdown-folder";
 import { useAssistantStore } from "../stores/assistant";
 import { useAuthStore } from "../stores/auth";
-import { useVaultStore } from "../stores/vault";
+import { useVaultStore, type DeletedItemRow } from "../stores/vault";
 
 const vault = useVaultStore();
 const auth = useAuthStore();
@@ -64,10 +73,11 @@ const content = ref("# Nouvelle note\n\n");
 const noteId = ref<string>(uuidV7());
 const selectedNoteId = ref<string | null>(null);
 const formError = ref("");
-const assistantDefaults = defaultAssistantSidePanelsOpen();
+const editorSurface = ref<InstanceType<typeof MarkdownEditor> | null>(null);
+const shell = ref<InstanceType<typeof AppShell> | null>(null);
 const assistantOpen = ref(false);
-const assistantHistoryOpen = ref(assistantDefaults.history);
-const noteHistoryOpen = ref(assistantDefaults.relations);
+const assistantHistoryOpen = ref(false);
+const noteHistoryOpen = ref(false);
 const compactAssistant = useCompactAssistantLayout();
 compactAssistant.bindSidePanels({
   historyOpen: assistantHistoryOpen,
@@ -95,16 +105,38 @@ const importFolderInput = ref<HTMLInputElement>();
 const importPlan = ref<MarkdownImportPlan | null>(null);
 const importProgress = ref<ImportProgress | null>(null);
 const importCancelled = ref(false);
+const deletedItemsOpen = ref(false);
+const deletedItems = ref<DeletedItemRow[]>([]);
+const deletedItemsLoading = ref(false);
+const deletedItemsError = ref("");
+const restoringDeletedItem = ref(false);
+const deletingIds = new Set<string>();
+const lastDeletedItem = ref<{ id: string; label: string } | null>(null);
+let vaultViewEpoch = 0;
+let deletedListRequest = 0;
 const attachmentPreview = ref<{
   contentType: string;
   name: string;
   url: string;
 } | null>(null);
+const attachmentDialog = ref<HTMLElement>();
+const attachmentFocus = new DialogFocusController({
+  getContainer: () => attachmentDialog.value ?? null,
+  onEscape: () => {
+    attachmentPreview.value = null;
+  },
+});
+watch(attachmentPreview, async (preview) => {
+  if (preview) {
+    await nextTick();
+    if (attachmentPreview.value) attachmentFocus.attach();
+  } else attachmentFocus.detach();
+});
 const draftBaseRevision = ref<number | null>(null);
-const pendingSaves = new Map<
-  string,
-  { content: string; baseRevision: number; noteId: string }
->();
+const pendingSaves = reactive(
+  new Map<string, { content: string; baseRevision: number; noteId: string }>(),
+);
+const localSaveFailed = ref(false);
 let saveInFlight: Promise<boolean> | undefined;
 
 const storageHealthMessage = computed(() => {
@@ -136,8 +168,10 @@ function noteTitle(markdown: string, fallback: string): string {
   return firstLine?.slice(0, 48) || fallback;
 }
 
-function rootNotePath(path: string | undefined, id: string): string {
-  return path?.split("/").filter(Boolean).pop() ?? `${id.slice(0, 8)}.md`;
+/** Keeps the full vault-relative path: folders drive the tree, templates and
+ * wikilink placement, so it must never be reduced to the root filename. */
+function fullNotePath(path: string | undefined, id: string): string {
+  return path && path.trim() ? path : `${id.slice(0, 8)}.md`;
 }
 
 const queryNotes = computed<QueryNote[]>(() =>
@@ -145,7 +179,7 @@ const queryNotes = computed<QueryNote[]>(() =>
     content: note.content,
     id,
     label: noteTitle(note.content, id.slice(0, 8)),
-    path: rootNotePath(note.path, id),
+    path: fullNotePath(note.path, id),
   })),
 );
 
@@ -202,7 +236,7 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "export", label: "Exporter Markdown" },
   { id: "from-template", label: "Créer une note depuis un modèle" },
   { id: "graph", label: "Afficher le graphe local" },
-  { id: "import", label: "Importer un dossier ou ZIP Markdown" },
+  { id: "import", label: "Importer un ZIP ou un dossier Markdown" },
   { id: "toggle-sidebar", label: "Afficher ou masquer la barre latérale" },
   { id: "toggle-compact", label: "Afficher ou masquer les titres de section" },
 ]);
@@ -233,9 +267,113 @@ const pinnedNotes = computed(() =>
     .filter((note): note is QueryNote => Boolean(note)),
 );
 
+const recentNotes = computed(() =>
+  vault.preferences.recentNoteIds
+    .map((id) => queryNotes.value.find((note) => note.id === id))
+    .filter((note): note is QueryNote => Boolean(note))
+    .slice(0, 8),
+);
+
+const treeSelectedId = computed(() =>
+  selectedNoteId.value && vault.notes.has(selectedNoteId.value)
+    ? selectedNoteId.value
+    : null,
+);
+
 const currentQueryNote = computed(() =>
   queryNotes.value.find((note) => note.id === noteId.value),
 );
+
+const currentNoteTitle = computed(() =>
+  noteTitle(content.value, currentQueryNote.value?.label ?? "Nouvelle note"),
+);
+
+const breadcrumbSegments = computed(() => {
+  const path = vault.notes.get(noteId.value)?.path;
+  return path ? path.split("/").filter(Boolean) : [];
+});
+
+/**
+ * Save feedback must be honest: an unsaved debounce draft, a local save in
+ * flight, a durable local save waiting for sync, a synced ack, offline,
+ * error and conflict are distinct states. Local-only modes never claim
+ * Synchronisé and a pending operation never hides behind Synced.
+ */
+const SAVE_STATUS_LABELS = {
+  conflict: "Conflit à résoudre",
+  draft: "Brouillon modifié",
+  "durable-pending": "Enregistré localement · synchronisation en attente",
+  error: "Échec de l’enregistrement local · brouillon conservé",
+  "sync-error": "Enregistré localement · synchronisation indisponible",
+  syncing: "Synchronisation…",
+  local: "Enregistré localement",
+  offline: "Hors ligne · enregistré localement",
+  synced: "Synchronisé",
+  "saving-local": "Enregistrement local…",
+} as const;
+
+type SaveFeedbackState = keyof typeof SAVE_STATUS_LABELS;
+
+const saveFeedbackState = computed<SaveFeedbackState>(() => {
+  if (localSaveFailed.value) return "error";
+  if (pendingSaves.has(noteId.value)) return "saving-local";
+  if (draftBaseRevision.value !== null || !vault.notes.has(noteId.value))
+    return "draft";
+  if (vault.syncStatus === "conflict") return "conflict";
+  if (vault.syncStatus === "error")
+    return auth.isLocalMode ? "error" : "sync-error";
+  if (auth.isLocalMode) return "local";
+  if (vault.syncStatus === "offline" || !navigator.onLine) return "offline";
+  if (vault.pendingNoteIds.includes(noteId.value)) return "durable-pending";
+  if (vault.syncStatus === "saving") return "syncing";
+  if (auth.isLocalMode || auth.isOfflineSession) return "local";
+  return "synced";
+});
+
+const saveStatusLabel = computed(
+  () => SAVE_STATUS_LABELS[saveFeedbackState.value],
+);
+
+const SYNC_STATUS_LABELS = {
+  saving: "Enregistrement…",
+  synced: "Synchronisé",
+  offline: "Hors ligne",
+  conflict: "Conflit",
+  error: "Erreur",
+} as const;
+
+const syncStatusLabel = computed(() =>
+  auth.isLocalMode
+    ? vault.syncStatus === "error"
+      ? "Erreur locale"
+      : "Sur cet appareil"
+    : SYNC_STATUS_LABELS[vault.syncStatus],
+);
+
+const showEmptyState = computed(
+  () => !vault.notes.size && isNewNoteDraft(content.value),
+);
+
+const AUTOSAVE_HINT_STORAGE_KEY = "synapse-autosave-hint-dismissed";
+
+function readAutosaveHintDismissed(): boolean {
+  try {
+    return window.sessionStorage.getItem(AUTOSAVE_HINT_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+const autosaveHintDismissed = ref(readAutosaveHintDismissed());
+
+function dismissAutosaveHint() {
+  autosaveHintDismissed.value = true;
+  try {
+    window.sessionStorage.setItem(AUTOSAVE_HINT_STORAGE_KEY, "true");
+  } catch {
+    // Session storage unavailable: keep the dismissal for this mount only.
+  }
+}
 
 const currentBacklinks = computed(() => {
   const current = currentQueryNote.value;
@@ -281,7 +419,46 @@ const historyEntries = computed(() =>
 
 const restorePoints = computed(() => vault.restorePointsFor(noteId.value));
 
-async function selectNote(id: string) {
+function focusEditorSoon() {
+  void nextTick(() => {
+    editorSurface.value?.focus?.();
+  });
+}
+
+async function closeMobileNavigation() {
+  await shell.value?.closeNavigation();
+}
+
+function closeNoteTools() {
+  assistantOpen.value = false;
+  graphOpen.value = false;
+  noteHistoryOpen.value = false;
+}
+
+/** Only one side tool (relations OR graph OR assistant) may be open. */
+function toggleNoteTools(tool: "relations" | "graph" | "assistant") {
+  if (tool === "relations") {
+    noteHistoryOpen.value = !noteHistoryOpen.value;
+    if (noteHistoryOpen.value) {
+      graphOpen.value = false;
+      assistantOpen.value = false;
+    }
+  } else if (tool === "graph") {
+    graphOpen.value = !graphOpen.value;
+    if (graphOpen.value) {
+      noteHistoryOpen.value = false;
+      assistantOpen.value = false;
+    }
+  } else {
+    assistantOpen.value = !assistantOpen.value;
+    if (assistantOpen.value) {
+      graphOpen.value = false;
+      noteHistoryOpen.value = false;
+    }
+  }
+}
+
+async function selectNote(id: string, focus = true) {
   const attached = vault.attachments.get(id);
   if (attached) {
     const url = blobUrls.value[attached.path];
@@ -309,15 +486,13 @@ async function selectNote(id: string) {
   content.value = vault.notes.get(id)?.content ?? "";
   void vault.rememberRecentNote(id);
   formError.value = "";
-  await focusEditor();
+  await closeMobileNavigation();
+  if (focus) await focusEditor();
 }
 
 async function focusEditor() {
   await nextTick();
-  const focus = markdownEditor.value?.focus;
-  if (typeof focus === "function") {
-    focus();
-  }
+  editorSurface.value?.focus?.();
 }
 
 function isSafePreviewType(contentType: string): boolean {
@@ -337,7 +512,10 @@ function isSafePreviewType(contentType: string): boolean {
 
 function attachNote(id: string) {
   assistant.attachNote(id);
+  graphOpen.value = false;
+  noteHistoryOpen.value = false;
   assistantOpen.value = true;
+  void closeMobileNavigation();
 }
 
 const assistantProviders = ASSISTANT_PROVIDERS.map((provider) => ({
@@ -390,6 +568,7 @@ async function showNote(id: string) {
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
+  await closeMobileNavigation();
   await focusEditor();
 }
 
@@ -400,6 +579,8 @@ async function startNewNote(folder?: string) {
   selectedNoteId.value = null;
   content.value = "# Nouvelle note\n\n";
   formError.value = "";
+  await closeMobileNavigation();
+  focusEditorSoon();
   if (folder) {
     void vault.saveNote({
       content: content.value,
@@ -408,7 +589,6 @@ async function startNewNote(folder?: string) {
     });
     selectedNoteId.value = noteId.value;
   }
-  await focusEditor();
 }
 
 async function startFromTemplate() {
@@ -437,17 +617,101 @@ async function startFromTemplate() {
 }
 
 async function deleteNote(id: string) {
-  pendingSaves.delete(id);
+  if (deletingIds.has(id)) return;
+  if (vault.activeConflict?.noteId === id) {
+    formError.value =
+      "Résolvez le conflit de cette note avant de la supprimer.";
+    return;
+  }
+  deletingIds.add(id);
+  const epoch = vaultViewEpoch;
   formError.value = "";
   try {
+    // Flush before the tombstone so Undo can recover the latest visible draft.
+    if (
+      (draftBaseRevision.value !== null || pendingSaves.size || saveInFlight) &&
+      !(await save(content.value))
+    )
+      return;
+    if (epoch !== vaultViewEpoch || !vault.isUnlocked) return;
+    const label =
+      queryNotes.value.find((note) => note.id === id)?.label ??
+      vault.attachments.get(id)?.path.split("/").pop() ??
+      "Élément";
     await vault.deleteNote(id);
+    if (epoch !== vaultViewEpoch || !vault.isUnlocked) return;
     assistant.detachNote(id);
+    lastDeletedItem.value = { id, label };
     if (selectedNoteId.value === id || noteId.value === id) {
-      startNewNote();
+      draftBaseRevision.value = null;
+      await startNewNote();
     }
-  } catch (error) {
-    formError.value =
-      error instanceof Error ? error.message : "Suppression impossible.";
+  } catch {
+    if (epoch === vaultViewEpoch)
+      formError.value =
+        "Suppression impossible. Votre contenu est conservé ; réessayez.";
+  } finally {
+    deletingIds.delete(id);
+  }
+}
+
+function closeDeletedItems() {
+  deletedListRequest++;
+  deletedItemsOpen.value = false;
+  deletedItems.value = [];
+  deletedItemsError.value = "";
+  deletedItemsLoading.value = false;
+}
+
+async function refreshDeletedItems() {
+  const request = ++deletedListRequest;
+  const epoch = vaultViewEpoch;
+  deletedItemsLoading.value = true;
+  deletedItemsError.value = "";
+  try {
+    const rows = await vault.listDeletedItems();
+    if (
+      request === deletedListRequest &&
+      epoch === vaultViewEpoch &&
+      vault.isUnlocked
+    )
+      deletedItems.value = rows;
+  } catch {
+    if (request === deletedListRequest && epoch === vaultViewEpoch)
+      deletedItemsError.value =
+        "Historique local indisponible. Fermez puis réessayez.";
+  } finally {
+    if (request === deletedListRequest && epoch === vaultViewEpoch)
+      deletedItemsLoading.value = false;
+  }
+}
+
+async function openDeletedItems() {
+  await closeMobileNavigation();
+  deletedItemsOpen.value = true;
+  await refreshDeletedItems();
+}
+
+async function restoreDeletedItem(id: string) {
+  if (restoringDeletedItem.value) return;
+  const epoch = vaultViewEpoch;
+  restoringDeletedItem.value = true;
+  deletedItemsError.value = "";
+  try {
+    await vault.restoreDeletedItem(id);
+    if (epoch !== vaultViewEpoch || !vault.isUnlocked) return;
+    if (lastDeletedItem.value?.id === id) lastDeletedItem.value = null;
+    if (deletedItemsOpen.value) await refreshDeletedItems();
+    else if (vault.notes.has(id)) await selectNote(id);
+  } catch {
+    if (epoch === vaultViewEpoch) {
+      const message =
+        "Restauration impossible. L’élément a changé, son chemin est occupé ou son historique local est indisponible. Réessayez depuis les éléments supprimés.";
+      if (deletedItemsOpen.value) deletedItemsError.value = message;
+      else formError.value = message;
+    }
+  } finally {
+    if (epoch === vaultViewEpoch) restoringDeletedItem.value = false;
   }
 }
 
@@ -489,6 +753,7 @@ async function save(nextContent = content.value) {
       const currentSave = pendingSaves.values().next().value!;
       formError.value = "";
       try {
+        localSaveFailed.value = false;
         await vault.saveNote({
           baseRevision: currentSave.baseRevision,
           content: currentSave.content,
@@ -509,6 +774,7 @@ async function save(nextContent = content.value) {
           formError.value = vault.lastError ?? "Enregistrement impossible.";
         }
       } catch (error) {
+        localSaveFailed.value = true;
         formError.value =
           error instanceof Error ? error.message : "Enregistrement impossible.";
         return false;
@@ -845,6 +1111,8 @@ function runCommand(id: string) {
   } else if (id === "from-template") {
     void startFromTemplate();
   } else if (id === "graph") {
+    assistantOpen.value = false;
+    noteHistoryOpen.value = false;
     graphOpen.value = true;
   } else if (id === "import") {
     requestImport();
@@ -855,8 +1123,9 @@ function runCommand(id: string) {
   }
 }
 
-function openLocalSearch(query: string) {
-  void searchPalette.value?.openPalette(query);
+async function openLocalSearch(query = "") {
+  await closeMobileNavigation();
+  await searchPalette.value?.openPalette(query);
 }
 
 async function saveSearch() {
@@ -889,7 +1158,7 @@ async function openWikilink(target: string) {
   }
   const path = wikilinkPath(
     target,
-    rootNotePath(vault.notes.get(noteId.value)?.path, "nouvelle"),
+    fullNotePath(vault.notes.get(noteId.value)?.path, "nouvelle"),
   );
   const id = uuidV7();
   const markdown = `# ${target}\n\n`;
@@ -965,14 +1234,39 @@ onMounted(() => {
   }
   void auth.refreshStorageHealth();
   void refreshDeviceTrust();
+  void reopenMostRecentNote();
 });
 
+/** Reopens the most recent note that still exists, from the encrypted vault
+ * preferences (recentNoteIds), never from plaintext localStorage. */
+async function reopenMostRecentNote() {
+  if (!vault.isUnlocked || vault.notes.has(noteId.value)) return;
+  if (vault.preferences.recentNoteIds.length === 0) return;
+  const mostRecent = vault.preferences.recentNoteIds.find((id) =>
+    vault.notes.has(id),
+  );
+  if (mostRecent) await selectNote(mostRecent, false);
+}
+
 onUnmounted(() => {
+  attachmentFocus.detach();
+  vaultViewEpoch++;
+  closeDeletedItems();
   window.removeEventListener("online", onOnline);
   for (const url of Object.values(blobUrls.value)) {
     URL.revokeObjectURL(url);
   }
 });
+
+watch(
+  [() => vault.isUnlocked, () => vault.currentVaultId, () => auth.userId],
+  () => {
+    vaultViewEpoch++;
+    closeDeletedItems();
+    lastDeletedItem.value = null;
+    restoringDeletedItem.value = false;
+  },
+);
 
 watch(
   () => vault.isUnlocked,
@@ -983,7 +1277,12 @@ watch(
     }
     draftBaseRevision.value = null;
     pendingSaves.clear();
+    localSaveFailed.value = false;
     content.value = "";
+    attachmentPreview.value = null;
+    importPlan.value = null;
+    settingsOpen.value = false;
+    closeNoteTools();
     assistant.lockSession();
   },
 );
@@ -1006,9 +1305,12 @@ watch(settingsOpen, (open) => {
 
 <template>
   <AppShell
+    ref="shell"
     class="vault-page"
     :class="{ 'vault-page--compact': sidebar.compact.value }"
     :sidebar-collapsed="sidebar.collapsed.value"
+    :tool-open="assistantOpen || graphOpen || noteHistoryOpen"
+    @close-tool="closeNoteTools"
   >
     <template #navigation>
       <header class="vault-nav-header">
@@ -1029,7 +1331,7 @@ watch(settingsOpen, (open) => {
           </div>
           <span class="sync-pill" :data-status="vault.syncStatus" role="status">
             <span class="sync-dot" aria-hidden="true" />
-            {{ vault.syncStatus }}
+            {{ syncStatusLabel }}
           </span>
         </div>
         <p v-if="storageHealthMessage" class="storage-health" role="status">
@@ -1062,6 +1364,20 @@ watch(settingsOpen, (open) => {
           webkitdirectory=""
           @change="previewImport"
         />
+        <button
+          class="vault-search-trigger"
+          type="button"
+          @click="openLocalSearch()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5Zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14Z"
+            />
+          </svg>
+          <span class="vault-search-label">Rechercher dans les notes</span>
+          <kbd class="vault-search-shortcut">Ctrl+K</kbd>
+        </button>
       </header>
       <div
         v-if="!sidebar.collapsed.value && allTags.length"
@@ -1135,6 +1451,25 @@ watch(settingsOpen, (open) => {
           {{ search.label }}
         </button>
       </section>
+      <section
+        v-if="!sidebar.collapsed.value && recentNotes.length"
+        class="recent-notes"
+        aria-label="Notes récentes"
+      >
+        <div class="sidebar-section-label" v-if="!sidebar.compact.value">
+          RÉCENTES
+        </div>
+        <button
+          v-for="note in recentNotes"
+          :key="note.id"
+          class="sidebar-nav-item"
+          type="button"
+          :data-active="selectedNoteId === note.id ? 'true' : undefined"
+          @click="selectNote(note.id)"
+        >
+          {{ note.label }}
+        </button>
+      </section>
       <VaultNotesSectionHeader
         :compact="sidebar.compact.value"
         :collapsed="sidebar.collapsed.value"
@@ -1144,11 +1479,22 @@ watch(settingsOpen, (open) => {
         v-if="!sidebar.collapsed.value"
         :attached-ids="assistant.attachedNoteIds"
         :nodes="treeNodes"
+        :selected-id="treeSelectedId"
         @attach="attachNote"
         @delete="deleteNote"
         @select="selectNote"
       />
       <div class="sidebar-footer">
+        <button
+          class="deleted-items-trigger"
+          type="button"
+          aria-label="Éléments supprimés"
+          title="Éléments supprimés"
+          @click="openDeletedItems"
+        >
+          <span aria-hidden="true">↶</span>
+          <span v-if="!sidebar.collapsed.value">Éléments supprimés</span>
+        </button>
         <button
           class="settings-button"
           type="button"
@@ -1183,41 +1529,85 @@ watch(settingsOpen, (open) => {
 
     <section class="vault-workspace" aria-label="Édition de note">
       <header class="workspace-header">
-        <div>
-          <span v-if="!sidebar.compact.value" class="eyebrow"
-            >ÉDITION MARKDOWN</span
+        <div class="workspace-titleblock">
+          <nav
+            v-if="breadcrumbSegments.length"
+            class="note-breadcrumb"
+            aria-label="Chemin de la note"
           >
+            <template
+              v-for="(segment, index) in breadcrumbSegments"
+              :key="index"
+            >
+              <span v-if="index" class="breadcrumb-separator" aria-hidden="true"
+                >/</span
+              >
+              <span class="breadcrumb-segment">{{ segment }}</span>
+            </template>
+          </nav>
+          <h2>{{ currentNoteTitle }}</h2>
         </div>
         <div class="workspace-meta">
-          <span v-if="auth.isOfflineSession" class="offline-label"
+          <span
+            v-if="auth.isOfflineSession && !auth.isLocalMode"
+            class="offline-label"
             >Session hors ligne</span
           >
-          <span class="save-hint">Sauvegarde automatique</span>
-          <Button
-            v-if="!assistantOpen"
-            label="Assistant"
-            outlined
+          <span
+            class="save-status"
+            role="status"
+            :data-state="saveFeedbackState"
+            >{{ saveStatusLabel }}</span
+          >
+          <button
+            class="workspace-tool"
             type="button"
-            @click="assistantOpen = true"
-          />
-          <Button
-            label="Graphe"
-            outlined
+            :aria-pressed="noteHistoryOpen"
+            @click="toggleNoteTools('relations')"
+          >
+            Relations
+          </button>
+          <button
+            class="workspace-tool"
             type="button"
-            @click="graphOpen = !graphOpen"
-          />
-          <Button
-            :label="
-              vault.preferences.pinnedNoteIds.includes(noteId)
-                ? 'Désépingler'
-                : 'Épingler'
-            "
-            outlined
+            :aria-pressed="graphOpen"
+            @click="toggleNoteTools('graph')"
+          >
+            Graphe
+          </button>
+          <button
+            class="workspace-tool"
             type="button"
+            :aria-pressed="assistantOpen"
+            @click="toggleNoteTools('assistant')"
+          >
+            Assistant
+          </button>
+          <button
+            class="workspace-tool"
+            type="button"
+            :aria-pressed="vault.preferences.pinnedNoteIds.includes(noteId)"
             @click="toggleCurrentPin"
-          />
+          >
+            {{
+              vault.preferences.pinnedNoteIds.includes(noteId)
+                ? "Désépingler"
+                : "Épingler"
+            }}
+          </button>
         </div>
       </header>
+      <div v-if="lastDeletedItem" class="deletion-notice" role="status">
+        <span>{{ lastDeletedItem.label }} supprimé.</span>
+        <button
+          type="button"
+          aria-label="Annuler la suppression"
+          :disabled="restoringDeletedItem"
+          @click="restoreDeletedItem(lastDeletedItem.id)"
+        >
+          Annuler la suppression
+        </button>
+      </div>
       <ConflictResolver
         v-if="vault.activeConflict"
         :base="vault.activeConflict.base"
@@ -1290,9 +1680,49 @@ watch(settingsOpen, (open) => {
         </div>
       </section>
       <template v-else>
+        <section
+          v-if="showEmptyState"
+          class="vault-empty-state"
+          aria-labelledby="empty-state-title"
+        >
+          <h2 id="empty-state-title">Votre coffre est prêt</h2>
+          <p>
+            L’éditeur est déjà ouvert : écrivez votre première note ou importez
+            un coffre Markdown existant.
+          </p>
+          <div class="vault-empty-actions">
+            <button
+              class="workspace-tool"
+              data-test="empty-state-write"
+              type="button"
+              @click="focusEditorSoon()"
+            >
+              Écrire
+            </button>
+            <button
+              class="workspace-tool"
+              data-test="empty-state-import"
+              type="button"
+              @click="requestImport()"
+            >
+              Importer
+            </button>
+          </div>
+          <p v-if="!autosaveHintDismissed" class="autosave-hint" role="note">
+            L’enregistrement automatique garde vos notes dans le coffre chiffré
+            local, même hors ligne.
+            <button
+              data-test="autosave-hint-dismiss"
+              type="button"
+              @click="dismissAutosaveHint"
+            >
+              Masquer pour cette session
+            </button>
+          </p>
+        </section>
         <div class="editor-surface">
           <MarkdownEditor
-            ref="markdownEditor"
+            ref="editorSurface"
             :model-value="content"
             @update:model-value="updateDraft"
             :attachment-urls="blobUrls"
@@ -1319,7 +1749,7 @@ watch(settingsOpen, (open) => {
         />
       </div>
     </section>
-    <template #relations v-if="graphOpen || (assistantOpen && noteHistoryOpen)">
+    <template #relations v-if="graphOpen || noteHistoryOpen">
       <GraphPanel
         v-if="graphOpen"
         :graph="localGraph"
@@ -1338,18 +1768,26 @@ watch(settingsOpen, (open) => {
         @select="selectNote"
       />
     </template>
-    <template #assistantHistory v-if="assistantOpen && assistantHistoryOpen">
-      <AiConversationPanel
-        :active-conversation-id="assistant.activeConversationId"
-        :busy="assistant.busy"
-        :conversations="assistant.conversationSummaries"
-        @close="assistantHistoryOpen = false"
-        @new-conversation="assistant.newConversation"
-        @open-conversation="assistant.openConversation"
-      />
-    </template>
     <template #assistant v-if="assistantOpen">
+      <div v-if="assistantHistoryOpen" class="assistant-slot">
+        <AiConversationPanel
+          :active-conversation-id="assistant.activeConversationId"
+          :busy="assistant.busy"
+          :conversations="assistant.conversationSummaries"
+          @close="assistantHistoryOpen = false"
+          @new-conversation="assistant.newConversation"
+          @open-conversation="assistant.openConversation"
+        />
+        <button
+          class="workspace-tool assistant-back-to-chat"
+          type="button"
+          @click="assistantHistoryOpen = false"
+        >
+          Retour à la conversation
+        </button>
+      </div>
       <AiChat
+        v-else
         :attachments="assistant.attachments"
         :busy="assistant.busy"
         :connected="assistant.connected"
@@ -1374,7 +1812,7 @@ watch(settingsOpen, (open) => {
         @disconnect="assistant.disconnect"
         @send="sendAssistant"
         @toggle-conversations="assistantHistoryOpen = !assistantHistoryOpen"
-        @toggle-history="noteHistoryOpen = !noteHistoryOpen"
+        @toggle-history="toggleNoteTools('relations')"
         @update:fast="assistant.setFast"
         @update:model="assistant.setModel"
         @update:reasoning-effort="assistant.setReasoningEffort"
@@ -1382,6 +1820,16 @@ watch(settingsOpen, (open) => {
     </template>
   </AppShell>
   <LocalFolderPanel />
+  <DeletedItemsPanel
+    v-if="deletedItemsOpen"
+    :open="deletedItemsOpen"
+    :items="deletedItems"
+    :loading="deletedItemsLoading"
+    :restoring="restoringDeletedItem"
+    :error="deletedItemsError"
+    @close="closeDeletedItems"
+    @restore="restoreDeletedItem"
+  />
   <SettingsPanel
     :admin="auth.isAdmin"
     :account-email="accountEmail"
@@ -1425,10 +1873,12 @@ watch(settingsOpen, (open) => {
     @click.self="attachmentPreview = null"
   >
     <section
+      ref="attachmentDialog"
       class="attachment-preview"
       role="dialog"
       aria-modal="true"
       :aria-label="`Aperçu ${attachmentPreview.name}`"
+      @keydown.escape.prevent="attachmentPreview = null"
     >
       <header>
         <strong>{{ attachmentPreview.name }}</strong>
@@ -1466,6 +1916,48 @@ watch(settingsOpen, (open) => {
 </template>
 
 <style scoped>
+@media (max-width: 48rem) {
+  .workspace-header {
+    padding: 0.65rem 0.75rem 0.5rem 3.75rem !important;
+    gap: 0.25rem !important;
+  }
+  .workspace-titleblock h2 {
+    font-size: 1.1rem;
+  }
+  .workspace-header .workspace-meta {
+    justify-content: flex-start;
+    gap: 0.25rem;
+  }
+  .workspace-header .save-status {
+    flex-basis: 100%;
+  }
+  .workspace-header .workspace-tool {
+    padding: 0.2rem 0.4rem;
+  }
+}
+.deletion-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--synapse-color-surface-muted);
+}
+.sidebar-footer {
+  flex-wrap: wrap;
+}
+.deleted-items-trigger {
+  flex-basis: 100%;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem;
+  color: var(--synapse-color-text-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: start;
+}
 .vault-page {
   min-height: 100vh;
 }
@@ -1552,6 +2044,30 @@ watch(settingsOpen, (open) => {
 
 .vault-page.app-shell--sidebar-collapsed .vault-notes-section-header {
   order: 1;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-search-trigger {
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  justify-content: center;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-search-trigger svg {
+  margin: 0;
+}
+
+.vault-page.app-shell--sidebar-collapsed .vault-search-label,
+.vault-page.app-shell--sidebar-collapsed .vault-search-shortcut {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .vault-page.app-shell--sidebar-collapsed :deep(.vault-explorer-toolbar) {
@@ -1926,18 +2442,125 @@ watch(settingsOpen, (open) => {
   font-size: 0.8rem;
 }
 
-.save-hint {
+.workspace-titleblock {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.note-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.72rem;
+}
+
+.breadcrumb-separator {
+  color: var(--synapse-color-text-muted);
+}
+
+.breadcrumb-segment:last-child {
+  color: var(--synapse-color-text);
+  font-weight: 600;
+}
+
+.workspace-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.workspace-tool:hover,
+.workspace-tool:focus-visible {
+  color: var(--synapse-color-text);
+  border-color: var(--synapse-color-border);
+  background: var(--synapse-color-surface-muted);
+  outline: none;
+}
+
+.workspace-tool[aria-pressed="true"] {
+  color: var(--synapse-color-accent-strong);
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 35%,
+    var(--synapse-color-border)
+  );
+  background: var(--synapse-color-surface-accent);
+}
+
+.save-status {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
 }
 
-.save-hint::before {
+.save-status::before {
   content: "";
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 50%;
   background: var(--synapse-color-success);
+}
+
+.save-status[data-state="draft"],
+.save-status[data-state="syncing"],
+.save-status[data-state="saving-local"] {
+  color: var(--synapse-color-text-muted);
+}
+
+.save-status[data-state="draft"]::before,
+.save-status[data-state="saving-local"]::before {
+  background: var(--synapse-color-accent);
+}
+
+.save-status[data-state="durable-pending"],
+.save-status[data-state="local"] {
+  color: var(--synapse-color-text-muted);
+}
+
+.save-status[data-state="durable-pending"]::before,
+.save-status[data-state="local"]::before {
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-success) 55%,
+    var(--synapse-color-warning)
+  );
+}
+
+.save-status[data-state="offline"] {
+  color: var(--synapse-color-warning);
+}
+
+.save-status[data-state="offline"]::before {
+  background: var(--synapse-color-warning);
+}
+
+.save-status[data-state="error"],
+.save-status[data-state="sync-error"],
+.save-status[data-state="conflict"] {
+  color: var(--synapse-color-danger);
+}
+
+.save-status[data-state="error"]::before,
+.save-status[data-state="sync-error"]::before,
+.save-status[data-state="conflict"]::before {
+  background: var(--synapse-color-danger);
 }
 
 .offline-label {
@@ -1962,11 +2585,133 @@ watch(settingsOpen, (open) => {
   background: color-mix(in srgb, var(--synapse-color-danger) 9%, transparent);
 }
 
-@media (max-width: 860px) {
-  .vault-page > :deep(.app-shell-sidebar) {
-    max-height: 22rem;
-  }
+.vault-search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: var(--synapse-color-surface);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
 
+.vault-search-trigger svg {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+}
+
+.vault-search-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-search-shortcut {
+  flex-shrink: 0;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: var(--synapse-color-surface-raised);
+  font-family: inherit;
+  font-size: 0.68rem;
+}
+
+.vault-search-trigger:hover,
+.vault-search-trigger:focus-visible {
+  color: var(--synapse-color-text);
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 35%,
+    var(--synapse-color-border)
+  );
+  outline: none;
+}
+
+.vault-empty-state {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  margin: clamp(1rem, 4vh, 3rem) auto 0;
+  max-width: 34rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-md);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 70%,
+    var(--synapse-color-surface)
+  );
+}
+
+.vault-empty-state h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.vault-empty-state p {
+  margin: 0;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.vault-empty-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.autosave-hint {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.autosave-hint button {
+  justify-self: start;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.autosave-hint button:hover,
+.autosave-hint button:focus-visible {
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-muted);
+  outline: none;
+}
+
+.assistant-slot {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
+}
+
+.assistant-back-to-chat {
+  justify-content: center;
+}
+
+@media (max-width: 860px) {
   .vault-workspace {
     height: auto;
     min-height: 70vh;
@@ -1979,6 +2724,15 @@ watch(settingsOpen, (open) => {
 
   .workspace-meta {
     flex-wrap: wrap;
+  }
+}
+
+/* Reserves top-start header space for the fixed mobile navigation toggle that
+   the AppShell lane renders itself (its drawer is closed by default at ≤768px,
+   so the toggle overlays the workspace header on narrow viewports). */
+@media (max-width: 768px) {
+  .workspace-header {
+    padding-inline-start: 3.75rem;
   }
 }
 </style>

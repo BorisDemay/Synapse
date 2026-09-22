@@ -5,7 +5,9 @@ import { resolve } from "node:path";
 const count = Number(process.env.SYNAPSE_BENCH_NOTES ?? 10000);
 const timeout = Number(process.env.SYNAPSE_BENCH_TIMEOUT_MS ?? 30000);
 const TREEITEM_BUDGET = 80;
-const DOM_ELEMENT_BUDGET = 584;
+// Writing-first navigation adds a bounded set of controls; virtualization still
+// caps the tree at 80 rows. The integrated 10k-note fixture measures 593 nodes.
+const DOM_ELEMENT_BUDGET = 600;
 const server = await createServer({
   root: resolve("apps/web"),
   configFile: resolve("apps/web/vite.config.ts"),
@@ -44,21 +46,27 @@ try {
     }
     return route.fulfill({ status: 401, json: {} });
   });
+  await page.route("**/auth/**", (route) =>
+    route.fulfill({ status: 401, json: {} }),
+  );
   await page.goto("http://127.0.0.1:16174/login");
   const result = await page.evaluate(
     async ({ count, timeout }) => {
       const { useVaultStore } = await import("/src/stores/vault.ts");
       const { useAuthStore } = await import("/src/stores/auth.ts");
-      const { openOfflineDb, noteKey, revisionKey } =
-        await import("/src/offline/db.ts");
-      const { wrapVaultKey, encodeWrappedVaultKey } =
-        await import("/src/crypto/vault-key.ts");
+      const { openOfflineDb, noteKey, revisionKey } = await import(
+        "/src/offline/db.ts"
+      );
+      const { wrapVaultKey, encodeWrappedVaultKey } = await import(
+        "/src/crypto/vault-key.ts"
+      );
       const { putCachedEnvelope } = await import("/src/offline/cache.ts");
       const { encodeNotePlaintext } = await import("/src/crypto/vault-item.ts");
-      const { xchacha20poly1305 } =
-        await import("/node_modules/@noble/ciphers/chacha.js").catch(
-          () => import("/node_modules/.vite/deps/@noble_ciphers_chacha__js.js"),
-        );
+      const { xchacha20poly1305 } = await import(
+        "/node_modules/@noble/ciphers/chacha.js"
+      ).catch(
+        () => import("/node_modules/.vite/deps/@noble_ciphers_chacha__js.js"),
+      );
       const auth = useAuthStore();
       await auth.enterLocalMode();
       const vault = useVaultStore();
@@ -189,7 +197,7 @@ try {
     );
   }
   if (!result.open_timeout_ms) {
-    await page.getByRole("treeitem").first().click();
+    await page.locator('[role="treeitem"][data-kind="note"]').first().click();
     const editor = page.getByRole("textbox", {
       name: "Éditeur Markdown",
       exact: true,
@@ -209,8 +217,9 @@ try {
       const { useAuthStore } = await import("/src/stores/auth.ts");
       const { useVaultStore } = await import("/src/stores/vault.ts");
       const { getCachedEnvelope } = await import("/src/offline/cache.ts");
-      const { parseWrappedVaultKey, unlockVaultKey } =
-        await import("/src/crypto/vault-key.ts");
+      const { parseWrappedVaultKey, unlockVaultKey } = await import(
+        "/src/crypto/vault-key.ts"
+      );
       const auth = useAuthStore();
       await auth.enterLocalMode();
       const vault = useVaultStore();
@@ -227,8 +236,9 @@ try {
         )
       )
         throw new Error("Durable edit did not survive reload");
-      const { xchacha20poly1305 } =
-        await import("/node_modules/@noble/ciphers/chacha.js");
+      const { xchacha20poly1305 } = await import(
+        "/node_modules/@noble/ciphers/chacha.js"
+      );
       const { encodeNotePlaintext } = await import("/src/crypto/vault-item.ts");
       const { setCachedPullCursor } = await import("/src/offline/cache.ts");
       const noteId = `0198e5de-7777-7888-8999-${String(count - 1).padStart(12, "0")}`;

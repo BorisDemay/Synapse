@@ -476,6 +476,7 @@ try {
     );
     if (cancelFirst) {
       await (await field("unlock-passphrase")).sendKeys(phrase);
+      await (await field("unlock-passphrase-confirm")).sendKeys(phrase);
       await driver.findElement(By.css('form button[type="submit"]')).click();
       await nativePicker();
       await poll(
@@ -494,7 +495,10 @@ try {
         0,
       );
     }
+    await (await field("unlock-passphrase")).clear();
+    await (await field("unlock-passphrase-confirm")).clear();
     await (await field("unlock-passphrase")).sendKeys(phrase);
+    await (await field("unlock-passphrase-confirm")).sendKeys(phrase);
     await driver.findElement(By.css('form button[type="submit"]')).click();
     await nativePicker(folder);
     await waitVault();
@@ -524,7 +528,7 @@ try {
   }
   await launch();
   await driver.wait(until.elementLocated(By.id("login-email")), timeout);
-  await (await button("Choisir un coffre local")).click();
+  await (await button("Utiliser un coffre local sans compte")).click();
   const localFolder = path.join(temporary, "local-folder");
   await createVault(localFolder, true);
   console.log("Native local vault created in chosen temporary folder");

@@ -14,6 +14,8 @@ import VaultView from "./VaultView.vue";
 
 const savedSearch = { id: "search-1", label: "À relire", query: "tag:review" };
 const noteId = "note-1";
+const editorFocusCalls: number[] = [];
+const appShellCloseCalls: number[] = [];
 
 function mockMatchMedia(matches = false) {
   vi.stubGlobal(
@@ -29,14 +31,23 @@ function mockMatchMedia(matches = false) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
+  editorFocusCalls.length = 0;
+  appShellCloseCalls.length = 0;
   resetSidebarLayoutState();
   resetCompactAssistantLayoutState();
   mockMatchMedia(false);
 });
 
-async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
+async function mountVault(options?: {
+  stubVaultTree?: boolean;
+  emptyVault?: boolean;
+  recentNoteIds?: string[];
+  attachToBody?: boolean;
+}): Promise<{
   router: Router;
   vault: ReturnType<typeof useVaultStore>;
+  auth: ReturnType<typeof useAuthStore>;
   wrapper: VueWrapper;
 }> {
   const stubVaultTree = options?.stubVaultTree ?? true;
@@ -47,14 +58,19 @@ async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
   auth.isAuthenticated = true;
   auth.isOfflineSession = true;
   auth.userId = "user-1";
-  vault.notes.set(noteId, {
-    content: "---\nstatus: actif\n---\n# Note épinglée",
-    path: "note-epinglee.md",
-    revision: 1,
-  });
+  vault.isUnlocked = true;
+  vault.currentVaultId = "vault-1";
+  if (!options?.emptyVault) {
+    vault.notes.set(noteId, {
+      content: "---\nstatus: actif\n---\n# Note épinglée",
+      path: "note-epinglee.md",
+      revision: 1,
+    });
+  }
   vault.preferences = {
-    pinnedNoteIds: [noteId],
-    recentNoteIds: [noteId],
+    pinnedNoteIds: options?.emptyVault ? [] : [noteId],
+    recentNoteIds:
+      options?.recentNoteIds ?? (options?.emptyVault ? [] : [noteId]),
     restorePoints: [],
     savedSearches: [savedSearch],
     templatesPath: "Templates",
@@ -75,16 +91,37 @@ async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
   await router.isReady();
 
   const wrapper = mount(VaultView, {
+    attachTo: options?.attachToBody ? document.body : undefined,
     global: {
       plugins: [pinia, router, [PrimeVue, { unstyled: true }]],
       stubs: {
         AiChat: true,
-        AiConversationPanel: true,
         ConflictResolver: true,
         GraphPanel: true,
+        AppShell: {
+          props: ["sidebarCollapsed"],
+          template: `<div class="app-shell" :class="{ 'app-shell--sidebar-collapsed': sidebarCollapsed }">
+            <aside class="app-shell-sidebar"><slot name="navigation" /></aside>
+            <main class="app-shell-content"><slot /></main>
+            <aside v-if="$slots.relations" class="app-shell-relations" aria-label="Relations de la note"><slot name="relations" /></aside>
+            <aside v-if="$slots.assistant" class="app-shell-assistant" aria-label="Assistant d'écriture"><slot name="assistant" /></aside>
+          </div>`,
+          setup(
+            _props: unknown,
+            { expose }: { expose: (api: object) => void },
+          ) {
+            expose({ closeNavigation: () => appShellCloseCalls.push(1) });
+          },
+        },
         MarkdownEditor: {
           props: ["modelValue"],
           template: '<div data-test="markdown-editor">{{ modelValue }}</div>',
+          setup(
+            _props: unknown,
+            { expose }: { expose: (api: object) => void },
+          ) {
+            expose({ focus: () => editorFocusCalls.push(1) });
+          },
         },
         NoteRelationsPanel: true,
         SettingsPanel: true,
@@ -94,7 +131,7 @@ async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
     },
   });
   await flushPromises();
-  return { router, vault, wrapper };
+  return { router, vault, auth, wrapper };
 }
 
 describe("VaultView saved navigation", () => {
@@ -138,24 +175,51 @@ describe("VaultView saved navigation", () => {
     );
   });
 
-  it("does not render a recent notes sidebar section", async () => {
-    const { wrapper } = await mountVault();
+  it("reopens the most recent valid existing note on mount", async () => {
+    const { wrapper } = await mountVault({ recentNoteIds: ["ghost", noteId] });
 
-    expect(wrapper.find('[aria-label="Notes récentes"]').exists()).toBe(false);
-    expect(wrapper.find(".recent-notes").exists()).toBe(false);
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Note épinglée",
+    );
+  });
+
+  it("ignores recent ids without an existing note", async () => {
+    const { wrapper } = await mountVault({ recentNoteIds: ["ghost"] });
+
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Nouvelle note",
+    );
+  });
+
+  it("prioritizes recent notes in a dedicated sidebar section", async () => {
+    const { wrapper } = await mountVault({ recentNoteIds: ["ghost", noteId] });
+    const recents = wrapper.get('[aria-label="Notes récentes"]');
+
+    expect(recents.text()).toContain("Note épinglée");
+    expect(recents.text()).not.toContain("ghost");
+
+    await recents.get("button").trigger("click");
+
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Note épinglée",
+    );
   });
 });
 
 describe("VaultView folder import action", () => {
-  it("uses icon-only toolbar actions for vault imports", async () => {
+  it("normalizes the French import labels", async () => {
     const { wrapper } = await mountVault();
 
     expect(
-      wrapper.get('[aria-label="importer une vault"]').attributes("title"),
-    ).toBe("importer une vault");
+      wrapper
+        .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
+        .attributes("title"),
+    ).toBe("Importer un ZIP Markdown (.zip)");
     expect(
-      wrapper.get('[aria-label="importer une note"]').attributes("title"),
-    ).toBe("importer une note");
+      wrapper
+        .get('[aria-label="Importer un dossier Markdown"]')
+        .attributes("title"),
+    ).toBe("Importer un dossier Markdown");
   });
 
   it("opens the directory picker from the folder import action", async () => {
@@ -164,7 +228,23 @@ describe("VaultView folder import action", () => {
       .element as HTMLInputElement;
     const click = vi.spyOn(picker, "click").mockImplementation(() => {});
 
-    await wrapper.get('[aria-label="importer une vault"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Importer un dossier Markdown"]')
+      .trigger("click");
+
+    expect(click).toHaveBeenCalledOnce();
+    click.mockRestore();
+  });
+
+  it("opens the ZIP picker from the ZIP import action", async () => {
+    const { wrapper } = await mountVault();
+    const picker = wrapper.get("input[accept='.zip']")
+      .element as HTMLInputElement;
+    const click = vi.spyOn(picker, "click").mockImplementation(() => {});
+
+    await wrapper
+      .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
+      .trigger("click");
 
     expect(click).toHaveBeenCalledOnce();
     click.mockRestore();
@@ -220,12 +300,12 @@ describe("VaultView sidebar layout", () => {
     expect(wrapper.find('[aria-label="Créer depuis un modèle"]').exists()).toBe(
       true,
     );
-    expect(wrapper.find('[aria-label="importer une note"]').exists()).toBe(
-      true,
-    );
-    expect(wrapper.find('[aria-label="importer une vault"]').exists()).toBe(
-      true,
-    );
+    expect(
+      wrapper.find('[aria-label="Importer un ZIP Markdown (.zip)"]').exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find('[aria-label="Importer un dossier Markdown"]').exists(),
+    ).toBe(true);
     expect(
       wrapper.find('[aria-label="Afficher la barre latérale"]').exists(),
     ).toBe(true);
@@ -438,6 +518,63 @@ it("retains a rejected durable draft and blocks logout and note switching", asyn
   );
 });
 
+it("does not claim an offline unsaved draft is already durable", async () => {
+  const { wrapper, vault } = await mountVault();
+  vault.syncStatus = "offline";
+  (
+    wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
+  ).vm.$emit("update:modelValue", "# dirty offline draft");
+  await flushPromises();
+  expect(wrapper.get(".save-status").attributes("data-state")).toBe("draft");
+  wrapper.unmount();
+});
+
+it("saves the latest draft before deleting and offers an explicit undo", async () => {
+  const { wrapper, vault } = await mountVault();
+  const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+  const remove = vi
+    .spyOn(vault, "deleteNote")
+    .mockImplementation(async (id) => {
+      vault.notes.delete(id);
+      return {} as never;
+    });
+  (
+    wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
+  ).vm.$emit("update:modelValue", "# last draft before delete");
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("delete", noteId);
+  await flushPromises();
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: noteId,
+      content: "# last draft before delete",
+    }),
+  );
+  expect(save.mock.invocationCallOrder[0]).toBeLessThan(
+    remove.mock.invocationCallOrder[0],
+  );
+  expect(wrapper.find('[aria-label="Annuler la suppression"]').exists()).toBe(
+    true,
+  );
+  wrapper.unmount();
+});
+
+it("does not delete when the latest draft cannot be durably saved", async () => {
+  const { wrapper, vault } = await mountVault();
+  vi.spyOn(vault, "saveNote").mockRejectedValue(new Error("quota"));
+  const remove = vi.spyOn(vault, "deleteNote").mockResolvedValue({} as never);
+  (
+    wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
+  ).vm.$emit("update:modelValue", "# retained draft");
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("delete", noteId);
+  await flushPromises();
+  expect(remove).not.toHaveBeenCalled();
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# retained draft",
+  );
+  expect(wrapper.get(".save-status").attributes("data-state")).toBe("error");
+  wrapper.unmount();
+});
+
 it("gives conflict resolution the workspace without competing editor height", async () => {
   const { wrapper, vault } = await mountVault();
   vault.activeConflict = {
@@ -456,4 +593,356 @@ it("gives conflict resolution the workspace without competing editor height", as
   vault.activeConflict = null;
   await flushPromises();
   expect(wrapper.find('[data-test="markdown-editor"]').exists()).toBe(true);
+});
+
+describe("VaultView writing-first workspace", () => {
+  it("exposes a visible search trigger with a Ctrl+K hint that opens the palette", async () => {
+    const { wrapper } = await mountVault();
+    const trigger = wrapper.get(".vault-search-trigger");
+
+    expect(trigger.text()).toContain("Rechercher dans les notes");
+    expect(trigger.get("kbd").text()).toBe("Ctrl+K");
+
+    await trigger.trigger("click");
+
+    expect(wrapper.get('[role="dialog"]').isVisible()).toBe(true);
+  });
+
+  it("moves the editor cursor forward immediately when creating a note", async () => {
+    const { wrapper } = await mountVault();
+    expect(editorFocusCalls).toHaveLength(0);
+
+    await wrapper
+      .get(".vault-notes-section-header [aria-label='Nouvelle note']")
+      .trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Nouvelle note",
+    );
+    expect(editorFocusCalls).toHaveLength(1);
+  });
+
+  it("shows a path breadcrumb and the current note title instead of identifiers", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("nested", {
+      content: "# Imbriquée\n\nCorps.",
+      path: "projets/sous-dossier/imbriquee.md",
+      revision: 1,
+    });
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "nested");
+    await flushPromises();
+
+    const breadcrumb = wrapper.get(".note-breadcrumb");
+    expect(breadcrumb.text()).toContain("projets");
+    expect(breadcrumb.text()).toContain("sous-dossier");
+    expect(breadcrumb.text()).toContain("imbriquee.md");
+    expect(wrapper.get(".workspace-titleblock h2").text()).toBe("Imbriquée");
+  });
+
+  it("keeps full note paths so folders survive in the tree", async () => {
+    const { wrapper, vault } = await mountVault({ stubVaultTree: false });
+    vault.notes.set("nested", {
+      content: "# Imbriquée",
+      path: "projets/imbriquee.md",
+      revision: 1,
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-kind="folder"]').text()).toContain("projets");
+    expect(wrapper.find('[data-kind="note"]').text()).toContain("Imbriquée");
+  });
+
+  it("shows full paths for duplicate filenames in search results", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("dup-1", {
+      content: "# Journal\n\n",
+      path: "projets/journal.md",
+      revision: 1,
+    });
+    vault.notes.set("dup-2", {
+      content: "# Journal\n\n",
+      path: "archives/journal.md",
+      revision: 1,
+    });
+    await flushPromises();
+
+    const palette = wrapper.findComponent({ name: "SearchPalette" });
+    palette.vm.$emit("update:query", "journal");
+    await flushPromises();
+
+    const results = palette.props("results") as { hint?: string; id: string }[];
+    const hints = results.map((result) => result.hint);
+    expect(hints).toContain("projets/journal.md");
+    expect(hints).toContain("archives/journal.md");
+  });
+
+  it("follows external selection in the tree via the selectedId prop", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("second", {
+      content: "# Seconde",
+      path: "projets/seconde.md",
+      revision: 1,
+    });
+
+    const palette = wrapper.findComponent({ name: "SearchPalette" });
+    palette.vm.$emit("select", "second");
+    await flushPromises();
+
+    const tree = wrapper.findComponent({ name: "VaultTree" });
+    expect(tree.props("selectedId")).toBe("second");
+  });
+
+  it("offers write or import with a dismissible per-session autosave hint in the empty state", async () => {
+    const { wrapper } = await mountVault({ emptyVault: true });
+    const emptyState = wrapper.get(".vault-empty-state");
+
+    expect(emptyState.text()).toContain("Écrire");
+    expect(emptyState.text()).toContain("Importer");
+    expect(emptyState.get(".autosave-hint").text()).toContain(
+      "enregistrement automatique",
+    );
+
+    await emptyState.get('[data-test="empty-state-write"]').trigger("click");
+    await flushPromises();
+    expect(editorFocusCalls).toHaveLength(1);
+
+    await emptyState
+      .get('[data-test="autosave-hint-dismiss"]')
+      .trigger("click");
+
+    expect(wrapper.find(".autosave-hint").exists()).toBe(false);
+    expect(
+      window.sessionStorage.getItem("synapse-autosave-hint-dismissed"),
+    ).toBe("true");
+  });
+
+  it("closes the navigation drawer after a successful selection and a new note", async () => {
+    const { wrapper } = await mountVault();
+    const afterMount = appShellCloseCalls.length;
+
+    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+    expect(appShellCloseCalls.length).toBe(afterMount + 1);
+
+    await wrapper
+      .get(".vault-notes-section-header [aria-label='Nouvelle note']")
+      .trigger("click");
+    expect(appShellCloseCalls.length).toBe(afterMount + 2);
+  });
+});
+
+describe("VaultView save feedback", () => {
+  function saveStatus(wrapper: VueWrapper) {
+    return wrapper.get(".save-status");
+  }
+
+  it("never claims Synchronisé in local-only or offline sessions", async () => {
+    const { wrapper, auth } = await mountVault();
+    auth.isLocalMode = true;
+    await flushPromises();
+
+    const status = saveStatus(wrapper);
+    expect(status.attributes("data-state")).toBe("local");
+    expect(status.text()).toBe("Enregistré localement");
+    expect(status.text()).not.toContain("Synchronisé");
+  });
+
+  it("claims Synchronisé only for a connected, acked state", async () => {
+    const { wrapper, auth, vault } = await mountVault();
+    auth.isOfflineSession = false;
+    auth.isLocalMode = false;
+    vault.syncStatus = "synced";
+    await flushPromises();
+
+    expect(saveStatus(wrapper).attributes("data-state")).toBe("synced");
+    expect(saveStatus(wrapper).text()).toBe("Synchronisé");
+  });
+
+  it("distinguishes the unsaved draft from durable local saves", async () => {
+    const { wrapper } = await mountVault();
+    const editor = wrapper.findComponent(
+      '[data-test="markdown-editor"]',
+    ) as VueWrapper;
+
+    editor.vm.$emit("update:modelValue", "# local draft");
+    await flushPromises();
+
+    const status = saveStatus(wrapper);
+    expect(status.attributes("data-state")).toBe("draft");
+    expect(status.text()).toBe("Brouillon modifié");
+  });
+
+  it("distinguishes durable local saves pending synchronization from Synchronisé", async () => {
+    const { wrapper, auth, vault } = await mountVault();
+    auth.isOfflineSession = false;
+    auth.isLocalMode = false;
+    vault.syncStatus = "synced";
+    vault.pendingNoteIds = [noteId];
+    await flushPromises();
+
+    const status = saveStatus(wrapper);
+    expect(status.attributes("data-state")).toBe("durable-pending");
+    expect(status.text()).toContain("synchronisation en attente");
+    expect(status.text()).not.toBe("Synchronisé");
+  });
+
+  it("exposes saving, offline, error and conflict states", async () => {
+    const { wrapper, auth, vault } = await mountVault();
+    auth.isOfflineSession = false;
+    auth.isLocalMode = false;
+
+    vault.syncStatus = "saving";
+    await flushPromises();
+    expect(saveStatus(wrapper).attributes("data-state")).toBe("syncing");
+    expect(saveStatus(wrapper).text()).toBe("Synchronisation…");
+
+    vault.syncStatus = "offline";
+    await flushPromises();
+    expect(saveStatus(wrapper).attributes("data-state")).toBe("offline");
+    expect(saveStatus(wrapper).text()).toContain("Hors ligne");
+
+    vault.syncStatus = "error";
+    await flushPromises();
+    expect(saveStatus(wrapper).attributes("data-state")).toBe("sync-error");
+    expect(saveStatus(wrapper).text()).toContain("Enregistré localement");
+
+    vault.syncStatus = "conflict";
+    await flushPromises();
+    expect(saveStatus(wrapper).attributes("data-state")).toBe("conflict");
+  });
+});
+
+describe("VaultView note tools", () => {
+  it("opens backlinks and history without any assistant", async () => {
+    const { wrapper } = await mountVault();
+
+    const relations = wrapper
+      .findAll(".workspace-tool")
+      .find((button) => button.text() === "Relations");
+    expect(relations).toBeDefined();
+    await relations!.trigger("click");
+
+    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
+      true,
+    );
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it("closes relations when a tree attachment opens the assistant", async () => {
+    const { wrapper } = await mountVault();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Relations")!
+      .trigger("click");
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("attach", noteId);
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "AiChat" }).exists()).toBe(true);
+    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
+      false,
+    );
+    wrapper.unmount();
+  });
+
+  it("keeps at most one side tool open at a time", async () => {
+    const { wrapper } = await mountVault();
+
+    const tool = (label: string) =>
+      wrapper
+        .findAll(".workspace-tool")
+        .find((button) => button.text() === label)!;
+
+    await tool("Relations").trigger("click");
+    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
+      true,
+    );
+
+    await tool("Graphe").trigger("click");
+    expect(wrapper.findComponent({ name: "GraphPanel" }).exists()).toBe(true);
+    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
+      false,
+    );
+
+    await tool("Assistant").trigger("click");
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.findComponent({ name: "GraphPanel" }).exists()).toBe(false);
+  });
+
+  it("renders the conversation list inside the assistant slot with a back-to-chat action", async () => {
+    const { wrapper } = await mountVault();
+
+    const assistant = wrapper
+      .findAll(".workspace-tool")
+      .find((button) => button.text() === "Assistant")!;
+    await assistant.trigger("click");
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      true,
+    );
+    expect(
+      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
+    ).toBe(false);
+
+    wrapper.findComponent({ name: "AiChat" }).vm.$emit("toggle-conversations");
+    await flushPromises();
+
+    expect(
+      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
+    ).toBe(true);
+    expect(wrapper.find(".assistant-back-to-chat").text()).toContain(
+      "Retour à la conversation",
+    );
+
+    await wrapper.get(".assistant-back-to-chat").trigger("click");
+    expect(
+      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
+    ).toBe(false);
+    expect(wrapper.findComponent({ name: "AiChat" }).exists()).toBe(true);
+  });
+
+  it("keeps quieter secondary workspace controls instead of prominent buttons", async () => {
+    const { wrapper } = await mountVault();
+
+    for (const label of ["Relations", "Graphe", "Désépingler", "Assistant"]) {
+      expect(
+        wrapper
+          .findAll(".workspace-tool")
+          .some((button) => button.text() === label),
+      ).toBe(true);
+    }
+    expect(
+      wrapper.find(".workspace-meta button[class*='p-button']").exists(),
+    ).toBe(false);
+  });
+});
+
+describe("VaultView attachment preview accessibility", () => {
+  it("moves focus into the dialog and closes it with Escape", async () => {
+    const { wrapper, vault } = await mountVault({ attachToBody: true });
+    vault.attachments.set("att-1", {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+      path: "attachments/photo.png",
+      revision: 1,
+    });
+    await flushPromises();
+
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "att-1");
+    await flushPromises();
+
+    const dialog = wrapper.get('[role="dialog"][aria-modal="true"]');
+    expect(document.activeElement).toBe(
+      dialog.get('button[aria-label="Fermer l’aperçu"]').element,
+    );
+
+    await dialog.trigger("keydown", { key: "Escape" });
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"][aria-modal="true"]').exists()).toBe(
+      false,
+    );
+    wrapper.unmount();
+  });
 });

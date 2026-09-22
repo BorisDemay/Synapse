@@ -17,11 +17,15 @@ describe("VaultExplorerToolbar", () => {
       wrapper.get('[aria-label="Créer depuis un modèle"]').attributes("title"),
     ).toBe("Créer depuis un modèle");
     expect(
-      wrapper.get('[aria-label="importer une note"]').attributes("title"),
-    ).toBe("importer une note");
+      wrapper
+        .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
+        .attributes("title"),
+    ).toBe("Importer un ZIP Markdown (.zip)");
     expect(
-      wrapper.get('[aria-label="importer une vault"]').attributes("title"),
-    ).toBe("importer une vault");
+      wrapper
+        .get('[aria-label="Importer un dossier Markdown"]')
+        .attributes("title"),
+    ).toBe("Importer un dossier Markdown");
     expect(
       wrapper
         .get('[aria-label="Masquer la barre latérale"]')
@@ -38,7 +42,9 @@ describe("VaultExplorerToolbar", () => {
       },
     });
 
-    await wrapper.get('[aria-label="importer une note"]').trigger("click");
+    await wrapper
+      .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
+      .trigger("click");
     await wrapper
       .get('[aria-label="Masquer la barre latérale"]')
       .trigger("click");

@@ -1,11 +1,18 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import SearchPalette from "../SearchPalette.vue";
 
 describe("SearchPalette", () => {
+  let wrapper: ReturnType<typeof mount> | undefined;
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = undefined;
+  });
+
   it("ouvre la recherche avec Control+K et expose les résultats", async () => {
-    const wrapper = mount(SearchPalette, {
+    wrapper = mount(SearchPalette, {
       props: {
         query: "",
         results: [{ id: "notes/roadmap.md", label: "Roadmap" }],
@@ -65,7 +72,7 @@ describe("SearchPalette", () => {
   });
 
   it("émet la saisie et sélectionne un résultat", async () => {
-    const wrapper = mount(SearchPalette, {
+    wrapper = mount(SearchPalette, {
       props: {
         query: "",
         results: [{ id: "notes/roadmap.md", label: "Roadmap" }],
@@ -84,7 +91,7 @@ describe("SearchPalette", () => {
   });
 
   it("exécute une commande depuis la palette", async () => {
-    const wrapper = mount(SearchPalette, {
+    wrapper = mount(SearchPalette, {
       props: {
         commands: [{ id: "new-note", label: "Nouvelle note" }],
         query: "",
@@ -97,5 +104,145 @@ describe("SearchPalette", () => {
     await wrapper.vm.$nextTick();
     await wrapper.get('[role="option"]').trigger("click");
     expect(wrapper.emitted("run")?.[0]).toEqual(["new-note"]);
+  });
+
+  it("distingue les commandes des notes avec des groupes libellés", async () => {
+    wrapper = mount(SearchPalette, {
+      props: {
+        commands: [{ id: "new-note", label: "Nouvelle note" }],
+        query: "",
+        results: [
+          {
+            hint: "notes/roadmap.md",
+            id: "notes/roadmap.md",
+            label: "Roadmap",
+          },
+        ],
+      },
+    });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+
+    const list = wrapper.get('[role="listbox"]');
+    const groups = list.findAll('[role="presentation"]');
+    expect(groups.map((group) => group.text())).toEqual(["Commandes", "Notes"]);
+    const options = list.findAll('[role="option"]');
+    expect(options[0].text()).toContain("Nouvelle note");
+    expect(options[1].text()).toContain("Roadmap");
+    expect(options[1].text()).toContain("notes/roadmap.md");
+  });
+
+  it("ne vole pas le Ctrl+Shift+K de l’éditeur de liens", () => {
+    wrapper = mount(SearchPalette, {
+      props: { query: "", results: [] },
+    });
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, shiftKey: true, key: "k" }),
+    );
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+  });
+
+  it("ne s’ouvre pas au-dessus d’un autre dialogue modal ouvert", async () => {
+    const unrelated = document.createElement("section");
+    unrelated.setAttribute("role", "dialog");
+    unrelated.setAttribute("aria-modal", "true");
+    document.body.append(unrelated);
+
+    wrapper = mount(SearchPalette, {
+      props: { query: "", results: [] },
+    });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    unrelated.remove();
+  });
+
+  it("ferme avec Échap et rend le focus à l’élément d’origine", async () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    wrapper = mount(SearchPalette, {
+      attachTo: document.body,
+      props: { query: "", results: [] },
+    });
+    opener.focus();
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+    expect(document.activeElement).toBe(wrapper.get("input").element);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it("piège Tab à l’intérieur de la palette", async () => {
+    wrapper = mount(SearchPalette, {
+      attachTo: document.body,
+      props: {
+        commands: [{ id: "new-note", label: "Nouvelle note" }],
+        query: "",
+        results: [],
+      },
+    });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+
+    const input = wrapper.get("input").element as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    // jsdom ne gère pas la navigation Tab native : on vérifie les deux
+    // rebouclages du piège, depuis le premier et le dernier focusable.
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    const lastOption = wrapper.findAll('[role="option"]').at(-1)!
+      .element as HTMLElement;
+    expect(document.activeElement).toBe(lastOption);
+
+    lastOption.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+    );
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("répète Ctrl+K : referme la palette sans écraser la requête en cours", async () => {
+    wrapper = mount(SearchPalette, {
+      props: { query: "", results: [] },
+    });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("update:query")).toBeUndefined();
+
+    await wrapper.get("input").setValue("road");
+    expect(wrapper.emitted("update:query")?.at(-1)).toEqual(["road"]);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    expect(wrapper.emitted("update:query")?.at(-1)).toEqual([""]);
   });
 });

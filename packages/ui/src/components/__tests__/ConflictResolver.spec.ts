@@ -4,6 +4,19 @@ import { describe, expect, it, vi } from "vitest";
 import ConflictResolver from "../ConflictResolver.vue";
 
 describe("ConflictResolver", () => {
+  it("nomme le bouton de publication comme son libellé visible", () => {
+    const wrapper = mount(ConflictResolver, {
+      props: {
+        base: "base",
+        local: "local",
+        remote: "remote",
+      },
+    });
+
+    const publish = wrapper.get('[aria-label="Publier le brouillon"]');
+    expect(publish.text()).toBe("Publier le brouillon");
+  });
+
   it("affiche les trois versions en texte sans exécuter le HTML", () => {
     const wrapper = mount(ConflictResolver, {
       props: {
@@ -44,7 +57,7 @@ describe("ConflictResolver", () => {
     await wrapper
       .get('[aria-label="Garder la version distante"]')
       .trigger("click");
-    await wrapper.get('[aria-label="Édition manuelle"]').trigger("click");
+    await wrapper.get('[aria-label="Publier le brouillon"]').trigger("click");
 
     expect(confirm).toHaveBeenCalledTimes(3);
     expect(wrapper.emitted("keep-local")).toHaveLength(1);

@@ -5,9 +5,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { useEditorMode } from "../editor-mode";
 import {
+  LINK_TOOLBAR_HOTKEY,
   markdownContextMenuItems,
   TOOLBAR_LABELS,
 } from "../markdown/editor-tools";
+import { menuIconPath } from "../markdown/editor-icons";
 import { useTheme } from "../theme";
 import MarkdownContextMenu from "./MarkdownContextMenu.vue";
 
@@ -73,6 +75,7 @@ let editor: Vditor | undefined;
 let editorReady = false;
 let currentValue = props.modelValue;
 let pendingExternalValue: string | undefined;
+let pendingFocus = false;
 let pendingListConversion = false;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let activeTableCell: HTMLTableCellElement | undefined;
@@ -231,6 +234,30 @@ function applyToolbarLabels() {
     .querySelectorAll<HTMLButtonElement>("button[data-type]")
     .forEach((button) => {
       const type = button.dataset.type;
+      const svg = button.querySelector("svg");
+      if (svg && type && type !== "edit-mode") {
+        const path = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path",
+        );
+        path.setAttribute(
+          "d",
+          menuIconPath(
+            type === "link"
+              ? "add-link"
+              : type === "code"
+                ? "code-block"
+                : type,
+          ),
+        );
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("aria-hidden", "true");
+        svg.replaceChildren(path);
+      }
       const label = type ? TOOLBAR_LABELS[type] : undefined;
       if (!label || button.querySelector(".synapse-toolbar-label")) {
         return;
@@ -310,21 +337,6 @@ function activeEditable(): HTMLElement | undefined {
         : '.vditor-ir [contenteditable="true"]',
     ) ?? undefined
   );
-}
-
-function focusEditor() {
-  const editable = activeEditable();
-  if (!editable) {
-    return;
-  }
-
-  editable.focus();
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(editable);
-  range.collapse(false);
-  selection?.removeAllRanges();
-  selection?.addRange(range);
 }
 
 function onEditorKeydown(event: KeyboardEvent) {
@@ -521,6 +533,27 @@ function applyViewMode(mode: "ir" | "sv") {
   applyAccessibility();
 }
 
+function focusWritingArea() {
+  if (!editorReady) {
+    pendingFocus = true;
+    return;
+  }
+  editor?.focus();
+  const editable = activeEditable();
+  if (!editable) {
+    return;
+  }
+  editable.focus();
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(editable);
+  range.collapse(false);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+defineExpose({ focus: focusWritingArea });
+
 function handleTableFocus(event: FocusEvent) {
   const cell = tableCellFromTarget(event.target);
   if (cell) {
@@ -689,27 +722,38 @@ onMounted(() => {
     tab: "    ",
     theme: dark ? "dark" : "classic",
     toolbar: [
-      "emoji",
+      // Common actions upfront; secondary actions live in the keyboard
+      // accessible "Plus" overflow so the toolbar stays a bounded row.
       "headings",
       "bold",
       "italic",
       "strike",
-      "link",
-      "|",
+      // Ctrl+K must stay free for the global search palette; insert-link
+      // answers on Ctrl+Shift+K instead (engine-resolved from ⇧⌘K).
+      { name: "link", hotkey: LINK_TOOLBAR_HOTKEY },
       "list",
-      "ordered-list",
-      "check",
-      "outdent",
-      "indent",
-      "|",
       "quote",
-      "line",
-      "code",
-      "inline-code",
-      "table",
       "|",
       "undo",
       "redo",
+      "|",
+      {
+        name: "more",
+        toolbar: [
+          "emoji",
+          "|",
+          "ordered-list",
+          "check",
+          "outdent",
+          "indent",
+          "|",
+          "code",
+          "inline-code",
+          "|",
+          "line",
+          "table",
+        ],
+      },
       { className: "synapse-edit-mode-host", name: "edit-mode" },
     ],
     value: props.modelValue,
@@ -726,6 +770,11 @@ onMounted(() => {
         const value = pendingExternalValue;
         pendingExternalValue = undefined;
         applyExternalValue(value);
+      }
+
+      if (pendingFocus) {
+        pendingFocus = false;
+        editor?.focus();
       }
     },
   });
@@ -780,8 +829,6 @@ onBeforeUnmount(() => {
   teardownTableInteractions();
   editor?.destroy();
 });
-
-defineExpose({ focus: focusEditor });
 </script>
 
 <template>
@@ -913,8 +960,8 @@ defineExpose({ focus: focusEditor });
   min-width: 0 !important;
   margin: 0;
   gap: 0.15rem;
-  /* Vditor aligns this inline with the 800px writing column. The toolbar
-     itself must stay centered across the full editor surface. */
+  /* The writing column is centered at 45rem; the toolbar stays centered
+     across the full editor surface. */
   padding: 0.35rem 0.75rem !important;
   border-color: var(--synapse-color-border);
   background: var(--synapse-color-surface-muted);
@@ -955,10 +1002,13 @@ defineExpose({ focus: focusEditor });
 
 .markdown-editor :deep(.vditor-toolbar__item svg) {
   display: block;
-  width: 14px !important;
-  height: 14px !important;
-  min-width: 14px;
-  max-width: 14px;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px;
+  max-width: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
   flex-shrink: 0;
 }
 
@@ -971,6 +1021,34 @@ defineExpose({ focus: focusEditor });
 
 .markdown-editor :deep(.synapse-toolbar-label) {
   white-space: nowrap;
+}
+
+/* Below this width the writing pane no longer fits a labeled row; icons
+   (still French-labelled for assistive tech) keep the toolbar to one row. */
+@media (max-width: 56rem) {
+  .markdown-editor :deep(.synapse-toolbar-label) {
+    display: none;
+  }
+
+  .markdown-editor :deep(.vditor-toolbar__item .vditor-tooltipped) {
+    min-width: 1.8rem;
+    padding: 0.4rem 0.3rem;
+  }
+  .markdown-editor :deep(.vditor-toolbar) {
+    gap: 0.05rem;
+    padding-inline: 0.35rem !important;
+  }
+  .markdown-editor :deep(.vditor-toolbar__divider) {
+    margin-inline: 0.1rem;
+  }
+}
+
+/* Overflow panel of the "Plus" entry and the emoji hint share Vditor's
+   .vditor-hint panel; align it with the Synapse surface tokens. */
+.markdown-editor :deep(.vditor-hint.vditor-panel--arrow) {
+  border: 1px solid var(--synapse-color-border);
+  border-radius: 0.4rem;
+  background: var(--synapse-color-surface-raised);
 }
 
 .markdown-editor :deep(.synapse-edit-mode-host) {
@@ -1006,10 +1084,12 @@ defineExpose({ focus: focusEditor });
   display: block;
   box-sizing: border-box;
   width: 100% !important;
-  max-width: none !important;
+  /* Comfortable reading column on wide screens; min() keeps the full
+     writing width on narrow viewports. */
+  max-width: min(100%, 45rem) !important;
   min-width: 0;
-  margin: 0 !important;
-  padding: 1.5rem clamp(2rem, 8vw, 8rem) !important;
+  margin-inline: auto !important;
+  padding: 1.5rem clamp(1.25rem, 4vw, 2rem) !important;
 }
 
 .markdown-editor :deep(.vditor-ir:focus),

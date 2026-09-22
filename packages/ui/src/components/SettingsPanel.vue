@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
+import { DialogFocusController } from "../dialog-focus";
 import {
   PANEL_WIDTH_BOUNDS,
   usePanelLayout,
@@ -90,6 +91,74 @@ const deleteConfirmation = ref("");
 const formError = ref("");
 const templatesPath = ref(props.templatesPath);
 const invitationEmail = ref("");
+const dialogElement = ref<HTMLElement>();
+const statusElement = ref<HTMLParagraphElement>();
+const errorElement = ref<HTMLParagraphElement>();
+type PendingAction = "" | "password" | "passphrase" | "delete";
+const pendingAction = ref<PendingAction>("");
+
+function clearTransientState() {
+  resetSecrets();
+  deleteConfirmation.value = "";
+  formError.value = "";
+  pendingAction.value = "";
+}
+
+const dialogFocus = new DialogFocusController({
+  getContainer: () => dialogElement.value ?? null,
+  onEscape: () => emit("close"),
+});
+onBeforeUnmount(() => {
+  dialogFocus.detach();
+  clearTransientState();
+});
+
+watch(
+  () => props.open,
+  async (open) => {
+    if (open) {
+      await nextTick();
+      if (props.open) {
+        dialogFocus.attach();
+      }
+      return;
+    }
+    dialogFocus.detach();
+    // Aucun secret ne survit à la fermeture du panneau.
+    clearTransientState();
+  },
+  { immediate: true },
+);
+
+// Le retour (succès ou erreur) doit rester visible et annoncé même si
+// l’utilisateur a déroulé la section concernée : on amène le focus dessus.
+watch(
+  () => [props.statusMessage, props.errorMessage, formError.value] as const,
+  async ([statusMessage, errorMessage, formErrorValue]) => {
+    if (!props.open) {
+      return;
+    }
+    const message = errorMessage || formErrorValue || statusMessage;
+    if (!message) {
+      return;
+    }
+    await nextTick();
+    (errorMessage || formErrorValue
+      ? errorElement.value
+      : statusElement.value
+    )?.focus();
+  },
+);
+
+// Une réponse du parent (succès ou erreur) clôt l’attente de la tentative.
+watch(
+  () => [props.errorMessage, props.statusMessage] as const,
+  ([errorMessage, statusMessage]) => {
+    if (errorMessage || statusMessage) {
+      pendingAction.value = "";
+    }
+  },
+);
 
 const { preference, setPreference } = useTheme();
 const { collapsed, compact, setCollapsed, setCompact } = useSidebarLayout();
@@ -133,18 +202,24 @@ const categories = computed<SettingsCategory[]>(() => {
 const activeCategory = ref<SettingsCategoryId>("appearance");
 
 watch(
-  categories,
-  (nextCategories) => {
+  // Comparaison par identifiants stables : le calculé renvoie un nouveau
+  // tableau à chaque évaluation, une comparaison par référence déclencherait
+  // donc un reset parasite d’activeCategory sous charge.
+  () => categories.value.map((category) => category.id).join(","),
+  () => {
     if (
-      !nextCategories.some((category) => category.id === activeCategory.value)
+      !categories.value.some((category) => category.id === activeCategory.value)
     ) {
-      activeCategory.value = nextCategories[0]?.id ?? "appearance";
+      activeCategory.value = categories.value[0]?.id ?? "appearance";
     }
   },
   { immediate: true },
 );
 
 function selectCategory(id: SettingsCategoryId) {
+  // Les erreurs de formulaire sont propres à une catégorie.
+  formError.value = "";
+  pendingAction.value = "";
   activeCategory.value = id;
 }
 
@@ -172,6 +247,7 @@ function submitPassword() {
   }
   emit("changePassword", currentPassword.value, newPassword.value);
   resetSecrets();
+  pendingAction.value = "password";
 }
 
 function submitPassphrase() {
@@ -184,6 +260,7 @@ function submitPassphrase() {
   currentPassphrase.value = "";
   newPassphrase.value = "";
   confirmPassphrase.value = "";
+  pendingAction.value = "passphrase";
 }
 
 function submitDelete() {
@@ -195,6 +272,7 @@ function submitDelete() {
   emit("deleteAccount", deletePassword.value);
   resetSecrets();
   deleteConfirmation.value = "";
+  pendingAction.value = "delete";
 }
 
 function resetAppearance() {
@@ -234,6 +312,7 @@ function selectInvitationLink(event: Event) {
 <template>
   <div v-if="open" class="settings-backdrop" @click="onBackdrop">
     <section
+      ref="dialogElement"
       class="settings-panel settings-panel-wide settings-panel-fixed"
       role="dialog"
       aria-label="Paramètres"
@@ -280,13 +359,21 @@ function selectInvitationLink(event: Event) {
           class="settings-content settings-content-scroll settings-content-compact"
           data-test="settings-content"
         >
-          <p v-if="statusMessage" class="settings-status" role="status">
+          <p
+            v-if="statusMessage"
+            ref="statusElement"
+            class="settings-status"
+            role="status"
+            tabindex="-1"
+          >
             {{ statusMessage }}
           </p>
           <p
             v-if="errorMessage || formError"
+            ref="errorElement"
             class="settings-error"
             role="alert"
+            tabindex="-1"
           >
             {{ errorMessage || formError }}
           </p>
@@ -582,6 +669,15 @@ function selectInvitationLink(event: Event) {
               <button class="settings-action" type="submit">
                 Changer la phrase de déchiffrement
               </button>
+              <p
+                v-if="pendingAction === 'passphrase'"
+                class="settings-pending"
+                data-test="settings-pending"
+                role="status"
+              >
+                Demande envoyée. En cas d’échec, saisissez à nouveau votre
+                phrase.
+              </p>
             </form>
           </section>
 
@@ -636,6 +732,15 @@ function selectInvitationLink(event: Event) {
                 <button class="settings-action" type="submit">
                   Changer le mot de passe
                 </button>
+                <p
+                  v-if="pendingAction === 'password'"
+                  class="settings-pending"
+                  data-test="settings-pending"
+                  role="status"
+                >
+                  Demande envoyée. En cas d’échec, saisissez à nouveau vos
+                  informations.
+                </p>
               </form>
             </section>
 
@@ -679,6 +784,14 @@ function selectInvitationLink(event: Event) {
                 <button class="settings-danger" type="submit">
                   Supprimer définitivement le compte
                 </button>
+                <p
+                  v-if="pendingAction === 'delete'"
+                  class="settings-pending"
+                  data-test="settings-pending"
+                  role="status"
+                >
+                  Demande envoyée.
+                </p>
               </form>
             </section>
           </template>
@@ -1047,6 +1160,18 @@ function selectInvitationLink(event: Event) {
 
 .settings-error {
   color: var(--synapse-color-danger);
+}
+
+.settings-status:focus-visible,
+.settings-error:focus-visible {
+  outline: 2px solid var(--synapse-color-accent);
+  outline-offset: 2px;
+}
+
+.settings-pending {
+  margin: 0;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.8rem;
 }
 
 .settings-close,

@@ -18,6 +18,7 @@ const router = useRouter();
 const email = ref("");
 const password = ref("");
 const rememberDevice = ref(false);
+const busy = ref(false);
 const error = ref("");
 const publicSignup = ref(false);
 
@@ -26,7 +27,9 @@ onMounted(async () => {
 });
 
 async function submit() {
+  if (busy.value) return;
   error.value = "";
+  busy.value = true;
   try {
     await auth.login(email.value, password.value, {
       rememberDevice: rememberDevice.value,
@@ -39,10 +42,21 @@ async function submit() {
     await router.push(auth.isAdmin ? "/admin" : "/unlock");
   } catch (cause) {
     password.value = "";
-    error.value =
-      cause instanceof AuthError && cause.status === 403
-        ? "Compte non activé. Ouvrez le lien d’activation envoyé par email (vérifiez vos spams), puis réessayez."
-        : "Connexion impossible.";
+    if (cause instanceof AuthError) {
+      if (cause.status === 403) {
+        error.value =
+          "Compte non activé. Ouvrez le lien d’activation envoyé par email (vérifiez vos spams), puis réessayez.";
+      } else if (cause.status === 401) {
+        error.value = "Email ou mot de passe incorrect.";
+      } else {
+        error.value = "Connexion impossible.";
+      }
+    } else {
+      error.value =
+        "Serveur injoignable. Vérifiez votre connexion, puis réessayez.";
+    }
+  } finally {
+    busy.value = false;
   }
 }
 </script>
@@ -85,6 +99,7 @@ async function submit() {
               fluid
               required
               type="text"
+              inputmode="email"
             />
           </div>
           <div class="form-field">
@@ -109,10 +124,18 @@ async function submit() {
             <span>Se souvenir de cet appareil</span>
           </label>
           <p id="login-remember-hint" class="form-hint">
-            Saute la saisie du mot de passe de compte sur cet appareil. La
-            phrase du coffre reste exigée.
+            Garde la session de compte ouverte sur cet appareil (30 jours) : le
+            mot de passe de compte sera demandé moins souvent. Ce n’est pas
+            l’appareil de confiance : la phrase du coffre reste exigée, sauf si
+            vous avez activé l’appareil de confiance après un déverrouillage.
+            N’activez pas cette option sur un appareil partagé.
           </p>
-          <Button label="Se connecter" type="submit" />
+          <Button
+            :disabled="busy"
+            :loading="busy"
+            label="Se connecter"
+            type="submit"
+          />
         </form>
         <p v-if="error" role="alert">
           <Message severity="error" :closable="false">{{ error }}</Message>

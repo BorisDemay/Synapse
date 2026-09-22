@@ -123,7 +123,7 @@ function confirmAction(
       <button
         class="action-secondary"
         type="button"
-        aria-label="Édition manuelle"
+        aria-label="Publier le brouillon"
         @click="
           confirmAction(
             'Confirmer : publier le brouillon manuel comme nouvelle révision ?',

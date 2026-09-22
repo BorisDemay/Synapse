@@ -9,6 +9,27 @@ const nodes = [
 ];
 
 describe("VaultTree", () => {
+  it("shows folder disclosure and visual nesting for full paths", () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            id: "folder",
+            kind: "folder",
+            label: "Work",
+            children: [{ id: "nested", kind: "note", label: "Overview" }],
+          },
+        ],
+      },
+    });
+    expect(
+      wrapper.get('[data-kind="folder"] .vault-tree-disclosure').text(),
+    ).toBe("▾");
+    expect(wrapper.get('[data-kind="note"]').attributes("style")).toContain(
+      "--tree-depth: 1",
+    );
+    wrapper.unmount();
+  });
   it("rend la première fenêtre de 10 000 feuilles hiérarchiques sans lire les branches hors écran", () => {
     const nestedNodes = Array.from({ length: 100 }, (_, folderIndex) => ({
       children: Array.from({ length: 100 }, (_, noteIndex) => ({
@@ -315,6 +336,47 @@ describe("VaultTree", () => {
     expect(
       wrapper.findAll('[role="treeitem"]')[1].attributes("aria-selected"),
     ).toBe("true");
+  });
+
+  it("suit la sélection externe (palette, récents, backlinks) sans clic dans l'arbre", async () => {
+    const wrapper = mount(VaultTree, { props: { nodes, selectedId: null } });
+
+    await wrapper.setProps({ selectedId: "note-2" });
+
+    const items = wrapper.findAll('[role="treeitem"]');
+    expect(items[1]!.attributes("aria-selected")).toBe("true");
+    expect(items[1]!.attributes("tabindex")).toBe("0");
+    expect(items[0]!.attributes("aria-selected")).toBe("false");
+  });
+
+  it("déplie les dossiers parents pour révéler la note sélectionnée depuis l'extérieur", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              { id: "projets/alpha.md", kind: "note", label: "Alpha" },
+            ],
+            id: "folder:projets",
+            kind: "folder",
+            label: "projets",
+          },
+        ],
+        selectedId: null,
+      },
+    });
+
+    await wrapper.get('[data-kind="folder"]').trigger("click");
+    expect(wrapper.findAll('[role="treeitem"]')).toHaveLength(1);
+
+    await wrapper.setProps({ selectedId: "projets/alpha.md" });
+
+    expect(
+      wrapper.get('[data-kind="folder"]').attributes("aria-expanded"),
+    ).toBe("true");
+    expect(wrapper.get('[data-kind="note"]').attributes("aria-selected")).toBe(
+      "true",
+    );
   });
 
   it("annonce un coffre vide", () => {
