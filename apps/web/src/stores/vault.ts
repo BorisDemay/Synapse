@@ -255,6 +255,13 @@ function applyPlaintext(
 export const useVaultStore = defineStore("vault", () => {
   let vaultKey: Uint8Array | undefined;
   const syncControllers = new Set<AbortController>();
+  // This is intentionally memory-only: it carries causal provenance for a
+  // draft that started before this client's preceding autosave was acknowledged.
+  // It must never enter the encrypted operation or the persisted cache.
+  const acknowledgedLocalRevisions = new Map<
+    string,
+    { baseRevision: number; revision: number }
+  >();
   let localEditEpoch = 0;
   const notes = reactive(new Map<string, LocalNote>());
   const attachments = reactive(new Map<string, LocalAttachment>());
@@ -278,6 +285,7 @@ export const useVaultStore = defineStore("vault", () => {
 
   function unlock(key: Uint8Array, vaultId: string, revision = 0) {
     vaultKey?.fill(0);
+    acknowledgedLocalRevisions.clear();
     vaultKey = key.slice();
     currentVaultId.value = vaultId;
     headRevision.value = revision;
@@ -290,6 +298,7 @@ export const useVaultStore = defineStore("vault", () => {
     for (const controller of syncControllers) controller.abort();
     vaultKey?.fill(0);
     vaultKey = undefined;
+    acknowledgedLocalRevisions.clear();
     isUnlocked.value = false;
     notes.clear();
     activeConflict.value = null;
@@ -1328,6 +1337,10 @@ export const useVaultStore = defineStore("vault", () => {
         if (!active()) return;
         await acknowledgeOperation(userId, operation, ack.revision);
         if (!active()) return;
+        acknowledgedLocalRevisions.set(operation.note_id, {
+          baseRevision: operation.base_revision,
+          revision: ack.revision,
+        });
         headRevision.value = Math.max(headRevision.value, ack.revision);
       } catch {
         if (!active()) return;
@@ -1357,7 +1370,12 @@ export const useVaultStore = defineStore("vault", () => {
     }
     const userId = requireUserId();
     const vaultId = currentVaultId.value;
-    const baseRevision = input.baseRevision ?? headRevision.value;
+    const acknowledgedLocalRevision = acknowledgedLocalRevisions.get(input.id);
+    const baseRevision =
+      input.baseRevision !== undefined &&
+      acknowledgedLocalRevision?.baseRevision === input.baseRevision
+        ? acknowledgedLocalRevision.revision
+        : (input.baseRevision ?? headRevision.value);
     if (!Number.isSafeInteger(baseRevision) || baseRevision < 0)
       throw new Error("Invalid base revision");
     const path = input.path ?? pathForNote(input.id, notes.get(input.id));
@@ -1820,6 +1838,7 @@ export const useVaultStore = defineStore("vault", () => {
     if (userId) {
       await clearUserOfflineData(userId);
     }
+    acknowledgedLocalRevisions.clear();
     lock();
     notes.clear();
     attachments.clear();
