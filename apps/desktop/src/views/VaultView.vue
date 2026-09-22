@@ -35,7 +35,7 @@ import {
   type SettingsSession,
   type VaultTreeNode,
 } from "@synapse/ui";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -65,6 +65,7 @@ compactAssistant.bindSidePanels({
 const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
+const markdownEditor = ref<InstanceType<typeof MarkdownEditor>>();
 const tagFilter = ref("");
 const blobUrls = ref<Record<string, string>>({});
 const attachmentPreview = ref<{
@@ -195,6 +196,15 @@ function selectNote(id: string) {
   });
   void vault.loadBacklinks(id);
   void vault.loadHistory(id);
+  void focusEditor();
+}
+
+async function focusEditor() {
+  await nextTick();
+  const focus = markdownEditor.value?.focus;
+  if (typeof focus === "function") {
+    focus();
+  }
 }
 
 function attachNote(id: string) {
@@ -250,6 +260,7 @@ function showNote(id: string) {
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
+  void focusEditor();
 }
 
 function startNewNote(folder?: string) {
@@ -257,6 +268,7 @@ function startNewNote(folder?: string) {
   noteId.value = vault.nextNotePath(draft, [noteId.value], folder);
   selectedNoteId.value = null;
   content.value = draft;
+  void focusEditor();
   formError.value = "";
 }
 
@@ -793,6 +805,7 @@ watch(settingsOpen, (open) => {
       <template v-else>
         <div class="editor-surface">
           <MarkdownEditor
+            ref="markdownEditor"
             v-model="content"
             :attachment-urls="blobUrls"
             :wikilink-suggestions="wikilinkSuggestions"

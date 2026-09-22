@@ -37,7 +37,7 @@ import {
   type SettingsUser,
   type VaultTreeNode,
 } from "@synapse/ui";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -77,6 +77,7 @@ const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
 const searchPalette = ref<InstanceType<typeof SearchPalette>>();
+const markdownEditor = ref<InstanceType<typeof MarkdownEditor>>();
 const tagFilter = ref("");
 const blobUrls = ref<Record<string, string>>({});
 const theme = useTheme();
@@ -308,6 +309,15 @@ async function selectNote(id: string) {
   content.value = vault.notes.get(id)?.content ?? "";
   void vault.rememberRecentNote(id);
   formError.value = "";
+  await focusEditor();
+}
+
+async function focusEditor() {
+  await nextTick();
+  const focus = markdownEditor.value?.focus;
+  if (typeof focus === "function") {
+    focus();
+  }
 }
 
 function isSafePreviewType(contentType: string): boolean {
@@ -380,6 +390,7 @@ async function showNote(id: string) {
   selectedNoteId.value = id;
   noteId.value = id;
   content.value = vault.notes.get(id)?.content ?? "";
+  await focusEditor();
 }
 
 async function startNewNote(folder?: string) {
@@ -397,6 +408,7 @@ async function startNewNote(folder?: string) {
     });
     selectedNoteId.value = noteId.value;
   }
+  await focusEditor();
 }
 
 async function startFromTemplate() {
@@ -1280,6 +1292,7 @@ watch(settingsOpen, (open) => {
       <template v-else>
         <div class="editor-surface">
           <MarkdownEditor
+            ref="markdownEditor"
             :model-value="content"
             @update:model-value="updateDraft"
             :attachment-urls="blobUrls"

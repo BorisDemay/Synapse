@@ -62,6 +62,9 @@ const vditorMock = vi.hoisted(() => {
           <button data-type="bold" aria-label="Gras"></button>
         </div>
         <div class="vditor-toolbar__item">
+          <button data-type="link" aria-label="Lien"></button>
+        </div>
+        <div class="vditor-toolbar__item">
           <button data-type="table" aria-label="Tableau"></button>
         </div>
         <div class="vditor-toolbar__item synapse-edit-mode-host">
@@ -502,6 +505,42 @@ describe("MarkdownEditor", () => {
         .get("button[aria-pressed='true']")
         .text(),
     ).toBe("Texte brut");
+  });
+
+  it("uses Control+Shift+K to insert a link only from the editor writing area", async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
+    const link = wrapper.get('.vditor-toolbar button[data-type="link"]')
+      .element as HTMLButtonElement;
+    const click = vi.spyOn(link, "click");
+
+    await wrapper.get('[contenteditable="true"]').trigger("keydown", {
+      ctrlKey: true,
+      key: "K",
+      shiftKey: true,
+    });
+
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("exposes focus that places the caret in the active writing area", () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const editable = wrapper.get('.vditor-ir [contenteditable="true"]')
+      .element as HTMLElement;
+    editable.append("écrire ici");
+    const focus = vi.spyOn(editable, "focus");
+
+    (wrapper.vm as unknown as { focus: () => void }).focus();
+
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(editable);
+    expect(window.getSelection()?.anchorNode).toBe(editable);
+    expect(window.getSelection()?.anchorOffset).toBe(
+      editable.childNodes.length,
+    );
+    wrapper.unmount();
   });
 
   it("includes table actions in the context menu when the caret is in a cell", async () => {

@@ -85,8 +85,13 @@ function closePalette() {
 }
 
 function openWithShortcut(event: KeyboardEvent) {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === "k"
+  ) {
     event.preventDefault();
+    event.stopPropagation();
     void openPalette();
   }
   if (event.key === "Escape" && isOpen.value) {
@@ -121,8 +126,10 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener("keydown", openWithShortcut));
-onBeforeUnmount(() => window.removeEventListener("keydown", openWithShortcut));
+onMounted(() => window.addEventListener("keydown", openWithShortcut, true));
+onBeforeUnmount(() =>
+  window.removeEventListener("keydown", openWithShortcut, true),
+);
 
 defineExpose({ openPalette, closePalette, isOpen });
 </script>

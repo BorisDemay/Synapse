@@ -302,6 +302,44 @@ function clickToolbarButton(selector: string) {
   editorRoot.value?.querySelector<HTMLButtonElement>(selector)?.click();
 }
 
+function activeEditable(): HTMLElement | undefined {
+  return (
+    editorRoot.value?.querySelector<HTMLElement>(
+      viewMode.value === "sv"
+        ? '.vditor-sv[contenteditable="true"]'
+        : '.vditor-ir [contenteditable="true"]',
+    ) ?? undefined
+  );
+}
+
+function focusEditor() {
+  const editable = activeEditable();
+  if (!editable) {
+    return;
+  }
+
+  editable.focus();
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(editable);
+  range.collapse(false);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function onEditorKeydown(event: KeyboardEvent) {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.shiftKey &&
+    event.key.toLowerCase() === "k" &&
+    isEditorWritingArea(event.target)
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    clickToolbarButton('.vditor-toolbar button[data-type="link"]');
+  }
+}
+
 function editorSelection(): string {
   return editor?.getSelection() ?? "";
 }
@@ -742,6 +780,8 @@ onBeforeUnmount(() => {
   teardownTableInteractions();
   editor?.destroy();
 });
+
+defineExpose({ focus: focusEditor });
 </script>
 
 <template>
@@ -750,6 +790,7 @@ onBeforeUnmount(() => {
     @click="onEditorClick"
     @contextmenu="onEditorContextMenu"
     @drop="onEditorDrop"
+    @keydown.capture="onEditorKeydown"
     @paste="onEditorPaste"
   >
     <div aria-label="Mode d'édition" class="markdown-editor-mode" role="group">
