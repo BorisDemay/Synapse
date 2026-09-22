@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, ref } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
@@ -14,7 +14,6 @@ import { useAuthStore } from "../../../web/src/stores/auth";
 
 const auth = useAuthStore();
 const route = useRoute();
-const router = useRouter();
 const email = ref("");
 const password = ref("");
 const instanceUrl = ref(
@@ -26,6 +25,8 @@ const invitationToken = ref(
   typeof route.query.invitation === "string" ? route.query.invitation : "",
 );
 const error = ref("");
+const registered = ref(false);
+const submitting = ref(false);
 const publicSignup = ref(false);
 const statusLoaded = ref(false);
 
@@ -46,6 +47,9 @@ async function configureInstance() {
 }
 
 async function submit() {
+  if (submitting.value) return;
+
+  submitting.value = true;
   error.value = "";
   try {
     await configureInstance();
@@ -55,10 +59,13 @@ async function submit() {
       password: password.value,
     });
     password.value = "";
-    await router.push("/unlock");
+    invitationToken.value = "";
+    registered.value = true;
   } catch {
     password.value = "";
     error.value = "Inscription impossible.";
+  } finally {
+    submitting.value = false;
   }
 }
 </script>
@@ -89,7 +96,14 @@ async function submit() {
           >
           <ThemeToggle />
         </div>
-        <template v-if="statusLoaded && showForm">
+        <template v-if="registered">
+          <h2>Consultez votre messagerie.</h2>
+          <p role="status">
+            Un lien d’activation a été envoyé. Activez votre compte, puis
+            connectez-vous.
+          </p>
+        </template>
+        <template v-else-if="statusLoaded && showForm">
           <h2>Commencez votre espace.</h2>
           <p class="subtitle">Un compte, puis une phrase pour la sync.</p>
           <form class="form-stack" @submit.prevent="submit">
@@ -136,7 +150,7 @@ async function submit() {
                 fluid
               />
             </div>
-            <Button label="S’inscrire" type="submit" />
+            <Button :disabled="submitting" label="S’inscrire" type="submit" />
           </form>
           <p v-if="error" role="alert">
             <Message severity="error" :closable="false">{{ error }}</Message>
