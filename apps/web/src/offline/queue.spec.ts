@@ -1,9 +1,11 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearUserOfflineData, resetOfflineDbHandle } from "./cache";
 import {
   enqueueOperation,
+  persistPendingOperation,
+  prepareOperation,
   listPendingOperations,
   removeAckedOperation,
 } from "./queue";
@@ -31,6 +33,33 @@ describe("offline queue", () => {
     indexedDB.deleteDatabase("synapse-offline-v1");
     resetOfflineDbHandle();
     await clearUserOfflineData(userId);
+  });
+
+  it("uses late edit provenance only before the first network attempt", async () => {
+    const operation = sampleOp("immutable-provenance");
+    await persistPendingOperation(userId, operation);
+    let revision = 1;
+    const reencrypt = vi.fn((original, base) => ({
+      ...original,
+      base_revision: base,
+      ciphertext: [9, base],
+    }));
+    const first = await prepareOperation(
+      userId,
+      operation.operation_id,
+      reencrypt,
+      () => revision,
+    );
+    expect(first?.base_revision).toBe(1);
+    revision = 2;
+    const replay = await prepareOperation(
+      userId,
+      operation.operation_id,
+      reencrypt,
+      () => revision,
+    );
+    expect(replay).toEqual(first);
+    expect(reencrypt).toHaveBeenCalledTimes(1);
   });
 
   it("keeps pending encrypted operations until they are acked", async () => {

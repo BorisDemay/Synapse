@@ -154,7 +154,7 @@ test-release-drill:
     bash tests/integration/release_drill.sh
 
 e2e-recovery:
-    pnpm exec playwright test tests/e2e/web-register-save.spec.ts tests/e2e/web-offline.spec.ts tests/e2e/reliability.spec.ts tests/e2e/conflict-resolution.spec.ts tests/e2e/full-sync.spec.ts tests/e2e/offline-update.spec.ts tests/e2e/update-ready.spec.ts tests/e2e/deleted-items.spec.ts
+    pnpm exec playwright test tests/e2e/web-register-save.spec.ts tests/e2e/web-offline.spec.ts tests/e2e/reliability.spec.ts tests/e2e/conflict-resolution.spec.ts tests/e2e/full-sync.spec.ts tests/e2e/offline-update.spec.ts tests/e2e/update-ready.spec.ts tests/e2e/deleted-items.spec.ts tests/e2e/sequential-autosave.spec.ts
 
 test-js:
     pnpm test

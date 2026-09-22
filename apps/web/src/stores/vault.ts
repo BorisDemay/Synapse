@@ -13,7 +13,7 @@ import {
   type PullResponse,
 } from "@synapse/api-client";
 import { defineStore } from "pinia";
-import { reactive, ref } from "vue";
+import { markRaw, reactive, ref } from "vue";
 
 import {
   unwrapAssistantConversations,
@@ -106,8 +106,27 @@ export interface ActiveConflict {
   remote: string;
 }
 
+/** Client-memory edit provenance; never part of an encrypted wire operation. */
+export interface NoteEditBase {
+  readonly revision: number;
+}
+interface EditBaseState {
+  revision: number;
+  noteId: string;
+  vaultId: string;
+  userId: string;
+  key: Uint8Array;
+}
+interface LocalSaveReceipt {
+  noteId: string;
+  hash: string;
+  acknowledgedRevision?: number;
+  followers: Set<EditBaseState>;
+}
+
 interface NoteInput {
   baseRevision?: number;
+  editBase?: NoteEditBase;
   content: string;
   id: string;
   path?: string;
@@ -275,8 +294,64 @@ export const useVaultStore = defineStore("vault", () => {
   const activeConflict = ref<ActiveConflict | null>(null);
   const preferences = ref<VaultPreferences>({ ...DEFAULT_VAULT_PREFERENCES });
   const skipTrustedUnlock = ref(sessionSkipTrustedUnlock());
+  let editBases = new WeakMap<NoteEditBase, EditBaseState>();
+  let noteOrigins = new WeakMap<LocalNote, LocalSaveReceipt>();
+  const pendingEditBases = new Map<string, EditBaseState>();
+  const localReceipts = new Map<string, LocalSaveReceipt>();
+  const latestLocalReceipts = new Map<string, LocalSaveReceipt>();
+
+  function clearEditProvenance() {
+    editBases = new WeakMap();
+    noteOrigins = new WeakMap();
+    pendingEditBases.clear();
+    localReceipts.clear();
+    latestLocalReceipts.clear();
+  }
+
+  function captureNoteEditBase(noteId: string): NoteEditBase {
+    const { key, vaultId } = requireUnlockedVault();
+    const state: EditBaseState = {
+      revision: headRevision.value,
+      noteId,
+      vaultId,
+      userId: requireUserId(),
+      key,
+    };
+    const note = notes.get(noteId);
+    const parent = note ? noteOrigins.get(note) : undefined;
+    if (parent?.acknowledgedRevision !== undefined) {
+      state.revision = Math.max(state.revision, parent.acknowledgedRevision);
+    } else parent?.followers.add(state);
+    const token = markRaw({
+      get revision() {
+        return state.revision;
+      },
+    });
+    editBases.set(token, state);
+    return token;
+  }
+
+  function acknowledgeLocalEdit(
+    operation: EncryptedPushOperation,
+    revision: number,
+  ) {
+    const receipt = localReceipts.get(operation.operation_id);
+    if (receipt && receipt.hash === operation.ciphertext_hash) {
+      receipt.acknowledgedRevision = revision;
+      for (const follower of receipt.followers) {
+        if (
+          isActiveVaultSession(follower.key, follower.vaultId, follower.userId)
+        )
+          follower.revision = Math.max(follower.revision, revision);
+      }
+      receipt.followers.clear();
+      localReceipts.delete(operation.operation_id);
+    }
+    pendingEditBases.delete(operation.operation_id);
+  }
 
   function unlock(key: Uint8Array, vaultId: string, revision = 0) {
+    clearEditProvenance();
     vaultKey?.fill(0);
     vaultKey = key.slice();
     currentVaultId.value = vaultId;
@@ -287,6 +362,7 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   function lock() {
+    clearEditProvenance();
     for (const controller of syncControllers) controller.abort();
     vaultKey?.fill(0);
     vaultKey = undefined;
@@ -612,9 +688,32 @@ export const useVaultStore = defineStore("vault", () => {
       }
     }
     if (!active() || epoch !== localEditEpoch) return;
+    const queued = await listPendingOperations(userId, vaultId);
+    if (!active() || epoch !== localEditEpoch) return;
+    const queuedByHash = new Map(
+      queued.map((operation) => [operation.ciphertext_hash, operation]),
+    );
+    const cachedById = new Map(cached.map((record) => [record.noteId, record]));
     notes.clear();
     attachments.clear();
-    for (const [id, note] of loadedNotes) notes.set(id, note);
+    for (const [id, note] of loadedNotes) {
+      notes.set(id, note);
+      const hash = cachedById.get(id)?.ciphertextHash;
+      let receipt = latestLocalReceipts.get(id);
+      const pending = hash ? queuedByHash.get(hash) : undefined;
+      if (pending && pending.note_id === id) {
+        receipt = localReceipts.get(pending.operation_id) ?? {
+          noteId: id,
+          hash: pending.ciphertext_hash,
+          followers: new Set<EditBaseState>(),
+        };
+        receipt.hash = pending.ciphertext_hash;
+        localReceipts.set(pending.operation_id, receipt);
+        latestLocalReceipts.set(id, receipt);
+      }
+      if (receipt && receipt.hash === hash)
+        noteOrigins.set(notes.get(id)!, receipt);
+    }
     for (const [id, attachment] of loadedAttachments)
       attachments.set(id, attachment);
     const head = await getCachedHeadRevision(userId, vaultId);
@@ -950,7 +1049,7 @@ export const useVaultStore = defineStore("vault", () => {
       if (!active()) return;
       if (epoch === localEditEpoch)
         for (const operation of page.operations) {
-          if (!pending.has(operation.note_id))
+          if (!pending.has(operation.note_id)) {
             applyPlaintext(
               operation.note_id,
               decoded.get(operation.operation_id)!,
@@ -958,6 +1057,11 @@ export const useVaultStore = defineStore("vault", () => {
               notes,
               attachments,
             );
+            const note = notes.get(operation.note_id);
+            const origin = latestLocalReceipts.get(operation.note_id);
+            if (note && origin?.hash === operation.ciphertext_hash)
+              noteOrigins.set(note, origin);
+          }
         }
       const head = await getCachedHeadRevision(userId, vaultId);
       if (!active()) return;
@@ -1276,6 +1380,7 @@ export const useVaultStore = defineStore("vault", () => {
               ciphertext_hash: bytesToHex(sha256(ciphertext)),
             };
           },
+          (original) => pendingEditBases.get(original.operation_id)?.revision,
         );
         if (!active()) return;
         if (!operation) {
@@ -1300,6 +1405,8 @@ export const useVaultStore = defineStore("vault", () => {
           }
           return;
         }
+        const localReceipt = localReceipts.get(operation.operation_id);
+        if (localReceipt) localReceipt.hash = operation.ciphertext_hash;
         const response = await pushOperation(operation);
         if (!active()) return;
         if (response.status === 409) {
@@ -1329,6 +1436,7 @@ export const useVaultStore = defineStore("vault", () => {
         await acknowledgeOperation(userId, operation, ack.revision);
         if (!active()) return;
         headRevision.value = Math.max(headRevision.value, ack.revision);
+        acknowledgeLocalEdit(operation, ack.revision);
       } catch {
         if (!active()) return;
         syncStatus.value = "offline";
@@ -1357,9 +1465,23 @@ export const useVaultStore = defineStore("vault", () => {
     }
     const userId = requireUserId();
     const vaultId = currentVaultId.value;
-    const baseRevision = input.baseRevision ?? headRevision.value;
-    if (!Number.isSafeInteger(baseRevision) || baseRevision < 0)
+    const editBase = input.editBase ? editBases.get(input.editBase) : undefined;
+    if (
+      input.editBase &&
+      (!editBase ||
+        editBase.noteId !== input.id ||
+        !isActiveVaultSession(editBase.key, editBase.vaultId, editBase.userId))
+    ) {
+      throw new Error("Invalid edit session");
+    }
+    const requestedRevision =
+      input.baseRevision ?? editBase?.revision ?? headRevision.value;
+    if (!Number.isSafeInteger(requestedRevision) || requestedRevision < 0)
       throw new Error("Invalid base revision");
+    const baseRevision = Math.max(
+      requestedRevision,
+      editBase?.revision ?? requestedRevision,
+    );
     const path = input.path ?? pathForNote(input.id, notes.get(input.id));
     syncStatus.value = "saving";
     lastError.value = null;
@@ -1386,12 +1508,26 @@ export const useVaultStore = defineStore("vault", () => {
     };
 
     const key = vaultKey;
-    const historyRevision = await persistPendingOperation(
-      userId,
-      operation,
-      supersedes,
-      useAuthStore().isLocalMode,
-    );
+    const receipt: LocalSaveReceipt = {
+      noteId: input.id,
+      hash: operation.ciphertext_hash,
+      followers: new Set(editBase ? [editBase] : []),
+    };
+    localReceipts.set(operation.operation_id, receipt);
+    if (editBase) pendingEditBases.set(operation.operation_id, editBase);
+    let historyRevision: number;
+    try {
+      historyRevision = await persistPendingOperation(
+        userId,
+        operation,
+        supersedes,
+        useAuthStore().isLocalMode,
+      );
+    } catch (error) {
+      localReceipts.delete(operation.operation_id);
+      pendingEditBases.delete(operation.operation_id);
+      throw error;
+    }
     if (
       vaultKey !== key ||
       currentVaultId.value !== vaultId ||
@@ -1404,11 +1540,16 @@ export const useVaultStore = defineStore("vault", () => {
         path,
         revision: baseRevision,
       });
+      latestLocalReceipts.set(input.id, receipt);
+      noteOrigins.set(notes.get(input.id)!, receipt);
     }
 
     pendingNoteIds.value = [...new Set([...pendingNoteIds.value, input.id])];
     await rememberHistory(userId, operation, input.content, historyRevision);
     if (useAuthStore().isLocalMode) {
+      localReceipts.delete(operation.operation_id);
+      pendingEditBases.delete(operation.operation_id);
+      receipt.followers.clear();
       pendingNoteIds.value = [];
       syncStatus.value = "synced";
     } else scheduleDelivery();
@@ -1848,6 +1989,7 @@ export const useVaultStore = defineStore("vault", () => {
     hasEncryptedVault,
     hasTrustedDevice,
     headRevision,
+    captureNoteEditBase,
     isUnlocked,
     lastError,
     listVaultIds,

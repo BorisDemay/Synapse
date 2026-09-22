@@ -58,8 +58,7 @@ async function mountVault(options?: {
   auth.isAuthenticated = true;
   auth.isOfflineSession = true;
   auth.userId = "user-1";
-  vault.isUnlocked = true;
-  vault.currentVaultId = "vault-1";
+  vault.unlock(new Uint8Array(32), "vault-1");
   if (!options?.emptyVault) {
     vault.notes.set(noteId, {
       content: "---\nstatus: actif\n---\n# Note épinglée",
@@ -75,6 +74,8 @@ async function mountVault(options?: {
     savedSearches: [savedSearch],
     templatesPath: "Templates",
   };
+  vi.spyOn(vault, "synchronize").mockResolvedValue(true);
+  vi.spyOn(vault, "loadHistory").mockResolvedValue();
   vi.spyOn(vault, "flushPendingOperations").mockResolvedValue();
   vi.spyOn(vault, "rememberRecentNote").mockResolvedValue();
   vi.spyOn(vault, "hasTrustedDevice").mockResolvedValue(false);

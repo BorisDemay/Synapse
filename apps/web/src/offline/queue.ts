@@ -199,6 +199,7 @@ export async function prepareOperation(
     operation: EncryptedPushOperation,
     revision: number,
   ) => EncryptedPushOperation,
+  localEditRevision?: (operation: EncryptedPushOperation) => number | undefined,
 ): Promise<EncryptedPushOperation | null> {
   const db = await openOfflineDb();
   const tx = db.transaction(["queue", "notes"], "readwrite");
@@ -217,9 +218,21 @@ export async function prepareOperation(
       supersededBy: _superseded,
       ...original
     } = row;
+    // A debounced successor may arrive after its predecessor's ACK removed
+    // that row. Only the caller's explicit edit provenance may advance it;
+    // never substitute the vault head (which can contain remote edits).
+    const revision = attempted
+      ? original.base_revision
+      : Math.max(
+          original.base_revision,
+          rebaseRevision ?? original.base_revision,
+          localEditRevision?.(original) ?? original.base_revision,
+        );
+    if (!Number.isSafeInteger(revision) || revision < original.base_revision)
+      throw new Error("Invalid local revision");
     const operation =
-      !attempted && rebaseRevision !== undefined
-        ? reencrypt(original, rebaseRevision)
+      !attempted && revision !== original.base_revision
+        ? reencrypt(original, revision)
         : original;
     await tx
       .objectStore("queue")

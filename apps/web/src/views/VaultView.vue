@@ -63,7 +63,11 @@ import {
 } from "../import/markdown-folder";
 import { useAssistantStore } from "../stores/assistant";
 import { useAuthStore } from "../stores/auth";
-import { useVaultStore, type DeletedItemRow } from "../stores/vault";
+import {
+  useVaultStore,
+  type DeletedItemRow,
+  type NoteEditBase,
+} from "../stores/vault";
 
 const vault = useVaultStore();
 const auth = useAuthStore();
@@ -132,8 +136,24 @@ watch(attachmentPreview, async (preview) => {
   } else attachmentFocus.detach();
 });
 const draftBaseRevision = ref<number | null>(null);
+const draftEditBase = ref<NoteEditBase | null>(null);
+watch(
+  draftBaseRevision,
+  (revision) => {
+    if (revision === null) draftEditBase.value = null;
+  },
+  { flush: "sync" },
+);
 const pendingSaves = reactive(
-  new Map<string, { content: string; baseRevision: number; noteId: string }>(),
+  new Map<
+    string,
+    {
+      content: string;
+      baseRevision: number;
+      noteId: string;
+      editBase: NoteEditBase;
+    }
+  >(),
 );
 const localSaveFailed = ref(false);
 let saveInFlight: Promise<boolean> | undefined;
@@ -715,8 +735,10 @@ async function restoreDeletedItem(id: string) {
 }
 
 function updateDraft(nextContent: string) {
-  if (nextContent !== content.value && draftBaseRevision.value === null)
+  if (nextContent !== content.value && draftBaseRevision.value === null) {
     draftBaseRevision.value = vault.headRevision;
+    draftEditBase.value = vault.captureNoteEditBase(noteId.value);
+  }
   content.value = nextContent;
 }
 
@@ -742,6 +764,7 @@ async function save(nextContent = content.value) {
     content: nextContent,
     noteId: noteId.value,
     baseRevision: draftBaseRevision.value ?? vault.headRevision,
+    editBase: draftEditBase.value ?? vault.captureNoteEditBase(noteId.value),
   });
   if (saveInFlight) {
     return saveInFlight;
@@ -755,6 +778,7 @@ async function save(nextContent = content.value) {
         localSaveFailed.value = false;
         await vault.saveNote({
           baseRevision: currentSave.baseRevision,
+          editBase: currentSave.editBase,
           content: currentSave.content,
           id: currentSave.noteId,
           path: vault.notes.get(currentSave.noteId)?.path,
