@@ -470,6 +470,60 @@ describe("SettingsPanel", () => {
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 
+  it("moves focus to the dismiss control when the dialog opens", async () => {
+    mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        deviceSupported: true,
+        deviceTrusted: true,
+        open: true,
+      },
+    });
+
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[aria-label="Fermer les paramètres"]'),
+    );
+  });
+
+  it("keeps Tab and Shift+Tab focus inside the dialog", async () => {
+    const wrapper = mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        deviceSupported: true,
+        deviceTrusted: true,
+        open: true,
+      },
+    });
+    await Promise.resolve();
+
+    const close = wrapper.get('[aria-label="Fermer les paramètres"]');
+    const lastControl = wrapper.get('[data-test="appearance-reset"]');
+
+    (lastControl.element as HTMLButtonElement).focus();
+    await lastControl.trigger("keydown", { key: "Tab" });
+    expect(document.activeElement).toBe(close.element);
+
+    (close.element as HTMLButtonElement).focus();
+    await close.trigger("keydown", { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(lastControl.element);
+  });
+
+  it("emits close when Escape is pressed in the dialog", async () => {
+    const wrapper = mount(SettingsPanel, {
+      props: {
+        deviceSupported: true,
+        deviceTrusted: true,
+        open: true,
+      },
+    });
+
+    await wrapper.get('[role="dialog"]').trigger("keydown", { key: "Escape" });
+
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
   it("emits account and vault secret changes from the settings forms", async () => {
     const wrapper = mount(SettingsPanel, {
       props: {

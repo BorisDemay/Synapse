@@ -37,7 +37,7 @@ import {
   type SettingsUser,
   type VaultTreeNode,
 } from "@synapse/ui";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -75,6 +75,7 @@ compactAssistant.bindSidePanels({
 });
 const graphOpen = ref(false);
 const settingsOpen = ref(false);
+const settingsTrigger = ref<HTMLButtonElement>();
 const searchQuery = ref("");
 const searchPalette = ref<InstanceType<typeof SearchPalette>>();
 const tagFilter = ref("");
@@ -584,6 +585,16 @@ async function lockVault() {
   settingsOpen.value = false;
   vault.lockAndRequirePassphrase();
   await router.push("/unlock");
+}
+
+function openSettings() {
+  settingsOpen.value = true;
+}
+
+async function closeSettings() {
+  settingsOpen.value = false;
+  await nextTick();
+  settingsTrigger.value?.focus();
 }
 
 async function loadAccountSettings() {
@@ -1138,13 +1149,14 @@ watch(settingsOpen, (open) => {
       />
       <div class="sidebar-footer">
         <button
+          ref="settingsTrigger"
           class="settings-button"
           type="button"
           aria-haspopup="dialog"
           :aria-expanded="settingsOpen"
           aria-label="Ouvrir les paramètres"
           title="Paramètres"
-          @click="settingsOpen = true"
+          @click="openSettings"
         >
           <span class="settings-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18">
@@ -1384,7 +1396,7 @@ watch(settingsOpen, (open) => {
     :templates-path="vault.preferences.templatesPath"
     @change-passphrase="changePassphrase"
     @change-password="changePassword"
-    @close="settingsOpen = false"
+    @close="closeSettings"
     @create-invitation="createInvitation"
     @open-admin="openAdminConsole"
     @delete-account="deleteAccount"

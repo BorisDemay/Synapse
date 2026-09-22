@@ -35,7 +35,7 @@ import {
   type SettingsSession,
   type VaultTreeNode,
 } from "@synapse/ui";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -64,6 +64,7 @@ compactAssistant.bindSidePanels({
 });
 const graphOpen = ref(false);
 const settingsOpen = ref(false);
+const settingsTrigger = ref<HTMLButtonElement>();
 const searchQuery = ref("");
 const tagFilter = ref("");
 const blobUrls = ref<Record<string, string>>({});
@@ -378,6 +379,16 @@ function goOnline() {
 async function lockVault() {
   settingsOpen.value = false;
   await vault.lock();
+}
+
+function openSettings() {
+  settingsOpen.value = true;
+}
+
+async function closeSettings() {
+  settingsOpen.value = false;
+  await nextTick();
+  settingsTrigger.value?.focus();
 }
 
 async function loadAccountSettings() {
@@ -716,13 +727,14 @@ watch(settingsOpen, (open) => {
       />
       <div class="sidebar-footer">
         <button
+          ref="settingsTrigger"
           class="settings-button"
           type="button"
           aria-haspopup="dialog"
           :aria-expanded="settingsOpen"
           aria-label="Ouvrir les paramètres"
           title="Paramètres"
-          @click="settingsOpen = true"
+          @click="openSettings"
         >
           <span class="settings-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18">
@@ -882,7 +894,7 @@ watch(settingsOpen, (open) => {
     :status-message="settingsStatus"
     @change-passphrase="changePassphrase"
     @change-password="changePassword"
-    @close="settingsOpen = false"
+    @close="closeSettings"
     @delete-account="deleteAccount"
     @export-notes="exportNotes"
     @lock-vault="lockVault"

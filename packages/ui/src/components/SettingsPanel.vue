@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 
 import {
   PANEL_WIDTH_BOUNDS,
@@ -90,6 +90,8 @@ const deleteConfirmation = ref("");
 const formError = ref("");
 const templatesPath = ref(props.templatesPath);
 const invitationEmail = ref("");
+const dialog = ref<HTMLElement>();
+const closeButton = ref<HTMLButtonElement>();
 
 const { preference, setPreference } = useTheme();
 const { collapsed, compact, setCollapsed, setCompact } = useSidebarLayout();
@@ -144,6 +146,16 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => props.open,
+  async (open) => {
+    if (!open) return;
+    await nextTick();
+    closeButton.value?.focus();
+  },
+  { immediate: true },
+);
+
 function selectCategory(id: SettingsCategoryId) {
   activeCategory.value = id;
 }
@@ -151,6 +163,32 @@ function selectCategory(id: SettingsCategoryId) {
 function onBackdrop(event: MouseEvent) {
   if (event.target === event.currentTarget) {
     emit("close");
+  }
+}
+
+function onDialogKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    emit("close");
+    return;
+  }
+  if (event.key !== "Tab") return;
+
+  const focusable = Array.from(
+    dialog.value?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? [],
+  );
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!first || !last) return;
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
@@ -234,10 +272,12 @@ function selectInvitationLink(event: Event) {
 <template>
   <div v-if="open" class="settings-backdrop" @click="onBackdrop">
     <section
+      ref="dialog"
       class="settings-panel settings-panel-wide settings-panel-fixed"
       role="dialog"
       aria-label="Paramètres"
       aria-modal="true"
+      @keydown="onDialogKeydown"
     >
       <header class="settings-header">
         <div>
@@ -245,6 +285,7 @@ function selectInvitationLink(event: Event) {
           <h2>Paramètres</h2>
         </div>
         <button
+          ref="closeButton"
           class="settings-close"
           type="button"
           aria-label="Fermer les paramètres"

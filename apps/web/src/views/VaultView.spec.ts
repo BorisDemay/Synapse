@@ -75,6 +75,7 @@ async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
   await router.isReady();
 
   const wrapper = mount(VaultView, {
+    attachTo: document.body,
     global: {
       plugins: [pinia, router, [PrimeVue, { unstyled: true }]],
       stubs: {
@@ -87,7 +88,6 @@ async function mountVault(options?: { stubVaultTree?: boolean }): Promise<{
           template: '<div data-test="markdown-editor">{{ modelValue }}</div>',
         },
         NoteRelationsPanel: true,
-        SettingsPanel: true,
         ThemeToggle: true,
         ...(stubVaultTree ? { VaultTree: true } : {}),
       },
@@ -197,6 +197,17 @@ describe("VaultView assistant layout", () => {
 });
 
 describe("VaultView sidebar layout", () => {
+  it("returns focus to the settings trigger after the dialog closes", async () => {
+    const { wrapper } = await mountVault();
+    const settings = wrapper.get('[aria-label="Ouvrir les paramètres"]');
+
+    await settings.trigger("click");
+    await wrapper.get('[aria-label="Fermer les paramètres"]').trigger("click");
+    await flushPromises();
+
+    expect(document.activeElement).toBe(settings.element);
+  });
+
   it("toggles sidebar collapse from the explorer toolbar", async () => {
     const { wrapper } = await mountVault();
 
