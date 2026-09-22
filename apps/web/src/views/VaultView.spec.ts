@@ -195,6 +195,7 @@ describe("VaultView saved navigation", () => {
     const { wrapper } = await mountVault({ recentNoteIds: ["ghost", noteId] });
     const recents = wrapper.get('[aria-label="Notes récentes"]');
 
+    expect(editorFocusCalls).toHaveLength(0);
     expect(recents.text()).toContain("Note épinglée");
     expect(recents.text()).not.toContain("ghost");
 
@@ -203,6 +204,7 @@ describe("VaultView saved navigation", () => {
     expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
       "# Note épinglée",
     );
+    expect(editorFocusCalls).toHaveLength(1);
   });
 });
 
@@ -610,7 +612,7 @@ describe("VaultView writing-first workspace", () => {
 
   it("moves the editor cursor forward immediately when creating a note", async () => {
     const { wrapper } = await mountVault();
-    const initialFocusCount = editorFocusCalls.length;
+    expect(editorFocusCalls).toHaveLength(0);
 
     await wrapper
       .get(".vault-notes-section-header [aria-label='Nouvelle note']")
@@ -620,7 +622,7 @@ describe("VaultView writing-first workspace", () => {
     expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
       "# Nouvelle note",
     );
-    expect(editorFocusCalls).toHaveLength(initialFocusCount + 1);
+    expect(editorFocusCalls).toHaveLength(1);
   });
 
   it("shows a path breadcrumb and the current note title instead of identifiers", async () => {

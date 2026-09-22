@@ -457,7 +457,7 @@ function toggleNoteTools(tool: "relations" | "graph" | "assistant") {
   }
 }
 
-async function selectNote(id: string) {
+async function selectNote(id: string, shouldFocus = true) {
   const attached = vault.attachments.get(id);
   if (attached) {
     const url = blobUrls.value[attached.path];
@@ -486,7 +486,7 @@ async function selectNote(id: string) {
   void vault.rememberRecentNote(id);
   formError.value = "";
   await closeMobileNavigation();
-  await focusEditor();
+  if (shouldFocus) await focusEditor();
 }
 
 async function focusEditor() {
@@ -1244,7 +1244,7 @@ async function reopenMostRecentNote() {
   const mostRecent = vault.preferences.recentNoteIds.find((id) =>
     vault.notes.has(id),
   );
-  if (mostRecent) await selectNote(mostRecent);
+  if (mostRecent) await selectNote(mostRecent, false);
 }
 
 onUnmounted(() => {
