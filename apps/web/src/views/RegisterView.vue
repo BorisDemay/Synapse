@@ -20,6 +20,7 @@ const invitationToken = ref(
 );
 const error = ref("");
 const registered = ref(false);
+const submitting = ref(false);
 const publicSignup = ref(false);
 const statusLoaded = ref(false);
 
@@ -33,6 +34,9 @@ onMounted(async () => {
 });
 
 async function submit() {
+  if (submitting.value) return;
+
+  submitting.value = true;
   error.value = "";
   try {
     await auth.register({
@@ -46,6 +50,8 @@ async function submit() {
   } catch {
     password.value = "";
     error.value = "Inscription impossible.";
+  } finally {
+    submitting.value = false;
   }
 }
 </script>
@@ -121,7 +127,7 @@ async function submit() {
                 fluid
               />
             </div>
-            <Button label="S’inscrire" type="submit" />
+            <Button :disabled="submitting" label="S’inscrire" type="submit" />
           </form>
           <p v-if="error" role="alert">
             <Message severity="error" :closable="false">{{ error }}</Message>

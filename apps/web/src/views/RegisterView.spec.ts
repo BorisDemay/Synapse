@@ -4,6 +4,7 @@ import PrimeVue from "primevue/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
+import { useAuthStore } from "../stores/auth";
 import RegisterView from "./RegisterView.vue";
 
 function mockSignupStatus(publicSignup: boolean | "error") {
@@ -46,18 +47,15 @@ async function mountRegister(path = "/register"): Promise<VueWrapper> {
 
 describe("RegisterView", () => {
   beforeEach(() => {
-    vi.stubGlobal("window", {
-      location: { origin: "https://synapse.local" },
-      localStorage: {
-        getItem: () => null,
-        setItem: () => undefined,
-      },
-      matchMedia: () => ({
-        matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      }),
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { origin: "https://synapse.local" },
     });
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
   });
 
   afterEach(() => {
@@ -107,5 +105,69 @@ describe("RegisterView", () => {
     expect(
       (wrapper.get("#register-invitation").element as HTMLInputElement).value,
     ).toBe("invite-token");
+  });
+
+  it("confirms that the account must be activated before signing in", async () => {
+    mockSignupStatus(true);
+    const wrapper = await mountRegister();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "register").mockResolvedValue();
+
+    await wrapper.get("#register-email").setValue("person@example.test");
+    await wrapper.get("#register-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "Activez votre compte, puis connectez-vous",
+    );
+  });
+
+  it("prevents a second submission while registration is pending", async () => {
+    mockSignupStatus(true);
+    const wrapper = await mountRegister();
+    const auth = useAuthStore();
+    let resolveRegistration: (() => void) | undefined;
+    const register = vi.spyOn(auth, "register").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRegistration = resolve;
+        }),
+    );
+
+    await wrapper.get("#register-email").setValue("person@example.test");
+    await wrapper.get("#register-password").setValue("a secure password");
+    const form = wrapper.get("form");
+    await form.trigger("submit");
+    await form.trigger("submit");
+
+    expect(
+      wrapper.get('button[type="submit"]').attributes("data-p-disabled"),
+    ).toBe("true");
+    expect(register).toHaveBeenCalledOnce();
+
+    resolveRegistration?.();
+  });
+
+  it("reenables registration after a failure and clears the password", async () => {
+    mockSignupStatus(true);
+    const wrapper = await mountRegister();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "register").mockRejectedValue(new Error("server detail"));
+
+    await wrapper.get("#register-email").setValue("person@example.test");
+    await wrapper.get("#register-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(
+      wrapper.get('button[type="submit"]').attributes("data-p-disabled"),
+    ).toBe("false");
+    expect(
+      (wrapper.get("#register-password").element as HTMLInputElement).value,
+    ).toBe("");
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "Inscription impossible.",
+    );
   });
 });
