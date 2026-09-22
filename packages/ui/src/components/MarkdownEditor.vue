@@ -1090,12 +1090,20 @@ onBeforeUnmount(() => {
   display: block;
   box-sizing: border-box;
   width: 100% !important;
-  /* Comfortable reading column on wide screens; min() keeps the full
-     writing width on narrow viewports. */
-  max-width: min(100%, 45rem) !important;
+  /* Use the available workspace without stretching lines edge-to-edge on
+     ultrawide displays. The same width applies to IR and source modes. */
+  max-width: min(100%, 60rem) !important;
   min-width: 0;
   margin-inline: auto !important;
-  padding: 1.5rem clamp(1.25rem, 4vw, 2rem) !important;
+  padding: 2rem clamp(1.25rem, 4vw, 2.5rem) !important;
+}
+
+/* Vditor paints its IR pre with its own dark panel color (#24292e), leaving
+   a conspicuous rectangle against the Synapse canvas. Keep the whole writing
+   area on the same surface in both themes, including while focused. */
+.markdown-editor :deep(.vditor-ir > .vditor-reset),
+.markdown-editor :deep(.vditor-ir > .vditor-reset:focus) {
+  background: var(--synapse-color-surface-raised);
 }
 
 .markdown-editor :deep(.vditor-ir:focus),

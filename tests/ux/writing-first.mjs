@@ -23,8 +23,11 @@ after(async () => {
   await server?.close();
 });
 
-async function fixture(viewport = { width: 1440, height: 900 }) {
-  const context = await browser.newContext({ viewport });
+async function fixture(
+  viewport = { width: 1440, height: 900 },
+  colorScheme = "light",
+) {
+  const context = await browser.newContext({ viewport, colorScheme });
   const page = await context.newPage();
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
@@ -169,6 +172,64 @@ test("returning to the vault resumes the recent note and reports local-only savi
       /synced|synchronisé/iu,
     );
     await expect(page.locator(".sync-pill")).toContainText(/local|appareil/iu);
+  } finally {
+    await close();
+  }
+});
+
+test("writing surface is spacious and seamless on desktop without mobile overflow", async () => {
+  const { page, close } = await fixture({ width: 1440, height: 900 }, "dark");
+  try {
+    for (const mode of ["Markdown", "Texte brut"]) {
+      await page.getByRole("button", { name: mode, exact: true }).click();
+      await page
+        .getByRole("textbox", { name: "Éditeur Markdown", exact: true })
+        .focus();
+      const writingSelector =
+        mode === "Markdown" ? ".vditor-ir > .vditor-reset" : ".vditor-sv";
+      const canvasSelector =
+        mode === "Markdown" ? ".vditor-ir" : ".vditor-content";
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        const layout = await page.evaluate(
+          ({ writingSelector, canvasSelector }) => {
+            const pane = document.querySelector(".editor-surface");
+            const writing = document.querySelector(writingSelector);
+            const canvas = document.querySelector(canvasSelector);
+            return {
+              paneWidth: pane.getBoundingClientRect().width,
+              writingWidth: writing.getBoundingClientRect().width,
+              writingBackground: getComputedStyle(writing).backgroundColor,
+              canvasBackground: getComputedStyle(canvas).backgroundColor,
+              viewportOverflow:
+                document.documentElement.scrollWidth > innerWidth,
+            };
+          },
+          { writingSelector, canvasSelector },
+        );
+        if (width === 1440) {
+          assert.ok(
+            layout.writingWidth >= 850,
+            `${mode} note is too narrow: ${JSON.stringify(layout)}`,
+          );
+          assert.equal(
+            layout.writingBackground,
+            layout.canvasBackground,
+            `${mode} column must blend with its canvas`,
+          );
+        } else {
+          assert.ok(
+            layout.writingWidth <= layout.paneWidth,
+            `${mode} mobile note overflows: ${JSON.stringify(layout)}`,
+          );
+          assert.equal(
+            layout.viewportOverflow,
+            false,
+            `${mode} mobile viewport overflows: ${JSON.stringify(layout)}`,
+          );
+        }
+      }
+    }
   } finally {
     await close();
   }
