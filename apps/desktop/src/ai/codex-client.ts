@@ -224,7 +224,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       delta?: unknown;
       arguments?: unknown;
       call_id?: unknown;
-      item?: CodexOutputItem;
+      item?: unknown;
       name?: unknown;
       output_text?: unknown;
       response?: CodexResponseBody;
@@ -262,7 +262,14 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         name: event.name,
       });
     }
-    if (event.type === "response.output_item.done" && event.item) {
+    if (event.type === "response.output_item.done") {
+      if (
+        !event.item ||
+        typeof event.item !== "object" ||
+        Array.isArray(event.item)
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
       calls.push(...extractFunctionCalls([event.item]));
     }
     if (event.type === "response.completed") {

@@ -298,6 +298,104 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    { label: "absent" },
+    { item: null, label: "null" },
+    { item: "not-an-output-item", label: "string" },
+    { item: 42, label: "number" },
+    { item: [], label: "array" },
+  ])(
+    "rejects a $label output item before a valid local tool call",
+    async ({ item }) => {
+      const malformedEvent: Record<string, unknown> = {
+        type: "response.output_item.done",
+      };
+      if (item !== undefined) {
+        malformedEvent.item = item;
+      }
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-valid-after-malformed-output-item",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              [malformedEvent, validCall]
+                .map((event) => `data: ${JSON.stringify(event)}`)
+                .join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+    },
+  );
+
+  it("accepts a message output item before a valid local tool call", async () => {
+    const messageItem = {
+      content: [{ text: "Je prépare la note.", type: "output_text" }],
+      role: "assistant",
+      type: "message",
+    };
+    const validCall = {
+      arguments: '{"markdown":"# Brouillon"}',
+      call_id: "call-after-message-output-item",
+      name: "create_note",
+      type: "response.function_call_arguments.done",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              { item: messageItem, type: "response.output_item.done" },
+              validCall,
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: '{"markdown":"# Brouillon"}',
+          callId: "call-after-message-output-item",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
   it.each(["", "   "])(
     "rejects blank function call arguments from every Responses API flow",
     async (argumentsValue) => {
