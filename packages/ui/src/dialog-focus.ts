@@ -93,12 +93,30 @@ export class DialogFocusController {
     document.removeEventListener("focusin", this.handleFocusIn, true);
     this.container?.removeEventListener("keydown", this.handleKeydown, true);
     this.container = null;
-    if (
-      wasActive &&
-      this.opener?.isConnected &&
-      isDialogElementVisible(this.opener)
-    ) {
-      this.opener.focus();
+    const opener = this.opener;
+    if (wasActive && opener?.isConnected && isDialogElementVisible(opener)) {
+      opener.focus();
+      // Chromium can refocus the editor's retained contenteditable selection
+      // after the dialog is removed, even though focus was just restored.
+      // Recheck once after paint, without overriding a new dialog or an
+      // intentional focus move to another control.
+      window.requestAnimationFrame?.(() => {
+        if (
+          activeDialogs.length > 0 ||
+          !opener.isConnected ||
+          !isDialogElementVisible(opener)
+        )
+          return;
+        const focused = document.activeElement;
+        if (
+          focused === document.body ||
+          (focused instanceof HTMLElement &&
+            (focused.isContentEditable ||
+              focused.closest('[contenteditable="true"]')))
+        ) {
+          opener.focus();
+        }
+      });
     }
     this.opener = null;
   }

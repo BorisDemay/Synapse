@@ -144,9 +144,12 @@ watch(
       return;
     }
     closeOverlay();
-    dialogFocus.detach();
-    // Aucun secret ne survit à la fermeture du panneau.
+    // Purger les secrets immédiatement, puis restituer le focus seulement
+    // après le retrait du dialogue du DOM : Chromium peut sinon refocaliser
+    // l'éditeur au moment où le panneau disparaît.
     clearTransientState();
+    await nextTick();
+    dialogFocus.detach();
   },
   { immediate: true },
 );

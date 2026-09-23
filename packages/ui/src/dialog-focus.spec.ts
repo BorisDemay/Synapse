@@ -164,6 +164,36 @@ describe("dialog-focus", () => {
     container.remove();
   });
 
+  it("récupère le focus si le navigateur le rend à l'éditeur après la fermeture", () => {
+    const container = buildDialog();
+    const opener = document.createElement("button");
+    const editable = document.createElement("div");
+    editable.contentEditable = "true";
+    document.body.append(opener, editable);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+
+    try {
+      opener.focus();
+      const controller = new DialogFocusController({
+        getContainer: () => container,
+      });
+      controller.attach();
+      controller.detach();
+      editable.focus();
+      frames[0]?.(0);
+      expect(document.activeElement).toBe(opener);
+    } finally {
+      vi.unstubAllGlobals();
+      container.remove();
+      opener.remove();
+      editable.remove();
+    }
+  });
+
   it("détache : retire l’écouteur et rend le focus à l’élément d’origine", () => {
     const container = buildDialog();
     const opener = document.createElement("button");
