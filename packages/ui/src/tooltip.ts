@@ -16,9 +16,8 @@ import type { Directive } from "vue";
 export const TOOLTIP_SHOW_DELAY_MS = 400;
 
 const TOOLTIP_ELEMENT_ID = "synapse-tooltip";
-
-/** Hauteur approximative de l'infobulle, utilisée pour choisir son côté. */
-const FLIP_MIN_SPACE_PX = 48;
+const VIEWPORT_MARGIN_PX = 8;
+const TRIGGER_GAP_PX = 6;
 
 let tooltipElement: HTMLDivElement | null = null;
 let describedTrigger: HTMLElement | null = null;
@@ -58,18 +57,36 @@ function accessibleName(trigger: HTMLElement): string {
   return label.trim();
 }
 
-function place(
-  element: HTMLDivElement,
-  trigger: HTMLElement,
-): "top" | "bottom" {
+function place(element: HTMLDivElement, trigger: HTMLElement): void {
   const rect = trigger.getBoundingClientRect();
-  const above = rect.top > FLIP_MIN_SPACE_PX;
+  // Measure after setting the text and unhiding the tooltip. CSS max-width
+  // alone does not shift a centered tooltip back inside the viewport.
+  const { width, height } = element.getBoundingClientRect();
+  const halfWidth = width / 2;
+  const minCenter = VIEWPORT_MARGIN_PX + halfWidth;
+  const maxCenter = Math.max(
+    minCenter,
+    window.innerWidth - VIEWPORT_MARGIN_PX - halfWidth,
+  );
+  const center = rect.left + rect.width / 2;
+  const left = Math.max(minCenter, Math.min(center, maxCenter));
 
-  element.style.left = `${rect.left + rect.width / 2}px`;
-  element.style.top = `${above ? rect.top : rect.bottom}px`;
+  const aboveSpace = rect.top - TRIGGER_GAP_PX - VIEWPORT_MARGIN_PX;
+  const belowSpace =
+    window.innerHeight - rect.bottom - TRIGGER_GAP_PX - VIEWPORT_MARGIN_PX;
+  const above =
+    aboveSpace >= height || (belowSpace < height && aboveSpace >= belowSpace);
+  const preferredTop = above
+    ? rect.top - TRIGGER_GAP_PX - height
+    : rect.bottom + TRIGGER_GAP_PX;
+  const maxTop = Math.max(
+    VIEWPORT_MARGIN_PX,
+    window.innerHeight - height - VIEWPORT_MARGIN_PX,
+  );
+
+  element.style.left = `${left}px`;
+  element.style.top = `${Math.max(VIEWPORT_MARGIN_PX, Math.min(preferredTop, maxTop))}px`;
   element.dataset.placement = above ? "top" : "bottom";
-
-  return above ? "top" : "bottom";
 }
 
 function handleDismiss(): void {

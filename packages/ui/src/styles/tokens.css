@@ -286,19 +286,13 @@ button {
   font-size: 0.8rem;
   line-height: 1.3;
   text-wrap: pretty;
+  overflow-wrap: anywhere;
+  transform: translateX(-50%);
   pointer-events: none;
 }
 
 .synapse-tooltip[hidden] {
   display: none;
-}
-
-.synapse-tooltip[data-placement="top"] {
-  transform: translate(-50%, calc(-100% - 0.4rem));
-}
-
-.synapse-tooltip[data-placement="bottom"] {
-  transform: translate(-50%, 0.4rem);
 }
 
 .p-button,

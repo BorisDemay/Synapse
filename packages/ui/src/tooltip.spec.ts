@@ -60,6 +60,7 @@ describe("infobulle applicative", () => {
   afterEach(() => {
     vi.useRealTimers();
     resetTooltip();
+    vi.restoreAllMocks();
   });
 
   it("n'utilise qu'un seul élément pour toutes les infobulles", () => {
@@ -131,6 +132,28 @@ describe("infobulle applicative", () => {
     showTooltip(trigger, "En bas");
 
     expect(tooltip()?.dataset.placement).toBe("bottom");
+  });
+
+  it("borne l'infobulle aux bords gauche et droit selon sa largeur réelle", () => {
+    const trigger = createTrigger();
+    let anchorLeft = 0;
+    trigger.getBoundingClientRect = () =>
+      ({ left: anchorLeft, width: 24, top: 200, bottom: 224 }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        return {
+          width: this.id === "synapse-tooltip" ? 200 : 24,
+          height: 48,
+        } as DOMRect;
+      },
+    );
+
+    showTooltip(trigger, "Un libellé plus long que le bouton");
+    expect(tooltip()?.style.left).toBe("108px");
+
+    anchorLeft = window.innerWidth - 24;
+    showTooltip(trigger, "Un libellé plus long que le bouton");
+    expect(tooltip()?.style.left).toBe(`${window.innerWidth - 108}px`);
   });
 
   it("se masque dès qu'une interaction ou un défilement a lieu ailleurs", () => {
