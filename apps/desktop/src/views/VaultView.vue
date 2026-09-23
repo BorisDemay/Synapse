@@ -30,7 +30,9 @@ import {
   searchLocalNotes,
   uniqueTags,
   useTheme,
+  pushOverlay,
   wikilinkPath,
+  type OverlayHandle,
   type PaletteCommand,
   type SettingsSession,
   type VaultTreeNode,
@@ -73,6 +75,23 @@ const attachmentPreview = ref<{
   name: string;
   url: string;
 } | null>(null);
+// L'aperçu participe à la pile d'overlays : profondeur d'empilement, verrou de
+// défilement et propriété d'Échap, sans gestionnaire clavier local.
+const attachmentOverlay = ref<OverlayHandle>();
+watch(attachmentPreview, (preview) => {
+  if (preview) {
+    attachmentOverlay.value = pushOverlay({
+      label: "attachment-preview",
+      lockScroll: true,
+      onEscape: () => {
+        attachmentPreview.value = null;
+      },
+    });
+    return;
+  }
+  attachmentOverlay.value?.release();
+  attachmentOverlay.value = undefined;
+});
 const theme = useTheme();
 const sidebar = useSidebarLayout();
 const settingsError = ref("");
@@ -608,6 +627,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  attachmentOverlay.value?.release();
+  attachmentOverlay.value = undefined;
   window.removeEventListener("online", onOnline);
   for (const url of Object.values(blobUrls.value)) {
     URL.revokeObjectURL(url);
@@ -914,6 +935,7 @@ watch(settingsOpen, (open) => {
     v-if="attachmentPreview"
     class="attachment-preview-backdrop"
     role="presentation"
+    :style="{ zIndex: attachmentOverlay?.zIndex }"
     @click.self="attachmentPreview = null"
   >
     <section

@@ -48,7 +48,12 @@ export function getDialogFocusableElements(
 
 export interface DialogFocusControllerOptions {
   getContainer: () => HTMLElement | null;
-  onEscape: () => void;
+  /**
+   * Ferme le dialogue sur Échap. À omettre quand la pile d'overlays gère déjà
+   * Échap : son écouteur en phase de capture sur `document` s'exécute avant
+   * celui du conteneur et consomme alors l'événement.
+   */
+  onEscape?: () => void;
 }
 
 /**
@@ -117,8 +122,10 @@ export class DialogFocusController {
       return;
     }
     if (event.key === "Escape") {
+      const close = this.options.onEscape;
+      if (!close) return;
       event.stopPropagation();
-      this.options.onEscape();
+      close();
       return;
     }
     if (event.key !== "Tab") {

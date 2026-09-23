@@ -9,6 +9,7 @@ import {
 } from "vue";
 
 import { DialogFocusController, isDialogElementVisible } from "../dialog-focus";
+import { pushOverlay, type OverlayHandle } from "../overlay-stack";
 
 export interface SearchResult {
   hint?: string;
@@ -44,21 +45,33 @@ const isOpen = ref(false);
 const activeIndex = ref(0);
 const input = ref<HTMLInputElement>();
 const dialogElement = ref<HTMLElement>();
+const overlay = ref<OverlayHandle>();
 
 function closePalette() {
   if (!isOpen.value) {
     return;
   }
   isOpen.value = false;
+  overlay.value?.release();
+  overlay.value = undefined;
   dialogFocus.detach();
   emit("update:query", "");
   emit("close");
 }
 
+// Échap appartient à la pile d'overlays : elle ne l'envoie qu'à l'overlay du
+// dessus, et consomme l'événement avant qu'il n'atteigne ce conteneur.
 const dialogFocus = new DialogFocusController({
   getContainer: () => dialogElement.value ?? null,
-  onEscape: closePalette,
 });
+
+function openOverlay() {
+  overlay.value = pushOverlay({
+    label: "search-palette",
+    lockScroll: true,
+    onEscape: closePalette,
+  });
+}
 
 /**
  * Un autre dialogue modal (paramètres, aperçu, historique) est ouvert : la
@@ -112,6 +125,7 @@ async function openPalette(query = "") {
     return;
   }
   isOpen.value = true;
+  openOverlay();
   emit("update:query", query);
   await nextTick();
   dialogFocus.attach();
@@ -131,6 +145,7 @@ async function togglePaletteFromShortcut() {
     return;
   }
   isOpen.value = true;
+  openOverlay();
   await nextTick();
   dialogFocus.attach();
   input.value?.focus();
@@ -146,10 +161,6 @@ function openWithShortcut(event: KeyboardEvent) {
     event.preventDefault();
     event.stopPropagation();
     void togglePaletteFromShortcut();
-  }
-  if (event.key === "Escape" && isOpen.value) {
-    event.preventDefault();
-    closePalette();
   }
 }
 
@@ -182,6 +193,8 @@ function onKeydown(event: KeyboardEvent) {
 onMounted(() => window.addEventListener("keydown", openWithShortcut, true));
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", openWithShortcut, true);
+  overlay.value?.release();
+  overlay.value = undefined;
   dialogFocus.detach();
 });
 
@@ -193,6 +206,7 @@ defineExpose({ openPalette, closePalette, isOpen });
     v-if="isOpen"
     class="search-palette-backdrop"
     role="presentation"
+    :style="{ zIndex: overlay?.zIndex }"
     @click.self="closePalette"
   >
     <section

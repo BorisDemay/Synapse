@@ -1,5 +1,11 @@
 import { mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  overlayStackDepth,
+  pushOverlay,
+  resetOverlayStack,
+} from "../../overlay-stack";
 
 import {
   PANEL_WIDTH_BOUNDS,
@@ -26,6 +32,10 @@ async function selectCategory(
 }
 
 describe("SettingsPanel", () => {
+  afterEach(() => {
+    resetOverlayStack();
+  });
+
   it("renders category pane headings with section title styling", async () => {
     const wrapper = mount(SettingsPanel, {
       props: {
@@ -597,6 +607,63 @@ describe("SettingsPanel", () => {
     expect(
       wrapper.find('[aria-label="Exporter les notes en Markdown"]').exists(),
     ).toBe(false);
+  });
+
+  it("s’empile dans la pile d’overlays et verrouille le défilement", async () => {
+    const wrapper = mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get(".settings-backdrop").attributes("style")).toContain(
+      "calc(var(--synapse-z-overlay) + 0)",
+    );
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await wrapper.setProps({ open: false });
+
+    expect(overlayStackDepth()).toBe(0);
+    expect(document.body.style.overflow).toBe("");
+    wrapper.unmount();
+  });
+
+  it("passe au-dessus d’un overlay déjà ouvert sans lui prendre Échap", async () => {
+    const palette = pushOverlay({ label: "palette", lockScroll: true });
+    const wrapper = mount(SettingsPanel, {
+      attachTo: document.body,
+      props: {
+        deviceSupported: true,
+        deviceTrusted: false,
+        open: true,
+      },
+    });
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get(".settings-backdrop").attributes("style")).toContain(
+      "calc(var(--synapse-z-overlay) + 1)",
+    );
+
+    const dialog = wrapper.get('[role="dialog"]').element as HTMLElement;
+    dialog.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    // La palette du dessous reste ouverte : Échap n'a été envoyé qu'au panneau.
+    expect(palette.depth).toBe(0);
+    expect(overlayStackDepth()).toBe(2);
+
+    await wrapper.setProps({ open: false });
+
+    expect(overlayStackDepth()).toBe(1);
+    expect(palette.depth).toBe(0);
+    wrapper.unmount();
   });
 
   it("déplace le focus dans le dialogue à l’ouverture et ferme avec Échap", async () => {

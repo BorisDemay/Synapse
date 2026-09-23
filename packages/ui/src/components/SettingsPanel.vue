@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import { DialogFocusController } from "../dialog-focus";
+import { pushOverlay, type OverlayHandle } from "../overlay-stack";
 import {
   PANEL_WIDTH_BOUNDS,
   usePanelLayout,
@@ -106,9 +107,27 @@ function clearTransientState() {
 
 const dialogFocus = new DialogFocusController({
   getContainer: () => dialogElement.value ?? null,
-  onEscape: () => emit("close"),
 });
+
+// Échap est délégué à la pile d'overlays, qui ne l'envoie qu'à l'overlay du
+// dessus ; le panneau en devient un simple participant.
+const overlay = ref<OverlayHandle>();
+
+function openOverlay() {
+  overlay.value ??= pushOverlay({
+    label: "settings-panel",
+    lockScroll: true,
+    onEscape: () => emit("close"),
+  });
+}
+
+function closeOverlay() {
+  overlay.value?.release();
+  overlay.value = undefined;
+}
+
 onBeforeUnmount(() => {
+  closeOverlay();
   dialogFocus.detach();
   clearTransientState();
 });
@@ -117,12 +136,14 @@ watch(
   () => props.open,
   async (open) => {
     if (open) {
+      openOverlay();
       await nextTick();
       if (props.open) {
         dialogFocus.attach();
       }
       return;
     }
+    closeOverlay();
     dialogFocus.detach();
     // Aucun secret ne survit à la fermeture du panneau.
     clearTransientState();
@@ -310,7 +331,12 @@ function selectInvitationLink(event: Event) {
 </script>
 
 <template>
-  <div v-if="open" class="settings-backdrop" @click="onBackdrop">
+  <div
+    v-if="open"
+    class="settings-backdrop"
+    :style="{ zIndex: overlay?.zIndex }"
+    @click="onBackdrop"
+  >
     <section
       ref="dialogElement"
       class="settings-panel settings-panel-wide settings-panel-fixed"

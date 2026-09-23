@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter, type Router } from "vue-router";
 
 import {
   resetCompactAssistantLayoutState,
+  resetOverlayStack,
   resetSidebarLayoutState,
   synapseTooltip,
 } from "@synapse/ui";
@@ -39,6 +40,7 @@ beforeEach(() => {
   appShellCloseCalls.length = 0;
   resetSidebarLayoutState();
   resetCompactAssistantLayoutState();
+  resetOverlayStack();
   mockMatchMedia(false);
 });
 
@@ -986,6 +988,34 @@ describe("VaultView attachment preview accessibility", () => {
     expect(wrapper.find('[role="dialog"][aria-modal="true"]').exists()).toBe(
       false,
     );
+    wrapper.unmount();
+  });
+
+  it("s’empile dans la pile d’overlays et verrouille le défilement", async () => {
+    const { wrapper, vault } = await mountVault({ attachToBody: true });
+    vault.attachments.set("att-1", {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+      path: "attachments/photo.png",
+      revision: 1,
+    });
+    await flushPromises();
+
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "att-1");
+    await flushPromises();
+
+    expect(
+      wrapper.get(".attachment-preview-backdrop").attributes("style"),
+    ).toContain("calc(var(--synapse-z-overlay) + 0)");
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await wrapper
+      .get('.attachment-preview button[aria-label="Fermer l’aperçu"]')
+      .trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".attachment-preview-backdrop").exists()).toBe(false);
+    expect(document.body.style.overflow).toBe("");
     wrapper.unmount();
   });
 });

@@ -139,6 +139,31 @@ describe("dialog-focus", () => {
     container.remove();
   });
 
+  it("laisse Échap à la pile d’overlays quand aucun rappel n’est fourni", () => {
+    const container = buildDialog();
+    const controller = new DialogFocusController({
+      getContainer: () => container,
+    });
+    const bubble = vi.fn();
+    document.addEventListener("keydown", bubble);
+    controller.attach();
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    container.dispatchEvent(event);
+
+    document.removeEventListener("keydown", bubble);
+
+    expect(bubble).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(false);
+
+    controller.detach();
+    container.remove();
+  });
+
   it("détache : retire l’écouteur et rend le focus à l’élément d’origine", () => {
     const container = buildDialog();
     const opener = document.createElement("button");

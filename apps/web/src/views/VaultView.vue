@@ -32,6 +32,8 @@ import {
   uniqueTags,
   useTheme,
   wikilinkPath,
+  pushOverlay,
+  type OverlayHandle,
   type PaletteCommand,
   type QueryNote,
   type SettingsSession,
@@ -141,17 +143,28 @@ const attachmentPreview = ref<{
   url: string;
 } | null>(null);
 const attachmentDialog = ref<HTMLElement>();
+// Échap appartient à la pile d'overlays : l'aperçu n'installe pas son propre
+// gestionnaire pour ne pas fermer un overlay situé au-dessus de lui.
 const attachmentFocus = new DialogFocusController({
   getContainer: () => attachmentDialog.value ?? null,
-  onEscape: () => {
-    attachmentPreview.value = null;
-  },
 });
+const attachmentOverlay = ref<OverlayHandle>();
 watch(attachmentPreview, async (preview) => {
   if (preview) {
+    attachmentOverlay.value = pushOverlay({
+      label: "attachment-preview",
+      lockScroll: true,
+      onEscape: () => {
+        attachmentPreview.value = null;
+      },
+    });
     await nextTick();
     if (attachmentPreview.value) attachmentFocus.attach();
-  } else attachmentFocus.detach();
+    return;
+  }
+  attachmentOverlay.value?.release();
+  attachmentOverlay.value = undefined;
+  attachmentFocus.detach();
 });
 const draftBaseRevision = ref<number | null>(null);
 const draftEditBase = ref<NoteEditBase | null>(null);
@@ -1297,6 +1310,8 @@ async function reopenMostRecentNote() {
 
 onUnmounted(() => {
   clearToasts();
+  attachmentOverlay.value?.release();
+  attachmentOverlay.value = undefined;
   attachmentFocus.detach();
   vaultViewEpoch++;
   closeDeletedItems();
@@ -1888,6 +1903,7 @@ watch(settingsOpen, (open) => {
     v-if="attachmentPreview"
     class="attachment-preview-backdrop"
     role="presentation"
+    :style="{ zIndex: attachmentOverlay?.zIndex }"
     @click.self="attachmentPreview = null"
   >
     <section
@@ -1896,7 +1912,6 @@ watch(settingsOpen, (open) => {
       role="dialog"
       aria-modal="true"
       :aria-label="`Aperçu ${attachmentPreview.name}`"
-      @keydown.escape.prevent="attachmentPreview = null"
     >
       <header>
         <strong>{{ attachmentPreview.name }}</strong>

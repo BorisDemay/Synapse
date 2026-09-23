@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { pushOverlay, resetOverlayStack } from "../../overlay-stack";
 import SearchPalette from "../SearchPalette.vue";
 
 describe("SearchPalette", () => {
@@ -9,6 +10,7 @@ describe("SearchPalette", () => {
   afterEach(() => {
     wrapper?.unmount();
     wrapper = undefined;
+    resetOverlayStack();
   });
 
   it("ouvre la recherche avec Control+K et expose les résultats", async () => {
@@ -179,13 +181,79 @@ describe("SearchPalette", () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
     expect(document.activeElement).toBe(wrapper.get("input").element);
 
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    wrapper.get('[role="dialog"]').element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Escape",
+      }),
+    );
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     expect(wrapper.emitted("close")).toHaveLength(1);
     expect(document.activeElement).toBe(opener);
     opener.remove();
+  });
+
+  it("s’empile dans la pile d’overlays et verrouille le défilement", async () => {
+    wrapper = mount(SearchPalette, {
+      attachTo: document.body,
+      props: { query: "", results: [] },
+    });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+
+    const backdrop = wrapper.get(".search-palette-backdrop");
+
+    expect(backdrop.attributes("style")).toContain(
+      "calc(var(--synapse-z-overlay) + 0)",
+    );
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await wrapper.get(".search-palette-backdrop").trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("laisse Échap à l’overlay du dessus", async () => {
+    wrapper = mount(SearchPalette, {
+      attachTo: document.body,
+      props: { query: "", results: [] },
+    });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }),
+    );
+    await wrapper.vm.$nextTick();
+    const settings = pushOverlay({ label: "paramètres", lockScroll: true });
+
+    wrapper.get('[role="dialog"]').element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Escape",
+      }),
+    );
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+    expect(wrapper.emitted("close")).toBeUndefined();
+
+    settings.release();
+    wrapper.get('[role="dialog"]').element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Escape",
+      }),
+    );
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.emitted("close")).toHaveLength(1);
   });
 
   it("piège Tab à l’intérieur de la palette", async () => {
