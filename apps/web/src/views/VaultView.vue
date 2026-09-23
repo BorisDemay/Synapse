@@ -286,13 +286,6 @@ const pinnedNotes = computed(() =>
     .filter((note): note is QueryNote => Boolean(note)),
 );
 
-const recentNotes = computed(() =>
-  vault.preferences.recentNoteIds
-    .map((id) => queryNotes.value.find((note) => note.id === id))
-    .filter((note): note is QueryNote => Boolean(note))
-    .slice(0, 8),
-);
-
 const treeSelectedId = computed(() =>
   selectedNoteId.value && vault.notes.has(selectedNoteId.value)
     ? selectedNoteId.value
@@ -1472,25 +1465,6 @@ watch(settingsOpen, (open) => {
           @click="openLocalSearch(search.query)"
         >
           {{ search.label }}
-        </button>
-      </section>
-      <section
-        v-if="!sidebar.collapsed.value && recentNotes.length"
-        class="recent-notes"
-        aria-label="Notes récentes"
-      >
-        <div class="sidebar-section-label" v-if="!sidebar.compact.value">
-          RÉCENTES
-        </div>
-        <button
-          v-for="note in recentNotes"
-          :key="note.id"
-          class="sidebar-nav-item"
-          type="button"
-          :data-active="selectedNoteId === note.id ? 'true' : undefined"
-          @click="selectNote(note.id)"
-        >
-          {{ note.label }}
         </button>
       </section>
       <VaultNotesSectionHeader

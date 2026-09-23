@@ -275,8 +275,9 @@ search, editor focus, recent-note resume, deleted-note recovery after reload,
 keyboard dialogs, and responsive layouts from 390 to 1440 pixels. The real
 server/offline recovery journeys remain covered by `just e2e-recovery`.
 
-The shared workspace exposes search and new-note actions, recent notes,
-folder paths, and backlinks/history independently of the optional assistant.
+The shared workspace exposes search and new-note actions, folder paths,
+and backlinks/history independently of the optional assistant. Opening a vault
+resumes the last available note without a dedicated recent-notes sidebar section.
 Only one secondary tool opens at a time; narrow screens use navigation and
 tool overlays. Vault creation confirms the local passphrase and explains that
 Synapse cannot recover it.

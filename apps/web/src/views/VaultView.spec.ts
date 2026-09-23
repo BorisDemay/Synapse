@@ -192,20 +192,19 @@ describe("VaultView saved navigation", () => {
     );
   });
 
-  it("prioritizes recent notes in a dedicated sidebar section", async () => {
+  it("hides the recent notes section while keeping other navigation", async () => {
     const { wrapper } = await mountVault({ recentNoteIds: ["ghost", noteId] });
-    const recents = wrapper.get('[aria-label="Notes récentes"]');
 
-    expect(editorFocusCalls).toHaveLength(0);
-    expect(recents.text()).toContain("Note épinglée");
-    expect(recents.text()).not.toContain("ghost");
-
-    await recents.get("button").trigger("click");
-
+    expect(wrapper.find('[aria-label="Notes récentes"]').exists()).toBe(false);
+    expect(wrapper.get('[aria-label="Notes épinglées"]').text()).toContain(
+      "Note épinglée",
+    );
+    expect(
+      wrapper.get('[aria-label="Recherches sauvegardées"]').text(),
+    ).toContain(savedSearch.label);
     expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
       "# Note épinglée",
     );
-    expect(editorFocusCalls).toHaveLength(1);
   });
 });
 
