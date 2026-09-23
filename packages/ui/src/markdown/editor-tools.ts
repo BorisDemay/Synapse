@@ -23,28 +23,6 @@ export type MarkdownMenuItem =
   | MarkdownMenuSeparator
   | MarkdownMenuSubmenu;
 
-export const TOOLBAR_LABELS: Readonly<Record<string, string>> = {
-  emoji: "Émojis",
-  headings: "Titres",
-  bold: "Gras",
-  italic: "Italique",
-  strike: "Barré",
-  link: "Lien",
-  list: "Puces",
-  "ordered-list": "Numéros",
-  check: "Tâches",
-  outdent: "Réduire",
-  indent: "Indenter",
-  quote: "Citation",
-  line: "Séparateur",
-  code: "Bloc code",
-  "inline-code": "Code",
-  more: "Plus",
-  table: "Tableau",
-  undo: "Annuler",
-  redo: "Rétablir",
-};
-
 /**
  * Vditor hotkey for the link toolbar action, written with the engine's own
  * ⌘/⇧ notation; the engine resolves it to Ctrl+Shift+K (Cmd on macOS) for
@@ -86,6 +64,21 @@ const TABLE_ITEMS: readonly MarkdownMenuCommand[] = [
 
 const SEPARATOR: MarkdownMenuSeparator = { type: "separator" };
 
+// Small, local palette: inserting an emoji never calls an external service.
+const EDITOR_EMOJIS = [
+  { id: "smile", glyph: "😄", label: "Sourire" },
+  { id: "thumbs-up", glyph: "👍", label: "J’aime" },
+  { id: "thumbs-down", glyph: "👎", label: "Je n’aime pas" },
+  { id: "eyes", glyph: "👀", label: "Regarder" },
+  { id: "heart", glyph: "❤️", label: "Cœur" },
+  { id: "rocket", glyph: "🚀", label: "Fusée" },
+  { id: "party", glyph: "🎉", label: "Fête" },
+] as const;
+
+export function emojiForCommand(id: string): string | undefined {
+  return EDITOR_EMOJIS.find((emoji) => `emoji:${emoji.id}` === id)?.glyph;
+}
+
 function command(id: string, label: string): MarkdownMenuCommand {
   return { type: "item", id, label };
 }
@@ -103,12 +96,17 @@ export function markdownContextMenuItems({
   headingLevel = 0,
   inTable,
   selectionEmpty = false,
+  viewMode = "ir",
 }: {
   headingLevel?: number;
   inTable: boolean;
   selectionEmpty?: boolean;
+  viewMode?: "ir" | "sv";
 }): MarkdownMenuItem[] {
   const items: MarkdownMenuItem[] = [
+    command("undo", "Annuler"),
+    command("redo", "Rétablir"),
+    SEPARATOR,
     {
       ...command("add-link", "Ajouter un lien"),
       shortcut: insertLinkShortcutHint(),
@@ -136,6 +134,8 @@ export function markdownContextMenuItems({
         command("list", "Liste à puces"),
         command("ordered-list", "Liste numérotée"),
         command("check", "Liste de tâches"),
+        command("outdent", "Réduire le retrait"),
+        command("indent", "Augmenter le retrait"),
         SEPARATOR,
         ...headingItems(headingLevel),
         {
@@ -162,6 +162,23 @@ export function markdownContextMenuItems({
         command("math-block", "Bloc mathématiques"),
       ],
       label: "Insérer",
+      type: "submenu",
+    },
+    {
+      id: "emoji",
+      items: EDITOR_EMOJIS.map(({ id, glyph, label }) =>
+        command(`emoji:${id}`, `${glyph} ${label}`),
+      ),
+      label: "Émojis",
+      type: "submenu",
+    },
+    {
+      id: "mode",
+      items: [
+        { ...command("mode-ir", "Markdown"), checked: viewMode === "ir" },
+        { ...command("mode-sv", "Texte brut"), checked: viewMode === "sv" },
+      ],
+      label: "Mode d’édition",
       type: "submenu",
     },
   ];

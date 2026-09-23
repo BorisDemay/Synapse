@@ -74,6 +74,12 @@ const vditorMock = vi.hoisted(() => {
         <div class="vditor-toolbar__item">
           <button data-type="more" aria-label="Plus"></button>
         </div>
+        <div class="vditor-toolbar__item">
+          <button data-type="undo"></button>
+          <button data-type="redo"></button>
+          <button data-type="outdent"></button>
+          <button data-type="indent"></button>
+        </div>
         <div class="vditor-toolbar__item synapse-edit-mode-host">
           <button data-type="edit-mode" aria-label="Mode"></button>
           <button data-mode="ir">Markdown</button>
@@ -232,27 +238,15 @@ describe("MarkdownEditor", () => {
     ]);
   });
 
-  it("shows explicit French labels in the formatting toolbar", () => {
-    const wrapper = mount(MarkdownEditor, {
-      props: { modelValue: "" },
-    });
-
-    expect(wrapper.get('.vditor-toolbar button[data-type="bold"]').text()).toBe(
-      "Gras",
-    );
-    expect(
-      wrapper.get(".synapse-toolbar-label").attributes("aria-hidden"),
-    ).toBe("true");
-  });
-
-  it("marks the formatting toolbar so it can shrink and stay centered", () => {
-    const wrapper = mount(MarkdownEditor, {
-      props: { modelValue: "" },
-    });
-
+  it("keeps Vditor command buttons mounted but hidden from users", () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
     const toolbar = wrapper.get(".vditor-toolbar");
-    expect(toolbar.classes()).toContain("synapse-toolbar");
-    expect(toolbar.attributes("role")).toBe("toolbar");
+    expect(toolbar.attributes("aria-hidden")).toBe("true");
+    expect(toolbar.attributes("role")).toBeUndefined();
+    expect(toolbar.get('button[data-type="bold"]').attributes("tabindex")).toBe(
+      "-1",
+    );
+    wrapper.unmount();
   });
 
   it("reserves Ctrl+K for global search by moving insert-link to Ctrl+Shift+K", () => {
@@ -269,7 +263,7 @@ describe("MarkdownEditor", () => {
     ).toBe(false);
   });
 
-  it("keeps common formatting actions upfront behind a secondary overflow", () => {
+  it("retains Vditor commands and hotkeys in the hidden engine toolbar", () => {
     mount(MarkdownEditor, { props: { modelValue: "" } });
 
     const toolbar = vditorMock.options()?.toolbar ?? [];
@@ -311,14 +305,6 @@ describe("MarkdownEditor", () => {
     ]);
   });
 
-  it("labels the overflow entry in French", () => {
-    const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
-
-    expect(wrapper.get('.vditor-toolbar button[data-type="more"]').text()).toBe(
-      "Plus",
-    );
-  });
-
   it("exposes focus() targeting the writing area once ready", () => {
     const wrapper = mount(MarkdownEditor, { props: { modelValue: "" } });
 
@@ -338,7 +324,7 @@ describe("MarkdownEditor", () => {
     expect(vditorMock.instance.focus).toHaveBeenCalledOnce();
   });
 
-  it("keeps table actions out of the formatting toolbar", () => {
+  it("keeps table-specific actions out of the hidden engine toolbar", () => {
     const wrapper = mount(MarkdownEditor, {
       props: { modelValue: "" },
     });
@@ -501,6 +487,101 @@ describe("MarkdownEditor", () => {
 
     expect(click).toHaveBeenCalledOnce();
     expect(menuNode()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it.each([
+    { type: "undo", label: "Annuler" },
+    { type: "redo", label: "Rétablir" },
+    { type: "outdent", label: "Réduire le retrait", submenu: "Paragraphe" },
+    { type: "indent", label: "Augmenter le retrait", submenu: "Paragraphe" },
+  ])(
+    "dispatches $label through the hidden Vditor command button",
+    async ({ type, label, submenu }) => {
+      const wrapper = mount(MarkdownEditor, {
+        attachTo: document.body,
+        props: { modelValue: "" },
+      });
+      const button = wrapper.get(`.vditor-toolbar button[data-type="${type}"]`)
+        .element as HTMLButtonElement;
+      const click = vi.spyOn(button, "click");
+      await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+      await wrapper.vm.$nextTick();
+      if (submenu) {
+        await openSubmenu(submenu);
+        await wrapper.vm.$nextTick();
+      }
+      menuItems(submenu ? submenuNode(submenu)! : menuNode()!)
+        .find((item) => item.textContent?.trim() === label)
+        ?.click();
+      expect(click).toHaveBeenCalledOnce();
+      wrapper.unmount();
+    },
+  );
+
+  it("routes Bloc de code to Vditor's internal code command", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const code = document.createElement("button");
+    code.dataset.type = "code";
+    wrapper.get(".vditor-toolbar").element.append(code);
+    const click = vi.spyOn(code, "click");
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    await openSubmenu("Insérer");
+    await wrapper.vm.$nextTick();
+    menuItems(submenuNode("Insérer")!)
+      .find((item) => item.textContent?.trim() === "Bloc de code")
+      ?.click();
+    expect(click).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
+  it("inserts a local emoji from the right-click menu", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const editable = wrapper.get('.vditor-ir [contenteditable="true"]')
+      .element as HTMLElement;
+    editable.textContent = "abc";
+    const range = document.createRange();
+    range.selectNodeContents(editable);
+    range.collapse(false);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    await openSubmenu("Émojis");
+    await wrapper.vm.$nextTick();
+    menuItems(submenuNode("Émojis")!)
+      .find((item) => item.textContent?.includes("😄 Sourire"))
+      ?.click();
+    expect(vditorMock.instance.insertValue).toHaveBeenCalledWith("😄");
+    wrapper.unmount();
+  });
+
+  it("switches editing mode from the right-click menu", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "" },
+    });
+    const source = wrapper.get('.vditor-toolbar button[data-mode="sv"]')
+      .element as HTMLButtonElement;
+    const click = vi.spyOn(source, "click");
+    await wrapper.get('[contenteditable="true"]').trigger("contextmenu");
+    await wrapper.vm.$nextTick();
+    await openSubmenu("Mode d’édition");
+    await wrapper.vm.$nextTick();
+    menuItems(submenuNode("Mode d’édition")!)
+      .find((item) => item.textContent?.trim() === "Texte brut")
+      ?.click();
+    expect(click).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem("synapse-ui-editor-mode")).toBe("sv");
     wrapper.unmount();
   });
 

@@ -62,11 +62,15 @@ describe("MarkdownContextMenu", () => {
     expect(root?.getAttribute("aria-label")).toBe("Outils Markdown");
     const labels = items(root!).map((item) => itemLabel(item));
     expect(labels).toEqual([
+      "Annuler",
+      "Rétablir",
       "Ajouter un lien",
       "Ajouter un lien externe",
       "Formater",
       "Paragraphe",
       "Insérer",
+      "Émojis",
+      "Mode d’édition",
       "Couper",
       "Copier",
       "Coller",
@@ -78,12 +82,12 @@ describe("MarkdownContextMenu", () => {
     ).toHaveLength(items(root!).length);
     expect(
       root?.querySelectorAll(".synapse-markdown-context-item-chevron"),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
     expect(
       items(root!).filter(
         (item) => item.getAttribute("aria-haspopup") === "true",
       ),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
     expect(submenuNode("Formater")).toBeNull();
   });
 
@@ -91,7 +95,9 @@ describe("MarkdownContextMenu", () => {
     mountMenu();
 
     const root = rootNode()!;
-    const addLink = items(root)[0]!;
+    const addLink = items(root).find(
+      (item) => itemLabel(item) === "Ajouter un lien",
+    )!;
     expect(itemLabel(addLink)).toBe("Ajouter un lien");
     expect(addLink.textContent?.trim()).toContain("Ctrl+Shift+K");
     const hint = addLink.querySelector<HTMLSpanElement>(
@@ -99,14 +105,18 @@ describe("MarkdownContextMenu", () => {
     );
     expect(hint?.getAttribute("aria-hidden")).toBe("true");
     expect(
-      items(root)[1]?.querySelector(".synapse-markdown-context-item-shortcut"),
+      items(root)
+        .find((item) => itemLabel(item) === "Annuler")
+        ?.querySelector(".synapse-markdown-context-item-shortcut"),
     ).toBeNull();
   });
 
   it("emits the selected command and closes on Escape", async () => {
     const wrapper = mountMenu();
 
-    items(rootNode()!)[0]?.click();
+    items(rootNode()!)
+      .find((item) => itemLabel(item) === "Ajouter un lien")
+      ?.click();
     expect(wrapper.emitted("select")?.[0]).toEqual(["add-link"]);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -125,7 +135,7 @@ describe("MarkdownContextMenu", () => {
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
     );
 
-    expect(wrapper.emitted("select")?.[0]).toEqual(["add-external-link"]);
+    expect(wrapper.emitted("select")?.[0]).toEqual(["redo"]);
   });
 
   it("opens a submenu on hover and selects a command from it", async () => {
@@ -164,8 +174,8 @@ describe("MarkdownContextMenu", () => {
   it("marks the active paragraph style with a check", () => {
     mountMenu({ headingLevel: 2 });
 
-    const paragraph = rootNode()!
-      .querySelectorAll('[role="menuitem"]')[3]
+    const paragraph = items(rootNode()!)
+      .find((item) => itemLabel(item) === "Paragraphe")
       ?.textContent?.trim();
     expect(paragraph).toBe("Paragraphe");
   });

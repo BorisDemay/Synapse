@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  emojiForCommand,
   markdownContextMenuItems,
   type MarkdownMenuCommand,
 } from "./editor-tools";
@@ -33,15 +34,58 @@ function submenu(
 }
 
 describe("markdownContextMenuItems", () => {
+  it("exposes every formatting action before the visible toolbar is removed", () => {
+    const items = markdownContextMenuItems({ inTable: false });
+    const actions = new Set(
+      items.flatMap((item) => {
+        if (item.type === "separator") return [];
+        return item.type === "submenu"
+          ? [
+              item.id,
+              ...item.items
+                .filter((entry) => entry.type === "item")
+                .map((entry) => entry.id),
+            ]
+          : [item.id];
+      }),
+    );
+    const required = [
+      "add-link",
+      "bold",
+      "italic",
+      "strike",
+      "list",
+      "quote",
+      "undo",
+      "redo",
+      "emoji",
+      "ordered-list",
+      "check",
+      "outdent",
+      "indent",
+      "code-block",
+      "inline-code",
+      "line",
+      "table",
+      ...[1, 2, 3, 4, 5, 6].map((level) => `h${level}`),
+    ];
+    expect(required.filter((action) => !actions.has(action))).toEqual([]);
+  });
+
   it("mirrors the root menu of the reference design", () => {
     const items = markdownContextMenuItems({ inTable: false });
 
     expect(ids(items)).toEqual([
+      "undo",
+      "redo",
+      "separator",
       "add-link",
       "add-external-link",
       "formater",
       "paragraphe",
       "inserer",
+      "emoji",
+      "mode",
       "separator",
       "cut",
       "copy",
@@ -79,6 +123,8 @@ describe("markdownContextMenuItems", () => {
       "list",
       "ordered-list",
       "check",
+      "outdent",
+      "indent",
       "separator",
       "h1",
       "h2",
@@ -178,12 +224,32 @@ describe("markdownContextMenuItems", () => {
     }
   });
 
+  it("exposes local emojis and checks the current editor mode", () => {
+    const items = markdownContextMenuItems({ inTable: false, viewMode: "sv" });
+    expect(ids(submenu(items, "emoji").items)).toContain("emoji:smile");
+    expect(emojiForCommand("emoji:smile")).toBe("😄");
+    expect(emojiForCommand("emoji:malicious")).toBeUndefined();
+    const mode = submenu(items, "mode").items;
+    expect(
+      mode.find((item) => item.type === "item" && item.id === "mode-sv"),
+    ).toMatchObject({ checked: true });
+    expect(
+      mode.find((item) => item.type === "item" && item.id === "mode-ir"),
+    ).toMatchObject({ checked: false });
+  });
+
   it("keeps table actions in a dedicated submenu inside tables", () => {
     const withoutTable = markdownContextMenuItems({ inTable: false });
     const submenuIds = withoutTable
       .filter((item) => item.type === "submenu")
       .map((item) => item.id);
-    expect(submenuIds).toEqual(["formater", "paragraphe", "inserer"]);
+    expect(submenuIds).toEqual([
+      "formater",
+      "paragraphe",
+      "inserer",
+      "emoji",
+      "mode",
+    ]);
 
     const insideTable = markdownContextMenuItems({ inTable: true });
     const table = submenu(insideTable, "tableau");

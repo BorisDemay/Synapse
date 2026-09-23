@@ -5,11 +5,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { useEditorMode } from "../editor-mode";
 import {
+  emojiForCommand,
   LINK_TOOLBAR_HOTKEY,
   markdownContextMenuItems,
-  TOOLBAR_LABELS,
 } from "../markdown/editor-tools";
-import { menuIconPath } from "../markdown/editor-icons";
 import { useTheme } from "../theme";
 import MarkdownContextMenu from "./MarkdownContextMenu.vue";
 
@@ -62,12 +61,15 @@ const contextMenuY = ref(0);
 const contextMenuInTable = ref(false);
 const contextMenuHeadingLevel = ref(0);
 const contextMenuSelectionEmpty = ref(false);
+const clipboardStatus = ref("");
+let contextMenuRange: Range | undefined;
 
 const contextMenuItems = computed(() =>
   markdownContextMenuItems({
     headingLevel: contextMenuHeadingLevel.value,
     inTable: contextMenuInTable.value,
     selectionEmpty: contextMenuSelectionEmpty.value,
+    viewMode: viewMode.value,
   }),
 );
 
@@ -219,56 +221,17 @@ function applyAccessibility() {
   editable.setAttribute("autocapitalize", "off");
 }
 
-function applyToolbarLabels() {
+function hideEngineToolbar() {
   const toolbar =
     editorRoot.value?.querySelector<HTMLElement>(".vditor-toolbar");
-  if (!toolbar) {
-    return;
-  }
-
-  toolbar.classList.add("synapse-toolbar");
-  toolbar.setAttribute("aria-label", "Mise en forme Markdown");
-  toolbar.setAttribute("role", "toolbar");
-
-  toolbar
-    .querySelectorAll<HTMLButtonElement>("button[data-type]")
-    .forEach((button) => {
-      const type = button.dataset.type;
-      const svg = button.querySelector("svg");
-      if (svg && type && type !== "edit-mode") {
-        const path = document.createElementNS(
-          "http://www.w3.org/2000/svg",
-          "path",
-        );
-        path.setAttribute(
-          "d",
-          menuIconPath(
-            type === "link"
-              ? "add-link"
-              : type === "code"
-                ? "code-block"
-                : type,
-          ),
-        );
-        svg.setAttribute("viewBox", "0 0 24 24");
-        svg.setAttribute("fill", "none");
-        svg.setAttribute("stroke", "currentColor");
-        svg.setAttribute("stroke-width", "2");
-        svg.setAttribute("stroke-linecap", "round");
-        svg.setAttribute("aria-hidden", "true");
-        svg.replaceChildren(path);
-      }
-      const label = type ? TOOLBAR_LABELS[type] : undefined;
-      if (!label || button.querySelector(".synapse-toolbar-label")) {
-        return;
-      }
-
-      const text = document.createElement("span");
-      text.className = "synapse-toolbar-label";
-      text.setAttribute("aria-hidden", "true");
-      text.textContent = label;
-      button.appendChild(text);
-    });
+  if (!toolbar) return;
+  // Preserve Vditor's command/hotkey DOM without exposing an unusable toolbar.
+  toolbar.setAttribute("aria-hidden", "true");
+  toolbar.removeAttribute("role");
+  toolbar.removeAttribute("aria-label");
+  toolbar.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+    button.tabIndex = -1;
+  });
 }
 
 function selectedTableCell(): HTMLTableCellElement | undefined {
@@ -422,14 +385,63 @@ function insertFootnote() {
   editor?.insertValue(`[^${next}]\n\n[^${next}]: `);
 }
 
+function restoreContextMenuSelection(): boolean {
+  const range = contextMenuRange;
+  const editable = activeEditable();
+  if (
+    !range ||
+    !editable ||
+    !editable.contains(range.commonAncestorContainer)
+  ) {
+    return false;
+  }
+  editable.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range.cloneRange());
+  return true;
+}
+
 async function pastePlainText() {
+  if (!navigator.clipboard?.readText) {
+    clipboardStatus.value = "Presse-papiers indisponible : utilisez Ctrl+V.";
+    return;
+  }
   try {
     const text = await navigator.clipboard.readText();
-    document.execCommand("insertText", false, text);
+    if (!text) return;
+    if (!restoreContextMenuSelection()) return;
+    editor?.insertValue(text);
+    clipboardStatus.value = "";
   } catch {
-    // Clipboard read refused (permission or focus): leave the content alone
-    // rather than inserting an untrusted fallback.
+    // Reading is permission-gated; never log contents or silently claim success.
+    clipboardStatus.value = "Accès au presse-papiers refusé : utilisez Ctrl+V.";
   }
+}
+
+function copyOrCut(cut: boolean) {
+  const selected = contextMenuRange?.toString() ?? "";
+  if (!selected || !restoreContextMenuSelection()) return;
+  const copied = document.execCommand("copy");
+  if (copied) {
+    if (cut && restoreContextMenuSelection()) editor?.deleteValue();
+    clipboardStatus.value = "";
+    return;
+  }
+  if (!navigator.clipboard?.writeText) {
+    clipboardStatus.value = "Presse-papiers indisponible : utilisez Ctrl+C.";
+    return;
+  }
+  void navigator.clipboard.writeText(selected).then(
+    () => {
+      if (cut && restoreContextMenuSelection()) editor?.deleteValue();
+      clipboardStatus.value = "";
+    },
+    () => {
+      clipboardStatus.value =
+        "Accès au presse-papiers refusé : utilisez Ctrl+C.";
+    },
+  );
 }
 
 function selectAllInEditor() {
@@ -439,6 +451,19 @@ function selectAllInEditor() {
 }
 
 function runEditorCommand(id: string) {
+  const emoji = emojiForCommand(id);
+  if (emoji) {
+    if (restoreContextMenuSelection()) editor?.insertValue(emoji);
+    return;
+  }
+  if (id === "mode-ir" || id === "mode-sv") {
+    applyViewMode(id === "mode-ir" ? "ir" : "sv");
+    return;
+  }
+  if (id === "code-block") {
+    clickToolbarButton('.vditor-toolbar button[data-type="code"]');
+    return;
+  }
   if (id === "add-link") {
     clickToolbarButton('.vditor-toolbar button[data-type="link"]');
     return;
@@ -477,7 +502,7 @@ function runEditorCommand(id: string) {
     editor?.insertValue("$$\n\n$$");
     return;
   }
-  if (id === "paste-plain") {
+  if (id === "paste-plain" || id === "paste") {
     void pastePlainText();
     return;
   }
@@ -485,8 +510,8 @@ function runEditorCommand(id: string) {
     selectAllInEditor();
     return;
   }
-  if (id === "copy" || id === "cut" || id === "paste") {
-    document.execCommand(id);
+  if (id === "copy" || id === "cut") {
+    copyOrCut(id === "cut");
     return;
   }
   if (
@@ -583,7 +608,17 @@ function onEditorContextMenu(event: MouseEvent) {
     heading && editorRoot.value?.contains(heading)
       ? Number(heading.tagName.charAt(1))
       : 0;
-  contextMenuSelectionEmpty.value = window.getSelection()?.isCollapsed ?? true;
+  const selection = window.getSelection();
+  const range = selection?.rangeCount
+    ? selection.getRangeAt(0).cloneRange()
+    : undefined;
+  contextMenuRange =
+    range && editorRoot.value?.contains(range.commonAncestorContainer)
+      ? range
+      : undefined;
+  contextMenuSelectionEmpty.value =
+    !contextMenuRange || contextMenuRange.collapsed;
+  clipboardStatus.value = "";
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
   contextMenuOpen.value = true;
@@ -689,7 +724,6 @@ onMounted(() => {
     minHeight: 320,
     mode: viewMode.value,
     placeholder: "Écrivez en Markdown…",
-    toolbarConfig: { pin: true },
     undoDelay: 80,
     preview: {
       hljs: {
@@ -767,7 +801,7 @@ onMounted(() => {
     after: () => {
       editorReady = true;
       applyAccessibility();
-      applyToolbarLabels();
+      hideEngineToolbar();
       setupTableInteractions();
       rewriteAttachmentUrls();
 
@@ -867,6 +901,13 @@ onBeforeUnmount(() => {
       class="markdown-editor-host"
       data-editor-engine="vditor"
     />
+    <p
+      v-if="clipboardStatus"
+      class="markdown-editor-clipboard-status"
+      role="status"
+    >
+      {{ clipboardStatus }}
+    </p>
     <MarkdownContextMenu
       :items="contextMenuItems"
       :open="contextMenuOpen"
@@ -890,6 +931,21 @@ onBeforeUnmount(() => {
   min-height: inherit;
   color: var(--synapse-color-text);
   background: var(--synapse-color-surface-raised);
+}
+
+.markdown-editor-clipboard-status {
+  position: absolute;
+  inset-block-end: 0.75rem;
+  inset-inline-start: 0.75rem;
+  z-index: var(--synapse-z-panel);
+  max-width: calc(100% - 1.5rem);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: var(--synapse-shadow-sm);
+  font-size: 0.8rem;
 }
 
 .markdown-editor-mode {
@@ -952,121 +1008,10 @@ onBeforeUnmount(() => {
   background: var(--synapse-color-surface-raised);
 }
 
-.markdown-editor :deep(.synapse-toolbar),
+/* Vditor still mounts command buttons and registers shortcuts, but the
+   right-click menu is the sole visible formatting surface. */
 .markdown-editor :deep(.vditor-toolbar) {
-  display: flex !important;
-  flex-flow: row wrap !important;
-  align-items: center;
-  align-content: center;
-  align-self: stretch;
-  justify-content: center !important;
-  box-sizing: border-box;
-  width: 100% !important;
-  max-width: 100%;
-  min-width: 0 !important;
-  margin: 0;
-  gap: 0.15rem;
-  /* The writing column is centered at 45rem; the toolbar stays centered
-     across the full editor surface. */
-  padding: 0.35rem 0.75rem !important;
-  border-color: var(--synapse-color-border);
-  background: var(--synapse-color-surface-muted);
-  line-height: normal;
-  text-align: center;
-  overflow: visible;
-}
-
-.markdown-editor :deep(.vditor-toolbar__item),
-.markdown-editor :deep(.vditor-toolbar__divider) {
-  float: none !important;
-  display: inline-flex !important;
-  flex: 0 0 auto;
-  width: auto !important;
-  max-width: 100%;
-  margin: 0;
-  vertical-align: middle;
-}
-
-.markdown-editor :deep(.vditor-toolbar__divider) {
-  align-self: stretch;
-  margin-inline: 0.3rem;
-}
-
-.markdown-editor :deep(.vditor-toolbar__item .vditor-tooltipped) {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  width: auto;
-  min-width: 2rem;
-  height: 2rem;
-  padding: 0.4rem 0.55rem;
-  border-radius: 0.4rem;
-  color: var(--synapse-color-text-muted);
-  font-size: 0.75rem;
-  font-weight: 650;
-}
-
-.markdown-editor :deep(.vditor-toolbar__item svg) {
-  display: block;
-  width: 18px !important;
-  height: 18px !important;
-  min-width: 18px;
-  max-width: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  flex-shrink: 0;
-}
-
-.markdown-editor :deep(.vditor-toolbar__item .vditor-tooltipped:hover),
-.markdown-editor :deep(.vditor-toolbar__item .vditor-tooltipped:focus-visible),
-.markdown-editor :deep(.vditor-toolbar__item--current .vditor-tooltipped) {
-  color: var(--synapse-color-accent-strong);
-  background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
-}
-
-.markdown-editor :deep(.synapse-toolbar-label) {
-  white-space: nowrap;
-}
-
-/* Below this width the writing pane no longer fits a labeled row; icons
-   (still French-labelled for assistive tech) keep the toolbar to one row. */
-@media (max-width: 56rem) {
-  .markdown-editor :deep(.synapse-toolbar-label) {
-    display: none;
-  }
-
-  .markdown-editor :deep(.vditor-toolbar__item .vditor-tooltipped) {
-    min-width: 1.8rem;
-    padding: 0.4rem 0.3rem;
-  }
-  .markdown-editor :deep(.vditor-toolbar) {
-    gap: 0.05rem;
-    padding-inline: 0.35rem !important;
-  }
-  .markdown-editor :deep(.vditor-toolbar__divider) {
-    margin-inline: 0.1rem;
-  }
-}
-
-/* Overflow panel of the "Plus" entry and the emoji hint share Vditor's
-   .vditor-hint panel; align it with the Synapse surface tokens. */
-.markdown-editor :deep(.vditor-hint.vditor-panel--arrow) {
-  border: 1px solid var(--synapse-color-border);
-  border-radius: 0.4rem;
-  background: var(--synapse-color-surface-raised);
-}
-
-.markdown-editor :deep(.synapse-edit-mode-host) {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  display: none !important;
 }
 
 .markdown-editor :deep(.vditor-content),

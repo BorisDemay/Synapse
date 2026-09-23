@@ -4,6 +4,7 @@
 const MENU_ICON_PATHS: Readonly<Record<string, string>> = {
   headings: "M5 4v16M19 4v16M5 12h14",
   more: "M5 12h.01M12 12h.01M19 12h.01",
+  mode: "M3 5h18v14H3zM3 10h18M8 14h8",
   undo: "M9 5 4 10l5 5M4 10h10a5 5 0 0 1 0 10",
   redo: "m15 5 5 5-5 5M20 10H10a5 5 0 0 0 0 10",
   emoji:
