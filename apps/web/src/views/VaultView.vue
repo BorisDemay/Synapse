@@ -1968,11 +1968,9 @@ watch(settingsOpen, (open) => {
     padding: 0.2rem 0.4rem;
   }
 }
-.sidebar-footer {
-  flex-wrap: wrap;
-}
 .deleted-items-trigger {
-  flex-basis: 100%;
+  width: 100%;
+  flex: 0 0 auto;
   display: flex;
   gap: 0.5rem;
   align-items: center;
@@ -2365,8 +2363,8 @@ watch(settingsOpen, (open) => {
 
 .sidebar-footer {
   display: flex;
-  flex-direction: row;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.25rem;
   margin-top: auto;
   padding-top: 1rem;
@@ -2378,9 +2376,11 @@ watch(settingsOpen, (open) => {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  flex: 1 1 0;
+  flex: 0 0 auto;
+  width: 100%;
   min-width: 0;
   padding: 0.65rem 0.7rem;
+  white-space: nowrap;
   border: 0;
   border-radius: var(--synapse-radius-sm);
   color: var(--synapse-color-text-muted);
@@ -2394,6 +2394,7 @@ watch(settingsOpen, (open) => {
 
 .settings-icon {
   display: grid;
+  flex: none;
   place-items: center;
   width: 1.15rem;
   height: 1.15rem;
