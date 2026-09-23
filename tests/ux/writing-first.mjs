@@ -235,6 +235,56 @@ test("writing surface is spacious and seamless on desktop without mobile overflo
   }
 });
 
+test("collapsed sidebar keeps only accessible icons inside its mini-rail", async () => {
+  const { page, close } = await fixture();
+  try {
+    await page.evaluate(async () => {
+      const { useAuthStore } = await import("/src/stores/auth.ts");
+      useAuthStore().storageHealth = {
+        availableBytes: 1024 * 1024 * 1024,
+        lastSuccessfulBackup: null,
+        pendingOperationCount: 0,
+        persistent: false,
+        quotaBytes: null,
+        serverPendingOperationCount: null,
+        serverUsedBytes: null,
+        usageBytes: null,
+      };
+    });
+    const sidebar = page.locator("#app-shell-sidebar");
+    await expect(sidebar.locator(".storage-health")).toBeVisible();
+    await page
+      .getByRole("button", { name: "Masquer la barre latérale" })
+      .click();
+    await expect(sidebar).toHaveCSS("width", "48px");
+    await expect(sidebar.locator(".storage-health")).toBeHidden();
+    for (const label of [
+      "Rechercher dans les notes",
+      "Éléments supprimés",
+      "Ouvrir les paramètres",
+      "Se déconnecter",
+    ]) {
+      const button = sidebar.getByRole("button", { name: label });
+      await expect(button).toBeVisible();
+      const box = await button.boundingBox();
+      assert.ok(
+        box &&
+          box.x >= 0 &&
+          box.x + box.width <= 48 &&
+          box.y >= 0 &&
+          box.y + box.height <= 900,
+        `${label} must fit in the rail and viewport`,
+      );
+    }
+    await sidebar
+      .getByRole("button", { name: "Afficher la barre latérale" })
+      .click();
+    await expect(sidebar.locator(".storage-health")).toBeVisible();
+  } finally {
+    await close();
+  }
+});
+
 test("notifications share a top-right stack with distinct type colors", async () => {
   const { page, close } = await fixture({ width: 390, height: 844 });
   try {

@@ -1385,7 +1385,11 @@ watch(settingsOpen, (open) => {
             {{ syncStatusLabel }}
           </span>
         </div>
-        <p v-if="storageHealthMessage" class="storage-health" role="status">
+        <p
+          v-if="!sidebar.collapsed.value && storageHealthMessage"
+          class="storage-health"
+          role="status"
+        >
           {{ storageHealthMessage }}
         </p>
         <VaultExplorerToolbar
@@ -2089,6 +2093,17 @@ watch(settingsOpen, (open) => {
   margin-top: auto;
   padding-top: 0.5rem;
   border-top: 0;
+}
+
+.vault-page.app-shell--sidebar-collapsed .deleted-items-trigger {
+  flex: 0 0 2rem;
+  justify-content: center;
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  background: var(--synapse-color-surface-raised);
 }
 
 .vault-page.app-shell--sidebar-collapsed .settings-label,
