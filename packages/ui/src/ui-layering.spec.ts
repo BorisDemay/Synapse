@@ -119,6 +119,61 @@ function stackingLiterals(): StackingLiteral[] {
   return found;
 }
 
+/** Balises dont le `title` reste légitime : il nomme un cadre pour les lecteurs d'écran. */
+const TITLE_ALLOWED_TAGS = ["iframe"];
+
+/**
+ * Un `title` natif est dessiné par le navigateur hors de l'arbre d'empilement :
+ * il ne suit ni le thème, ni le défilement, et reste affiché au-dessus d'un menu
+ * qui vient de s'ouvrir. Toutes les infobulles doivent donc passer par
+ * `v-synapse-tooltip` (packages/ui/src/tooltip.ts).
+ */
+const TITLE_ATTRIBUTE = /(?<![-\w:])(?::)?title\s*=/g;
+
+function nativeTooltips(): StackingLiteral[] {
+  const found: StackingLiteral[] = [];
+
+  for (const directory of SCANNED_DIRECTORIES) {
+    for (const file of collectFiles(join(repoRoot, directory))) {
+      if (extname(file) !== ".vue") {
+        continue;
+      }
+
+      const source = readFileSync(file, "utf8");
+      const lines = source.split("\n");
+
+      TITLE_ATTRIBUTE.lastIndex = 0;
+
+      for (const match of source.matchAll(TITLE_ATTRIBUTE)) {
+        const before = source.slice(0, match.index);
+        const tagStart = before.lastIndexOf("<");
+
+        // Hors d'une balise, `title =` est une affectation de script, pas un attribut.
+        if (tagStart < before.lastIndexOf(">")) {
+          continue;
+        }
+
+        const tag =
+          before.slice(tagStart + 1).match(/^[A-Za-z][\w.-]*/)?.[0] ?? "";
+
+        if (TITLE_ALLOWED_TAGS.includes(tag)) {
+          continue;
+        }
+
+        const line = before.split("\n").length;
+
+        found.push({
+          file: file.replace(`${repoRoot}/`, ""),
+          line,
+          value: lines[line - 1]?.trim() ?? match[0],
+        });
+      }
+    }
+  }
+
+  return found;
+}
+
 describe("échelle d'empilement (z-index)", () => {
   const tokensCss = readFileSync(TOKENS_CSS, "utf8");
 
@@ -162,6 +217,23 @@ describe("échelle d'empilement (z-index)", () => {
         (literal) => `${literal.file}:${literal.line} → ${literal.value}`,
       ),
       "utilisez var(--synapse-z-*) ou calc() à partir de l'échelle",
+    ).toEqual([]);
+  });
+});
+
+describe("infobulles", () => {
+  it("enregistre la directive d'infobulle dans plugin.ts", () => {
+    expect(readFileSync(PLUGIN_TS, "utf8")).toContain(
+      'app.directive("synapse-tooltip", synapseTooltip)',
+    );
+  });
+
+  it("bannit l'infobulle native hors des cadres", () => {
+    const titles = nativeTooltips();
+
+    expect(
+      titles.map((title) => `${title.file}:${title.line} → ${title.value}`),
+      "remplacez title= par v-synapse-tooltip",
     ).toEqual([]);
   });
 });

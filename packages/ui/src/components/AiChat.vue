@@ -190,7 +190,7 @@ function submitPrompt() {
           aria-label="Afficher ou masquer les conversations"
           class="ai-chat-icon-button"
           name="toggle-codex-conversations"
-          title="Conversations"
+          v-synapse-tooltip="'Afficher ou masquer les conversations'"
           type="button"
           @click="emit('toggleConversations')"
         >
@@ -202,7 +202,7 @@ function submitPrompt() {
           aria-label="Afficher ou masquer l’historique de la note"
           class="ai-chat-icon-button"
           name="toggle-note-history"
-          title="Historique de la note"
+          v-synapse-tooltip="'Afficher ou masquer l’historique de la note'"
           type="button"
           @click="emit('toggleHistory')"
         >
@@ -212,7 +212,7 @@ function submitPrompt() {
           aria-label="Fermer l’assistant"
           class="ai-chat-icon-button"
           name="close-codex-panel"
-          title="Fermer l’assistant"
+          v-synapse-tooltip="'Fermer l’assistant'"
           type="button"
           @click="emit('closePanel')"
         >

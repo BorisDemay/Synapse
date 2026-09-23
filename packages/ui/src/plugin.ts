@@ -2,9 +2,11 @@ import PrimeVue from "primevue/config";
 import type { App } from "vue";
 
 import { initializeTheme } from "./theme";
+import { synapseTooltip } from "./tooltip";
 
 export function installSynapseUi(app: App) {
   initializeTheme();
+  app.directive("synapse-tooltip", synapseTooltip);
   app.use(PrimeVue, {
     unstyled: true,
     // Bande haute réservée aux overlays internes de PrimeVue (aujourd'hui : le Select).

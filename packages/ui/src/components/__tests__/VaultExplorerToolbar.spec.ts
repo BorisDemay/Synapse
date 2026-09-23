@@ -1,36 +1,56 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import VaultExplorerToolbar from "../VaultExplorerToolbar.vue";
+import { resetTooltip, synapseTooltip } from "../../tooltip";
+
+const tooltipDirective = { directives: { "synapse-tooltip": synapseTooltip } };
+
+afterEach(() => {
+  resetTooltip();
+});
 
 describe("VaultExplorerToolbar", () => {
-  it("renders icon-only vault actions with accessible labels", () => {
+  it("garde les actions en icône accessibles sans infobulle native", () => {
     const wrapper = mount(VaultExplorerToolbar, {
       props: {
         showImport: true,
         showImportFolder: true,
         showTemplate: true,
       },
+      global: tooltipDirective,
     });
 
-    expect(
-      wrapper.get('[aria-label="Créer depuis un modèle"]').attributes("title"),
-    ).toBe("Créer depuis un modèle");
-    expect(
-      wrapper
-        .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
-        .attributes("title"),
-    ).toBe("Importer un ZIP Markdown (.zip)");
-    expect(
-      wrapper
-        .get('[aria-label="Importer un dossier Markdown"]')
-        .attributes("title"),
-    ).toBe("Importer un dossier Markdown");
-    expect(
-      wrapper
-        .get('[aria-label="Masquer la barre latérale"]')
-        .attributes("title"),
-    ).toBe("Masquer la barre latérale");
+    for (const label of [
+      "Créer depuis un modèle",
+      "Importer un ZIP Markdown (.zip)",
+      "Importer un dossier Markdown",
+      "Masquer la barre latérale",
+    ]) {
+      expect(
+        wrapper.get(`[aria-label="${label}"]`).attributes("title"),
+        `${label} ne doit plus compter sur l'infobulle native`,
+      ).toBeUndefined();
+    }
+  });
+
+  it("affiche l'infobulle applicative au focus", async () => {
+    const wrapper = mount(VaultExplorerToolbar, {
+      props: {
+        showImport: true,
+        showImportFolder: true,
+        showTemplate: true,
+      },
+      global: tooltipDirective,
+    });
+    const trigger = wrapper.get('[aria-label="Créer depuis un modèle"]');
+
+    await trigger.trigger("focus");
+
+    const tooltip = document.querySelector<HTMLElement>("#synapse-tooltip");
+
+    expect(tooltip?.hidden).toBe(false);
+    expect(tooltip?.textContent).toBe("Créer depuis un modèle");
   });
 
   it("emits actions when toolbar icons are clicked", async () => {
@@ -65,9 +85,7 @@ describe("VaultExplorerToolbar", () => {
 
     expect(wrapper.classes()).toContain("vault-explorer-toolbar--collapsed");
     expect(
-      wrapper
-        .get('[aria-label="Afficher la barre latérale"]')
-        .attributes("title"),
-    ).toBe("Afficher la barre latérale");
+      wrapper.find('[aria-label="Afficher la barre latérale"]').exists(),
+    ).toBe(true);
   });
 });

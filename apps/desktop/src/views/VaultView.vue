@@ -733,7 +733,7 @@ watch(settingsOpen, (open) => {
           aria-haspopup="dialog"
           :aria-expanded="settingsOpen"
           aria-label="Ouvrir les paramètres"
-          title="Paramètres"
+          v-synapse-tooltip="'Ouvrir les paramètres'"
           @click="settingsOpen = true"
         >
           <span class="settings-icon" aria-hidden="true">
@@ -750,7 +750,7 @@ watch(settingsOpen, (open) => {
           class="logout-button"
           type="button"
           :aria-label="auth.isAuthenticated ? 'Se déconnecter' : 'Compte'"
-          :title="auth.isAuthenticated ? 'Se déconnecter' : 'Compte'"
+          v-synapse-tooltip="auth.isAuthenticated ? 'Se déconnecter' : 'Compte'"
           @click="logout"
         >
           <span aria-hidden="true">↪</span>

@@ -1525,7 +1525,7 @@ watch(settingsOpen, (open) => {
           class="deleted-items-trigger"
           type="button"
           aria-label="Éléments supprimés"
-          title="Éléments supprimés"
+          v-synapse-tooltip="'Éléments supprimés'"
           @click="openDeletedItems"
         >
           <span aria-hidden="true">↶</span>
@@ -1537,7 +1537,7 @@ watch(settingsOpen, (open) => {
           aria-haspopup="dialog"
           :aria-expanded="settingsOpen"
           aria-label="Ouvrir les paramètres"
-          title="Paramètres"
+          v-synapse-tooltip="'Ouvrir les paramètres'"
           @click="settingsOpen = true"
         >
           <span class="settings-icon" aria-hidden="true">
@@ -1554,7 +1554,7 @@ watch(settingsOpen, (open) => {
           class="logout-button"
           type="button"
           aria-label="Se déconnecter"
-          title="Se déconnecter"
+          v-synapse-tooltip="'Se déconnecter'"
           @click="logout"
         >
           <span aria-hidden="true">↪</span>

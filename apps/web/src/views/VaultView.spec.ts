@@ -7,6 +7,7 @@ import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import {
   resetCompactAssistantLayoutState,
   resetSidebarLayoutState,
+  synapseTooltip,
 } from "@synapse/ui";
 import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
@@ -97,6 +98,7 @@ async function mountVault(options?: {
     attachTo: options?.attachToBody ? document.body : undefined,
     global: {
       plugins: [pinia, router, [PrimeVue, { unstyled: true }]],
+      directives: { "synapse-tooltip": synapseTooltip },
       stubs: {
         AiChat: true,
         ConflictResolver: true,
@@ -214,16 +216,15 @@ describe("VaultView folder import action", () => {
   it("normalizes the French import labels", async () => {
     const { wrapper } = await mountVault();
 
-    expect(
-      wrapper
-        .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
-        .attributes("title"),
-    ).toBe("Importer un ZIP Markdown (.zip)");
-    expect(
-      wrapper
-        .get('[aria-label="Importer un dossier Markdown"]')
-        .attributes("title"),
-    ).toBe("Importer un dossier Markdown");
+    for (const label of [
+      "Importer un ZIP Markdown (.zip)",
+      "Importer un dossier Markdown",
+    ]) {
+      const action = wrapper.get(`[aria-label="${label}"]`);
+
+      expect(action.attributes("aria-label")).toBe(label);
+      expect(action.attributes("title")).toBeUndefined();
+    }
   });
 
   it("opens the directory picker from the folder import action", async () => {

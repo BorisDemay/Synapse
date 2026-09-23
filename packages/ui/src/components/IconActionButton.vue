@@ -9,7 +9,7 @@ defineProps<{
     class="icon-action-button"
     type="button"
     :aria-label="label"
-    :title="label"
+    v-synapse-tooltip="label"
   >
     <slot />
   </button>

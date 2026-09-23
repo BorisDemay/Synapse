@@ -15,7 +15,7 @@ const label = computed(() =>
     type="button"
     :aria-label="label"
     :aria-pressed="mode === 'dark'"
-    :title="label"
+    v-synapse-tooltip="label"
     @click="toggleTheme"
   >
     <span aria-hidden="true">{{ mode === "dark" ? "☼" : "◐" }}</span>

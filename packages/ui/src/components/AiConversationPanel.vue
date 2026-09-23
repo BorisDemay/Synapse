@@ -76,7 +76,7 @@ function openAdjacentConversation(offset: number) {
         :class="{ 'is-active': conversation.id === activeConversationId }"
         :disabled="busy"
         :name="`codex-conversation-${conversation.id}`"
-        :title="conversation.title"
+        v-synapse-tooltip="conversation.title"
         role="tab"
         type="button"
         @click="emit('openConversation', conversation.id)"

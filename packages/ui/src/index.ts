@@ -10,6 +10,13 @@ export {
   resetOverlayStack,
 } from "./overlay-stack";
 export type { OverlayHandle, OverlayOptions } from "./overlay-stack";
+export {
+  TOOLTIP_SHOW_DELAY_MS,
+  hideTooltip,
+  resetTooltip,
+  showTooltip,
+  synapseTooltip,
+} from "./tooltip";
 export { default as BacklinksPanel } from "./components/BacklinksPanel.vue";
 export { default as ConflictResolver } from "./components/ConflictResolver.vue";
 export { default as HistoryPanel } from "./components/HistoryPanel.vue";
