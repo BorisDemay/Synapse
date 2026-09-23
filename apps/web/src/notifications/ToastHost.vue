@@ -65,7 +65,7 @@ async function runAction(toast: Toast) {
   position: fixed;
   inset-block-start: max(1rem, env(safe-area-inset-top));
   inset-inline-end: max(1rem, env(safe-area-inset-right));
-  z-index: 1100;
+  z-index: var(--synapse-z-toast);
   display: grid;
   gap: 0.6rem;
   width: min(24rem, calc(100vw - 2rem));

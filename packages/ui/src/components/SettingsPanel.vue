@@ -880,7 +880,7 @@ function selectInvitationLink(event: Event) {
 .settings-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--synapse-z-overlay);
   display: grid;
   place-items: center;
   padding: 1.25rem;

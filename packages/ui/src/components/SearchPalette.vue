@@ -277,7 +277,7 @@ defineExpose({ openPalette, closePalette, isOpen });
 .search-palette-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--synapse-z-overlay);
   display: grid;
   place-items: start center;
   padding-top: 12vh;

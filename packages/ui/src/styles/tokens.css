@@ -37,6 +37,27 @@
   --app-shell-relations-width: 16rem;
   --app-shell-assistant-history-width: 16rem;
   --app-shell-assistant-width: 24rem;
+
+  /* Échelle d'empilement : source unique de vérité.
+     Les overlays applicatifs (palettes, panneaux de réglages, menus contextuels,
+     aperçus de pièce jointe) tirent leur profondeur de `packages/ui/src/overlay-stack.ts`,
+     qui positionne chaque overlay au-dessus du précédent à partir de la bande
+     --synapse-z-overlay. Ne jamais écrire de valeur numérique d'empilement dans
+     un composant : utiliser ces tokens. */
+  --synapse-z-resize-handle: 10;
+  --synapse-z-panel-backdrop: 20;
+  --synapse-z-panel: 30;
+  --synapse-z-nav-toggle: 40;
+  --synapse-z-drawer-backdrop: 50;
+  --synapse-z-drawer: 60;
+  --synapse-z-overlay: 1000;
+  --synapse-z-tooltip: 1100;
+  --synapse-z-toast: 1200;
+  /* Bande haute réservée aux overlays internes de PrimeVue (Select) ; elle est
+     configurée dans packages/ui/src/plugin.ts et doit rester au-dessus de la pile. */
+  --synapse-z-primevue-overlay: 2000;
+  --synapse-z-primevue-modal: 2100;
+  --synapse-z-primevue-tooltip: 2200;
 }
 
 .synapse-dark {
@@ -82,7 +103,7 @@ button {
 .app-shell-tool-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 19;
+  z-index: var(--synapse-z-panel-backdrop);
   background: rgb(0 0 0 / 35%);
 }
 .app-shell-nav-toggle[inert],
@@ -208,7 +229,7 @@ button {
   position: absolute;
   inset-block: 0;
   width: 8px;
-  z-index: 4;
+  z-index: var(--synapse-z-resize-handle);
   padding: 0;
   border: 0;
   background: transparent;
@@ -404,7 +425,7 @@ textarea[data-pc-name="textarea"]:enabled:focus {
 
 [data-pc-section="overlay"]:has([data-pc-section="list"]) {
   position: absolute;
-  z-index: 1100;
+  z-index: var(--synapse-z-primevue-overlay);
   max-block-size: 16rem;
   margin-block-start: 0.25rem;
   padding: 0.25rem;
@@ -534,7 +555,7 @@ div[data-pc-name="message"][data-p-severity="info"] {
     position: fixed;
     inset-block: 0;
     inset-inline-end: 0;
-    z-index: 20;
+    z-index: var(--synapse-z-panel);
     box-shadow: var(--synapse-shadow-md);
   }
 
@@ -567,7 +588,7 @@ div[data-pc-name="message"][data-p-severity="info"] {
     position: fixed;
     inset-block: 0;
     inset-inline-start: 0;
-    z-index: 35;
+    z-index: var(--synapse-z-drawer);
     width: min(20rem, 85vw);
     padding: var(--synapse-space-5);
     background: var(--synapse-color-surface-raised);
@@ -598,7 +619,7 @@ div[data-pc-name="message"][data-p-severity="info"] {
   .app-shell > .app-shell-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 30;
+    z-index: var(--synapse-z-drawer-backdrop);
     border: 0;
     padding: 0;
     background: rgb(15 23 42 / 45%);
@@ -608,7 +629,7 @@ div[data-pc-name="message"][data-p-severity="info"] {
     position: fixed;
     top: 0.75rem;
     inset-inline-start: 0.75rem;
-    z-index: 25;
+    z-index: var(--synapse-z-nav-toggle);
     display: inline-flex;
     align-items: center;
     justify-content: center;

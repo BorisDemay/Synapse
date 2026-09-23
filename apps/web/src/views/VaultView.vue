@@ -1975,7 +1975,7 @@ watch(settingsOpen, (open) => {
 .attachment-preview-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--synapse-z-overlay);
   display: grid;
   place-items: center;
   padding: 1rem;

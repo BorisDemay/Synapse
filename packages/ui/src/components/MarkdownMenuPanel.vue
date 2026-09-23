@@ -285,7 +285,7 @@ defineExpose({
 <style scoped>
 .synapse-markdown-context-menu {
   position: fixed;
-  z-index: 1100;
+  z-index: var(--synapse-z-overlay);
   display: grid;
   min-width: 12rem;
   max-width: min(18rem, calc(100vw - 1rem));
