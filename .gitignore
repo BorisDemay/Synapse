@@ -19,6 +19,8 @@ node_modules/
 .agents/
 .codex/
 .hermes/
+# Disposable per-task agent worktrees (never part of a release).
+.worktrees/
 
 # Test and build artifacts
 __pycache__/
