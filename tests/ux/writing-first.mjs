@@ -74,6 +74,27 @@ async function openNote(page, title) {
   await page.getByRole("option").filter({ hasText: title }).first().click();
 }
 
+async function selectEditorText(editor, text) {
+  return editor.evaluate((editable, needle) => {
+    const walker = document.createTreeWalker(editable, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const start = node.textContent?.indexOf(needle) ?? -1;
+      if (start < 0) continue;
+      editable.focus();
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + needle.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const box = range.getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    }
+    throw new Error("Synthetic fixture text not found");
+  }, text);
+}
+
 for (const mode of ["Markdown", "Texte brut"]) {
   test(`global search never changes a ${mode} document`, async () => {
     const { page, close } = await fixture();
@@ -390,6 +411,269 @@ test("deleted notes recover the latest draft and path after reopening", async ()
   }
 });
 
+for (const mode of ["Markdown", "Texte brut"]) {
+  test(`right-click Copy, Cut and Paste work in ${mode} mode`, async () => {
+    const { page, close } = await fixture();
+    try {
+      await page
+        .context()
+        .grantPermissions(["clipboard-read", "clipboard-write"]);
+      await openNote(page, "Website");
+      await page.getByRole("button", { name: mode, exact: true }).click();
+      const editor = page.getByRole("textbox", {
+        name: "Éditeur Markdown",
+        exact: true,
+      });
+      const rect = await selectEditorText(editor, "synthetic writing");
+      await page.mouse.click(rect.x, rect.y, { button: "right" });
+      const menu = page.getByRole("menu", { name: "Outils Markdown" });
+      await expect(menu).toBeVisible();
+      const copy = menu.getByRole("menuitem", { name: "Copier" });
+      await expect(copy).not.toHaveAttribute("aria-disabled", "true");
+      await copy.click();
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe("synthetic writing");
+
+      const cutRect = await selectEditorText(editor, "synthetic writing");
+      await page.mouse.click(cutRect.x, cutRect.y, { button: "right" });
+      await page
+        .getByRole("menu", { name: "Outils Markdown" })
+        .getByRole("menuitem", { name: "Couper" })
+        .click();
+      await expect(editor).not.toContainText("synthetic writing");
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe("synthetic writing");
+
+      const caret = await editor.evaluate((editable) => {
+        const walker = document.createTreeWalker(
+          editable,
+          NodeFilter.SHOW_TEXT,
+        );
+        let node;
+        while ((node = walker.nextNode())) {
+          if (!node.textContent?.includes("fixture")) continue;
+          const range = document.createRange();
+          range.setStart(node, node.textContent.length);
+          range.collapse(true);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          const box = node.parentElement.getBoundingClientRect();
+          return { x: box.right - 4, y: box.top + box.height / 2 };
+        }
+        throw new Error("Synthetic fixture text not found");
+      });
+      await page.mouse.click(caret.x, caret.y, { button: "right" });
+      await page
+        .getByRole("menu", { name: "Outils Markdown" })
+        .getByRole("menuitem", { name: "Coller", exact: true })
+        .click();
+      await expect
+        .poll(
+          async () =>
+            (await editor.innerText()).match(/synthetic writing/gu)?.length ??
+            0,
+        )
+        .toBe(1);
+    } finally {
+      await close();
+    }
+  });
+}
+
+test("the formatting toolbar is hidden while right-click commands still edit", async () => {
+  const { page, close } = await fixture();
+  try {
+    await expect(page.locator(".vditor-toolbar")).toBeHidden();
+    await openNote(page, "Website");
+    await page.getByRole("button", { name: "Texte brut", exact: true }).click();
+    const editor = page.getByRole("textbox", {
+      name: "Éditeur Markdown",
+      exact: true,
+    });
+    const rect = await selectEditorText(editor, "synthetic writing");
+    await page.mouse.click(rect.x, rect.y, { button: "right" });
+    await page
+      .getByRole("menu", { name: "Outils Markdown" })
+      .getByRole("menuitem", { name: "Formater" })
+      .hover();
+    await page
+      .getByRole("menu", { name: "Formater" })
+      .getByRole("menuitem", { name: "Gras" })
+      .click();
+    await expect(editor).toContainText("**synthetic writing**");
+  } finally {
+    await close();
+  }
+});
+
+test("right-click exposes emoji, formatting, history and editor modes", async () => {
+  const { page, close } = await fixture({ width: 1280, height: 720 });
+  try {
+    await openNote(page, "Website");
+    let editor = page.getByRole("textbox", {
+      name: "Éditeur Markdown",
+      exact: true,
+    });
+    await editor.click({ button: "right", position: { x: 60, y: 40 } });
+    let menu = page.getByRole("menu", { name: "Outils Markdown" });
+    for (const label of [
+      "Annuler",
+      "Rétablir",
+      "Formater",
+      "Paragraphe",
+      "Insérer",
+      "Émojis",
+      "Mode d’édition",
+      "Couper",
+      "Copier",
+      "Coller",
+    ]) {
+      await expect(
+        menu.getByRole("menuitem", { name: label, exact: true }),
+      ).toBeVisible();
+    }
+    await menu.getByRole("menuitem", { name: "Émojis" }).hover();
+    await page
+      .getByRole("menu", { name: "Émojis" })
+      .getByRole("menuitem", { name: "😄 Sourire" })
+      .click();
+    await expect(editor).toContainText("😄");
+
+    await editor.click({ button: "right", position: { x: 60, y: 40 } });
+    menu = page.getByRole("menu", { name: "Outils Markdown" });
+    await menu.getByRole("menuitem", { name: "Mode d’édition" }).hover();
+    await page
+      .getByRole("menu", { name: "Mode d’édition" })
+      .getByRole("menuitem", { name: "Texte brut" })
+      .click();
+    editor = page.getByRole("textbox", {
+      name: "Éditeur Markdown",
+      exact: true,
+    });
+    await expect(editor).toHaveClass(/vditor-sv/u);
+  } finally {
+    await close();
+  }
+});
+
+test("mobile right-click keeps the last command and submenus clickable", async () => {
+  const { page, close } = await fixture({ width: 390, height: 700 });
+  try {
+    await openNote(page, "Website");
+    const editor = page.getByRole("textbox", { name: "Éditeur Markdown", exact: true });
+    await editor.click({ button: "right", position: { x: 180, y: 45 } });
+    const menu = page.getByRole("menu", { name: "Outils Markdown" });
+    await expect(menu).toBeVisible();
+    const last = menu.getByRole("menuitem", { name: "Tout sélectionner" });
+    await last.scrollIntoViewIfNeeded();
+    assert.equal(
+      await last.evaluate((button) => {
+        const rect = button.getBoundingClientRect();
+        const target = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return target === button || button.contains(target);
+      }),
+      true,
+    );
+    await menu.getByRole("menuitem", { name: "Émojis" }).hover();
+    const submenu = page.getByRole("menu", { name: "Émojis" });
+    await expect(submenu.getByRole("menuitem", { name: "😄 Sourire" })).toBeInViewport();
+  } finally {
+    await close();
+  }
+});
+
+test("denied clipboard reads do not change a note silently", async () => {
+  const { page, close } = await fixture();
+  try {
+    await openNote(page, "Website");
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, "readText", {
+        configurable: true,
+        value: async () => {
+          throw new DOMException("denied", "NotAllowedError");
+        },
+      });
+    });
+    const editor = page.getByRole("textbox", {
+      name: "Éditeur Markdown",
+      exact: true,
+    });
+    const before = await editor.innerText();
+    await editor.click({ button: "right", position: { x: 45, y: 35 } });
+    await page
+      .getByRole("menu", { name: "Outils Markdown" })
+      .getByRole("menuitem", { name: "Coller", exact: true })
+      .click();
+    await expect(
+      page.locator(".markdown-editor-clipboard-status"),
+    ).toContainText("utilisez Ctrl+V");
+    assert.equal(await editor.innerText(), before);
+  } finally {
+    await close();
+  }
+});
+
+test("desktop sidebar footer keeps account actions readable on one line", async () => {
+  const { page, close } = await fixture({ width: 1280, height: 720 });
+  try {
+    const footer = page.locator(".app-shell-sidebar .sidebar-footer");
+    const settings = footer.getByRole("button", {
+      name: "Ouvrir les paramètres",
+    });
+    const logout = footer.getByRole("button", { name: "Se déconnecter" });
+    const lines = await logout.locator(".logout-label").evaluate((label) => {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      return range.getClientRects().length;
+    });
+    assert.equal(lines, 1, "Logout label must not wrap in a wide viewport");
+    const settingsBox = await settings.boundingBox();
+    const logoutBox = await logout.boundingBox();
+    assert.ok(logoutBox.y >= settingsBox.y + settingsBox.height - 1);
+  } finally {
+    await close();
+  }
+});
+
+test("vault action tooltips stay within both viewport edges", async () => {
+  const { page, close } = await fixture({ width: 1280, height: 720 });
+  try {
+    const action = page.getByRole("button", {
+      name: "Créer depuis un modèle",
+      exact: true,
+    });
+    const tooltip = page.locator("#synapse-tooltip");
+    await action.hover();
+    await expect(tooltip).toBeVisible();
+    let rect = await tooltip.boundingBox();
+    assert.ok(rect.x >= 8, "The left-edge tooltip must stay on screen");
+
+    await page.mouse.move(700, 600);
+    await expect(tooltip).toBeHidden();
+    await action.evaluate((button) => {
+      button.style.position = "fixed";
+      button.style.top = "80px";
+      button.style.right = "8px";
+      button.style.zIndex = "9999";
+    });
+    await action.hover();
+    await expect(tooltip).toBeVisible();
+    rect = await tooltip.boundingBox();
+    assert.ok(
+      rect.x + rect.width <= 1280 - 8,
+      "The right-edge tooltip must stay on screen",
+    );
+  } finally {
+    await close();
+  }
+});
+
 test("mobile navigation fills the screen and New note returns focus to the editor", async () => {
   const { page, close } = await fixture({ width: 390, height: 844 });
   try {
@@ -401,6 +685,9 @@ test("mobile navigation fills the screen and New note returns focus to the edito
       (await drawer.boundingBox()).height >= 840,
       "Drawer must not retain the old stacked-sidebar height cap",
     );
+    await expect(
+      drawer.getByRole("button", { name: "Se déconnecter", exact: true }),
+    ).toBeInViewport();
     await drawer
       .getByRole("button", { name: "Nouvelle note", exact: true })
       .click();
@@ -412,13 +699,10 @@ test("mobile navigation fills the screen and New note returns focus to the edito
         page.evaluate(() => document.activeElement?.isContentEditable === true),
       )
       .toBe(true);
-    const stroke = await page
-      .locator('.vditor-toolbar button[data-type="headings"] svg')
-      .evaluate((el) => parseFloat(getComputedStyle(el).strokeWidth));
-    assert.ok(
-      stroke > 0,
-      "Icon-only toolbar needs visible strokes, not Vditor's fill-only defaults",
-    );
+    await page.keyboard.press("Shift+F10");
+    await expect(
+      page.getByRole("menu", { name: "Outils Markdown" }),
+    ).toBeVisible();
   } finally {
     await close();
   }
