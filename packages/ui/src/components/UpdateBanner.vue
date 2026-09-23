@@ -35,8 +35,9 @@ function retry() {
   <aside
     v-if="visible"
     class="synapse-update-toast"
-    role="status"
-    aria-live="polite"
+    :data-kind="state === 'error' ? 'error' : 'info'"
+    :role="state === 'error' ? 'alert' : 'status'"
+    :aria-live="state === 'error' ? 'assertive' : 'polite'"
   >
     <template v-if="state === 'ready'">
       <strong>Une mise à jour est disponible</strong>
@@ -107,20 +108,23 @@ function retry() {
 
 <style scoped>
 .synapse-update-toast {
+  --toast-accent: #60a5fa;
   background: var(--synapse-color-surface-raised, #172033);
-  border: 1px solid var(--synapse-color-border, #334155);
+  border: 1px solid var(--toast-accent);
+  border-inline-start: 0.3rem solid var(--toast-accent);
   border-radius: 0.6rem;
   box-shadow: 0 12px 30px rgb(0 0 0 / 35%);
   color: var(--synapse-color-text, #f8fafc);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  inset-block-end: 1rem;
-  inset-inline-end: 1rem;
-  max-inline-size: min(24rem, calc(100vw - 2rem));
+  max-inline-size: 100%;
   padding: 0.85rem 1rem;
-  position: fixed;
-  z-index: 1000;
+  pointer-events: auto;
+}
+
+.synapse-update-toast[data-kind="error"] {
+  --toast-accent: #fb7185;
 }
 
 .synapse-update-toast__version {

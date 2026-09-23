@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
-import Message from "primevue/message";
 import Select from "primevue/select";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
+import { clearToasts, notify } from "../notifications/toasts";
 import { useAuthStore, type ManagedUser } from "../stores/auth";
 
 const auth = useAuthStore();
@@ -16,8 +16,6 @@ const invitationEmail = ref("");
 const invitationRole = ref<"user" | "admin">("user");
 const invitationLink = ref("");
 const invitationDelivered = ref<boolean | null>(null);
-const status = ref("");
-const error = ref("");
 const loading = ref(true);
 const inviting = ref(false);
 
@@ -27,19 +25,19 @@ const roleOptions = [
 ];
 
 async function loadUsers() {
-  error.value = "";
   try {
     users.value = await auth.listUsers();
   } catch {
-    error.value = "Impossible de charger les utilisateurs.";
+    notify({
+      kind: "error",
+      message: "Impossible de charger les utilisateurs.",
+    });
   } finally {
     loading.value = false;
   }
 }
 
 async function invite() {
-  error.value = "";
-  status.value = "";
   invitationLink.value = "";
   invitationDelivered.value = null;
   inviting.value = true;
@@ -52,13 +50,16 @@ async function invite() {
     invitationLink.value = `${window.location.origin}/register?invitation=${encodeURIComponent(
       invitation.token,
     )}`;
-    status.value = invitation.emailSent
-      ? `Invitation envoyée par e-mail à ${invitation.email}.`
-      : `Invitation créée pour ${invitation.email}.`;
+    notify({
+      kind: "success",
+      message: invitation.emailSent
+        ? `Invitation envoyée par e-mail à ${invitation.email}.`
+        : `Invitation créée pour ${invitation.email}.`,
+    });
     invitationEmail.value = "";
     await loadUsers();
   } catch {
-    error.value = "Impossible de créer l’invitation.";
+    notify({ kind: "error", message: "Impossible de créer l’invitation." });
   } finally {
     inviting.value = false;
   }
@@ -66,6 +67,7 @@ async function invite() {
 
 async function signOut() {
   await auth.logout();
+  clearToasts();
   await router.push("/login");
 }
 
@@ -161,9 +163,6 @@ onMounted(loadUsers);
         />
       </form>
 
-      <Message v-if="status" severity="success" :closable="false">{{
-        status
-      }}</Message>
       <div v-if="invitationLink" class="admin__link">
         <label for="admin-invite-link">
           {{
@@ -178,9 +177,6 @@ onMounted(loadUsers);
           @focus="($event.target as HTMLInputElement).select()"
         />
       </div>
-      <Message v-if="error" severity="error" :closable="false">{{
-        error
-      }}</Message>
     </section>
   </div>
 </template>

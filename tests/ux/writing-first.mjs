@@ -235,6 +235,40 @@ test("writing surface is spacious and seamless on desktop without mobile overflo
   }
 });
 
+test("notifications share a top-right stack with distinct type colors", async () => {
+  const { page, close } = await fixture({ width: 390, height: 844 });
+  try {
+    await page.evaluate(async () => {
+      const { notify } = await import("/src/notifications/toasts.ts");
+      for (const kind of ["info", "success", "warning", "error"])
+        notify({ kind, message: `Synthetic ${kind}` });
+    });
+    const colors = await page
+      .locator(".toast-stack .toast")
+      .evaluateAll((items) =>
+        items.map((item) => ({
+          color: getComputedStyle(item).borderInlineStartColor,
+          kind: item.dataset.kind,
+          right: item.getBoundingClientRect().right,
+          top: item.getBoundingClientRect().top,
+        })),
+      );
+    assert.deepEqual(
+      colors.map((item) => item.kind),
+      ["info", "success", "warning", "error"],
+    );
+    assert.equal(new Set(colors.map((item) => item.color)).size, 4);
+    assert.ok(colors.every((item) => item.right <= 390 && item.top < 400));
+    await page
+      .getByRole("button", { name: "Fermer la notification" })
+      .first()
+      .click();
+    await expect(page.locator(".toast-stack .toast")).toHaveCount(3);
+  } finally {
+    await close();
+  }
+});
+
 test("deleted notes recover the latest draft and path after reopening", async () => {
   const { page, close } = await fixture();
   try {
@@ -262,9 +296,20 @@ test("deleted notes recover the latest draft and path after reopening", async ()
         .getByRole("treeitem", { name: "Projects", exact: true })
         .click();
     await remove.click();
+    const undoToast = page.locator('.toast-stack [data-kind="success"]');
+    await expect(undoToast).toContainText("Website supprimé.");
     await expect(
-      page.getByRole("button", { name: "Annuler la suppression", exact: true }),
+      undoToast.getByRole("button", {
+        name: "Annuler la suppression",
+        exact: true,
+      }),
     ).toBeVisible();
+    const toastBox = await undoToast.boundingBox();
+    assert.ok(
+      toastBox && toastBox.x > 0 && toastBox.y < 120,
+      "Deletion notification must appear at the top right, not in the editor",
+    );
+    await expect(page.locator(".deletion-notice")).toHaveCount(0);
     await page.reload();
     await page
       .getByLabel("Phrase de déchiffrement", { exact: true })

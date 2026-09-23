@@ -278,9 +278,11 @@ server/offline recovery journeys remain covered by `just e2e-recovery`.
 The shared workspace exposes search and new-note actions, folder paths,
 and backlinks/history independently of the optional assistant. Opening a vault
 resumes the last available note without a dedicated recent-notes sidebar section.
-Only one secondary tool opens at a time; narrow screens use navigation and
-tool overlays. Vault creation confirms the local passphrase and explains that
-Synapse cannot recover it.
+Transient feedback (including deletion undo and update prompts) appears in a
+color-coded toast stack at the top right; save and sync states remain visible
+in the workspace. Only one secondary tool opens at a time; narrow screens use
+navigation and tool overlays. Vault creation confirms the local passphrase
+and explains that Synapse cannot recover it.
 
 Deletion offers undo and an **Éléments supprimés** view. Recovery uses encrypted
 history already present **on this device**, preserves the original path, and

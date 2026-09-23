@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 import VaultView from "./VaultView.vue";
+import { clearToasts, toasts } from "../notifications/toasts";
 
 const savedSearch = { id: "search-1", label: "À relire", query: "tag:review" };
 const noteId = "note-1";
@@ -30,6 +31,7 @@ function mockMatchMedia(matches = false) {
 }
 
 beforeEach(() => {
+  clearToasts();
   window.localStorage.clear();
   window.sessionStorage.clear();
   editorFocusCalls.length = 0;
@@ -554,9 +556,47 @@ it("saves the latest draft before deleting and offers an explicit undo", async (
   expect(save.mock.invocationCallOrder[0]).toBeLessThan(
     remove.mock.invocationCallOrder[0],
   );
-  expect(wrapper.find('[aria-label="Annuler la suppression"]').exists()).toBe(
-    true,
+  expect(wrapper.find(".deletion-notice").exists()).toBe(false);
+  const undoToast = toasts.value.find(
+    (toast) => toast.action?.label === "Annuler la suppression",
   );
+  expect(undoToast?.kind).toBe("success");
+  expect(undoToast?.message).toContain("Note épinglée");
+  const restore = vi
+    .spyOn(vault, "restoreDeletedItem")
+    .mockResolvedValue({} as never);
+  await undoToast?.action?.run();
+  expect(restore).toHaveBeenCalledWith(noteId);
+  wrapper.unmount();
+});
+
+it("purges vault notification text and undo actions on lock", async () => {
+  const { wrapper, vault } = await mountVault();
+  vi.spyOn(vault, "deleteNote").mockImplementation(async (id) => {
+    vault.notes.delete(id);
+    return {} as never;
+  });
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("delete", noteId);
+  await flushPromises();
+  expect(toasts.value[0]?.message).toContain("Note épinglée");
+  vault.lock();
+  await flushPromises();
+  expect(toasts.value).toHaveLength(0);
+  wrapper.unmount();
+});
+
+it("routes a failed deletion to a persistent error toast without removing the note", async () => {
+  const { wrapper, vault } = await mountVault();
+  vi.spyOn(vault, "deleteNote").mockRejectedValue(new Error("private content"));
+  wrapper.findComponent({ name: "VaultTree" }).vm.$emit("delete", noteId);
+  await flushPromises();
+  expect(vault.notes.has(noteId)).toBe(true);
+  expect(toasts.value.at(-1)).toMatchObject({
+    kind: "error",
+    message: "Suppression impossible. Votre contenu est conservé ; réessayez.",
+  });
+  expect(JSON.stringify(toasts.value)).not.toContain("private content");
+  expect(wrapper.find(".workspace-error").exists()).toBe(false);
   wrapper.unmount();
 });
 

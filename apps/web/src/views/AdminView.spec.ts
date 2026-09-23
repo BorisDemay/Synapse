@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
 import AdminView from "./AdminView.vue";
+import { clearToasts, toasts } from "../notifications/toasts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -34,6 +35,7 @@ async function mountAdmin(): Promise<VueWrapper> {
 
 describe("AdminView", () => {
   beforeEach(() => {
+    clearToasts();
     vi.stubGlobal("fetch", vi.fn());
     vi.stubGlobal(
       "matchMedia",
@@ -106,6 +108,11 @@ describe("AdminView", () => {
     expect(
       (wrapper.get("#admin-invite-link").element as HTMLInputElement).value,
     ).toBe(`${window.location.origin}/register?invitation=one-time-token`);
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "success",
+      message: expect.stringContaining("Invitation"),
+    });
+    expect(JSON.stringify(toasts.value)).not.toContain("one-time-token");
   });
 
   it("reports a failed account listing instead of showing an empty table", async () => {
@@ -113,8 +120,10 @@ describe("AdminView", () => {
 
     const wrapper = await mountAdmin();
 
-    expect(wrapper.get('[role="alert"]').text()).toContain(
-      "Impossible de charger les utilisateurs.",
-    );
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "error",
+      message: "Impossible de charger les utilisateurs.",
+    });
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
 });

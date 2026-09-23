@@ -61,6 +61,7 @@ import {
   planZipImport,
   type MarkdownImportPlan,
 } from "../import/markdown-folder";
+import { clearToasts, dismissToast, notify } from "../notifications/toasts";
 import { useAssistantStore } from "../stores/assistant";
 import { useAuthStore } from "../stores/auth";
 import {
@@ -115,7 +116,24 @@ const deletedItemsError = ref("");
 const restoringDeletedItem = ref(false);
 const deletingIds = new Set<string>();
 const lastDeletedItem = ref<{ id: string; label: string } | null>(null);
+let lastDeletionToastId: number | null = null;
+let errorToastId: number | null = null;
 let vaultViewEpoch = 0;
+
+watch(
+  () => formError.value || vault.lastError,
+  (message) => {
+    if (errorToastId !== null) dismissToast(errorToastId);
+    errorToastId =
+      message && vault.isUnlocked ? notify({ kind: "error", message }) : null;
+  },
+);
+watch(settingsStatus, (message) => {
+  if (message && vault.isUnlocked) notify({ kind: "success", message });
+});
+watch(settingsError, (message) => {
+  if (message && vault.isUnlocked) notify({ kind: "error", message });
+});
 let deletedListRequest = 0;
 const attachmentPreview = ref<{
   contentType: string;
@@ -654,6 +672,15 @@ async function deleteNote(id: string) {
     if (epoch !== vaultViewEpoch || !vault.isUnlocked) return;
     assistant.detachNote(id);
     lastDeletedItem.value = { id, label };
+    if (lastDeletionToastId !== null) dismissToast(lastDeletionToastId);
+    lastDeletionToastId = notify({
+      kind: "success",
+      message: `${label} supprimé.`,
+      action: {
+        label: "Annuler la suppression",
+        run: () => restoreDeletedItem(id),
+      },
+    });
     if (selectedNoteId.value === id || noteId.value === id) {
       draftBaseRevision.value = null;
       await startNewNote();
@@ -712,7 +739,11 @@ async function restoreDeletedItem(id: string) {
   try {
     await vault.restoreDeletedItem(id);
     if (epoch !== vaultViewEpoch || !vault.isUnlocked) return;
-    if (lastDeletedItem.value?.id === id) lastDeletedItem.value = null;
+    if (lastDeletedItem.value?.id === id) {
+      lastDeletedItem.value = null;
+      if (lastDeletionToastId !== null) dismissToast(lastDeletionToastId);
+      lastDeletionToastId = null;
+    }
     if (deletedItemsOpen.value) await refreshDeletedItems();
     else if (vault.notes.has(id)) await selectNote(id);
   } catch {
@@ -1265,6 +1296,7 @@ async function reopenMostRecentNote() {
 }
 
 onUnmounted(() => {
+  clearToasts();
   attachmentFocus.detach();
   vaultViewEpoch++;
   closeDeletedItems();
@@ -1278,6 +1310,9 @@ watch(
   [() => vault.isUnlocked, () => vault.currentVaultId, () => auth.userId],
   () => {
     vaultViewEpoch++;
+    clearToasts();
+    errorToastId = null;
+    lastDeletionToastId = null;
     closeDeletedItems();
     lastDeletedItem.value = null;
     restoringDeletedItem.value = false;
@@ -1594,17 +1629,6 @@ watch(settingsOpen, (open) => {
           </button>
         </div>
       </header>
-      <div v-if="lastDeletedItem" class="deletion-notice" role="status">
-        <span>{{ lastDeletedItem.label }} supprimé.</span>
-        <button
-          type="button"
-          aria-label="Annuler la suppression"
-          :disabled="restoringDeletedItem"
-          @click="restoreDeletedItem(lastDeletedItem.id)"
-        >
-          Annuler la suppression
-        </button>
-      </div>
       <ConflictResolver
         v-if="vault.activeConflict"
         :base="vault.activeConflict.base"
@@ -1730,13 +1754,6 @@ watch(settingsOpen, (open) => {
           />
         </div>
       </template>
-      <p
-        v-if="formError || vault.lastError"
-        class="workspace-error"
-        role="alert"
-      >
-        {{ formError || vault.lastError }}
-      </p>
       <div v-if="searchQuery" class="saved-search-action">
         <Button
           label="Enregistrer la recherche"
@@ -1832,13 +1849,13 @@ watch(settingsOpen, (open) => {
     :account-email="accountEmail"
     :device-supported="deviceSupported"
     :device-trusted="deviceTrusted"
-    :error-message="settingsError"
+    :error-message="''"
     :offline="auth.isOfflineSession || auth.isLocalMode"
     :open="settingsOpen"
     :sessions="sessions"
     :users="users"
     :invitation-link="invitationLink"
-    :status-message="settingsStatus"
+    :status-message="''"
     :templates-path="vault.preferences.templatesPath"
     @change-passphrase="changePassphrase"
     @change-password="changePassword"
@@ -1931,14 +1948,6 @@ watch(settingsOpen, (open) => {
   .workspace-header .workspace-tool {
     padding: 0.2rem 0.4rem;
   }
-}
-.deletion-notice {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: var(--synapse-color-surface-muted);
 }
 .sidebar-footer {
   flex-wrap: wrap;
