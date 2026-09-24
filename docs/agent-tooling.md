@@ -23,6 +23,15 @@ Les fichiers sous `skills/` sont des procédures versionnées du projet. Ils ne 
 - Les tâches filesystem, shell, Git, PostgreSQL, Docker et HTTP utilisent les outils natifs et les commandes contrôlées du dépôt : un MCP supplémentaire serait redondant et élargirait inutilement la surface d’attaque.
 - GitHub MCP est volontairement absent : l’intégration exige un jeton et n’est pas nécessaire avant qu’un dépôt distant et une politique de jetons existent.
 
+### Sélection d’éléments dans le navigateur (Yoink)
+
+Pi ne lit pas `.mcp.json` : il ne prend pas en charge MCP et délègue cette intégration à une extension. Le pont vers [Yoink](https://getyoink.dev/), l’extension Chrome qui renvoie un élément désigné (sélecteur, HTML, styles calculés, capture) avec une note libre, est donc une extension pi **au niveau utilisateur** (`~/.pi/agent/extensions/yoink/`), hors dépôt.
+
+- Elle sert à désigner un élément dans l’application locale et à demander une correction ciblée à l’agent.
+- `yoink-mcp` est publié en `UNLICENSED` : il ne peut être ni vendorisé ni déclaré comme dépendance du dépôt. L’extension ne le lance qu’à la demande (`/yoink setup` ou première utilisation de l’outil), version figée.
+- Le jeton d’appairage ne doit pas entrer dans le contexte du modèle ; il est masqué des résultats d’outil et n’est affiché qu’au développeur.
+- Usage restreint à l’application locale de développement : jamais de cookies ni de secrets de production.
+
 ## Validation
 
-Avant d’utiliser `.mcp.json`, vérifier que le client agent ciblé reconnaît ce format et que Node.js/npx sont disponibles. Le serveur Playwright ne doit pas être un prérequis pour compiler, tester ou auto-héberger Synapse.
+Avant d’utiliser `.mcp.json`, vérifier que le client agent ciblé reconnaît ce format et que Node.js/npx sont disponibles. Le serveur Playwright ne doit pas être un prérequis pour compiler, tester ou auto-héberger Synapse. Le pont Yoink est un confort de développement local : il est optionnel et n’est requis ni pour compiler, ni pour tester, ni pour auto-héberger Synapse.
