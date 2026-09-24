@@ -372,6 +372,38 @@ async function selectNext(index: number) {
     >
       <div class="vault-tree-row">
         <span
+          class="vault-tree-kind"
+          :data-kind="entry.node.kind ?? 'note'"
+          aria-hidden="true"
+        >
+          <svg
+            v-if="entry.node.kind === 'folder'"
+            viewBox="0 0 24 24"
+            focusable="false"
+          >
+            <path
+              fill="currentColor"
+              d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2Z"
+            />
+          </svg>
+          <svg
+            v-else-if="entry.node.kind === 'attachment'"
+            viewBox="0 0 24 24"
+            focusable="false"
+          >
+            <path
+              fill="currentColor"
+              d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5S13.5 3.62 13.5 5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5Z"
+            />
+          </svg>
+          <svg v-else viewBox="0 0 24 24" focusable="false">
+            <path
+              fill="currentColor"
+              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 2.5L18.5 9H14V4.5ZM8 13h8v2H8v-2Zm0 4h5v2H8v-2Z"
+            />
+          </svg>
+        </span>
+        <span
           v-if="entry.node.kind === 'folder'"
           class="vault-tree-disclosure"
           aria-hidden="true"
@@ -469,11 +501,73 @@ async function selectNext(index: number) {
   box-shadow: inset 3px 0 0 var(--synapse-color-accent);
 }
 
+/* Les dossiers sont des conteneurs : pastille pleine teintée, rail d'accent et
+   icône de dossier. Les notes restent des feuilles plates et discrètes avec une
+   icône de document. La forme et le fond suffisent à distinguer les deux au
+   premier regard, y compris en thème clair comme en thème sombre. */
 .vault-tree-item[data-kind="folder"] > .vault-tree-row {
-  font-weight: 650;
+  padding-inline-start: calc(
+    0.45rem - 3px + min(6rem, var(--tree-depth, 0) * 1rem)
+  );
+  color: var(--synapse-color-text);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 9%,
+    var(--synapse-color-surface-muted)
+  );
+  border: 1px solid var(--synapse-color-border);
+  border-inline-start: 3px solid var(--synapse-color-accent);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
+
+.vault-tree-item[data-kind="folder"]:hover:not([aria-selected="true"])
+  > .vault-tree-row {
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 16%,
+    var(--synapse-color-surface-muted)
+  );
+}
+
+.vault-tree-item[data-kind="folder"][aria-selected="true"] > .vault-tree-row {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  border-color: var(--synapse-color-accent);
+}
+
+.vault-tree-item[data-kind="folder"][aria-selected="true"]:hover
+  > .vault-tree-row {
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 22%,
+    var(--synapse-color-surface-accent)
+  );
+}
+
+.vault-tree-kind {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--synapse-color-text-muted);
+}
+
+.vault-tree-kind svg {
+  width: 100%;
+  height: 100%;
+}
+
+.vault-tree-item[data-kind="folder"] > .vault-tree-row > .vault-tree-kind {
+  color: var(--synapse-color-accent);
+}
+
 .vault-tree-disclosure {
   flex-shrink: 0;
+  color: var(--synapse-color-accent);
+  font-size: 0.75rem;
 }
 
 .vault-tree-label {

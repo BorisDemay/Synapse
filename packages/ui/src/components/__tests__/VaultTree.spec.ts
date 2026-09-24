@@ -217,6 +217,45 @@ describe("VaultTree", () => {
     expect(wrapper.emitted("delete")?.[0]).toEqual(["projets/roadmap.md"]);
   });
 
+  it("marque chaque ligne par une icône distincte : dossier pour les dossiers, document pour les notes", () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              { id: "projets/roadmap.md", kind: "note", label: "Roadmap" },
+              { id: "projets/image.png", kind: "attachment", label: "image" },
+            ],
+            id: "folder:projets",
+            kind: "folder",
+            label: "projets",
+          },
+          { id: "sans-kind", label: "Sans type" },
+        ],
+      },
+    });
+    const folderIcon = wrapper.get('[data-kind="folder"] .vault-tree-kind');
+    const noteIcon = wrapper.get('[data-tree-index="1"] .vault-tree-kind');
+    const attachmentIcon = wrapper.get(
+      '[data-tree-index="2"] .vault-tree-kind',
+    );
+    const implicitNoteIcon = wrapper.get(
+      '[data-tree-index="3"] .vault-tree-kind',
+    );
+
+    expect(folderIcon.attributes("data-kind")).toBe("folder");
+    expect(noteIcon.attributes("data-kind")).toBe("note");
+    expect(attachmentIcon.attributes("data-kind")).toBe("attachment");
+    expect(implicitNoteIcon.attributes("data-kind")).toBe("note");
+    expect(folderIcon.get("svg path").attributes("d")).not.toBe(
+      noteIcon.get("svg path").attributes("d"),
+    );
+    expect(attachmentIcon.get("svg path").attributes("d")).not.toBe(
+      noteIcon.get("svg path").attributes("d"),
+    );
+    wrapper.unmount();
+  });
+
   it("sélectionne et focalise une note virtualisée sans perdre sa commande de suppression", async () => {
     const largeNodes = Array.from({ length: 10_000 }, (_, index) => ({
       id: `note-${index}`,
