@@ -948,13 +948,19 @@ onBeforeUnmount(() => {
   font-size: 0.8rem;
 }
 
+/* Le sélecteur de mode reste dans le flux (pas d'absolute : il masquerait la
+   barre d'outils Vditor) mais sans bande de fond pleine largeur. */
 .markdown-editor-mode {
   display: flex;
   flex: 0 0 auto;
   justify-content: flex-end;
-  gap: 0.25rem;
-  padding: 0.35rem 0.75rem 0;
-  background: var(--synapse-color-surface-muted);
+  gap: var(--synapse-space-1, 0.25rem);
+  /* Align the editing-mode buttons with the writing column below: same max
+     width, same centring and same inline padding as the editor surface. */
+  width: 100%;
+  max-width: min(100%, 60rem);
+  margin-inline: auto;
+  padding: 0.35rem clamp(1.25rem, 4vw, 2.5rem) 0;
 }
 
 .markdown-editor-mode button {
@@ -975,6 +981,12 @@ onBeforeUnmount(() => {
     var(--synapse-color-border)
   );
   background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
+}
+
+/* Demande ciblée : le bouton « Texte brut » (second bouton du sélecteur de mode)
+   reçoit un fond jaune, y compris à l'état pressé. */
+.markdown-editor-mode button:last-child {
+  background: #ffd83d;
 }
 
 .markdown-editor-mode button:hover,
@@ -1035,12 +1047,14 @@ onBeforeUnmount(() => {
   display: block;
   box-sizing: border-box;
   width: 100% !important;
-  /* Use the available workspace without stretching lines edge-to-edge on
-     ultrawide displays. The same width applies to IR and source modes. */
-  max-width: min(100%, 60rem) !important;
   min-width: 0;
-  margin-inline: auto !important;
-  padding: 2rem clamp(1.25rem, 4vw, 2.5rem) !important;
+  /* The scroller spans the whole pane so its scrollbar sits flush against
+     the right edge, while the text column stays centred at 60rem thanks to
+     symmetric inline padding. The same width applies to IR and source modes. */
+  max-width: none !important;
+  margin-inline: 0 !important;
+  padding: 2rem calc(clamp(1.25rem, 4vw, 2.5rem) + max(0px, (100% - 60rem) / 2)) !important;
+  scrollbar-gutter: stable both-edges;
 }
 
 /* Vditor paints its IR pre with its own dark panel color (#24292e), leaving
@@ -1049,6 +1063,47 @@ onBeforeUnmount(() => {
 .markdown-editor :deep(.vditor-ir > .vditor-reset),
 .markdown-editor :deep(.vditor-ir > .vditor-reset:focus) {
   background: var(--synapse-color-surface-raised);
+}
+
+.markdown-editor :deep(.vditor-ir > .vditor-reset),
+.markdown-editor :deep(.vditor-sv) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in srgb,
+      var(--synapse-color-text-muted) 45%,
+      transparent
+    )
+    transparent;
+}
+
+.markdown-editor :deep(.vditor-ir > .vditor-reset)::-webkit-scrollbar,
+.markdown-editor :deep(.vditor-sv)::-webkit-scrollbar {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.markdown-editor :deep(.vditor-ir > .vditor-reset)::-webkit-scrollbar-track,
+.markdown-editor :deep(.vditor-sv)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.markdown-editor :deep(.vditor-ir > .vditor-reset)::-webkit-scrollbar-thumb,
+.markdown-editor :deep(.vditor-sv)::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-text-muted) 45%,
+    transparent
+  );
+  background-clip: padding-box;
+}
+
+.markdown-editor
+  :deep(.vditor-ir > .vditor-reset)::-webkit-scrollbar-thumb:hover,
+.markdown-editor :deep(.vditor-sv)::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--synapse-color-accent) 70%, transparent);
+  background-clip: padding-box;
 }
 
 .markdown-editor :deep(.vditor-ir:focus),
