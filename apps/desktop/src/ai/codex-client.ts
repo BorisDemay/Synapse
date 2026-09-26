@@ -300,7 +300,11 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      calls.push(...extractFunctionCalls([event.item]));
+      calls.push(
+        ...extractFunctionCalls(
+          outputItems({ output: [event.item as CodexOutputItem] }),
+        ),
+      );
     }
     if (event.type === "response.completed") {
       let response: CodexAgentResponse | undefined;

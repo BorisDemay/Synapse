@@ -753,6 +753,57 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it.each([
+    { content: {}, label: "object" },
+    { content: "not-an-output-content-array", label: "string" },
+    { content: null, label: "null" },
+    { content: [null], label: "array containing null" },
+    {
+      content: ["not-an-output-content-item"],
+      label: "array containing string",
+    },
+    { content: [[]], label: "array containing array" },
+  ])(
+    "rejects a streamed message output item with $label content before returning a local tool call",
+    async ({ content }) => {
+      const malformedEvent = {
+        item: { content, type: "message" },
+        type: "response.output_item.done",
+      };
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-malformed-streamed-message-content",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              [malformedEvent, validCall]
+                .map((event) => `data: ${JSON.stringify(event)}`)
+                .join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+    },
+  );
+
   it.each(["", "   "])(
     "rejects blank function call arguments from every Responses API flow",
     async (argumentsValue) => {
