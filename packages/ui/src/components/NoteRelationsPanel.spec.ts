@@ -8,7 +8,15 @@ describe("NoteRelationsPanel", () => {
     const wrapper = mount(NoteRelationsPanel, {
       props: {
         backlinks: [],
-        history: [{ label: "Révision 3", revision: 3 }],
+        recoveryView: true,
+        history: [
+          {
+            label: "Snapshot de récupération · révision 3",
+            recordedAt: new Date().toISOString(),
+            revision: 3,
+            recoverySnapshot: true,
+          },
+        ],
       },
     });
 
@@ -21,7 +29,9 @@ describe("NoteRelationsPanel", () => {
       .get('[role="tab"][aria-controls="relations-history"]')
       .trigger("click");
 
-    expect(wrapper.get('[role="tabpanel"]').text()).toContain("Révision 3");
+    expect(wrapper.get('[role="tabpanel"]').text()).toContain(
+      "Snapshot de récupération · révision 3",
+    );
     expect(wrapper.get('[role="tabpanel"]').text()).not.toContain(
       "Aucun lien entrant.",
     );
@@ -30,6 +40,47 @@ describe("NoteRelationsPanel", () => {
         .get('[role="tab"][aria-controls="relations-history"]')
         .attributes("aria-selected"),
     ).toBe("true");
+  });
+
+  it("conserve l’historique natif et les restore points par défaut", async () => {
+    const wrapper = mount(NoteRelationsPanel, {
+      props: {
+        backlinks: [],
+        history: [
+          { label: "Révision native", recordedAt: "2026-01-01", revision: 2 },
+        ],
+      },
+    });
+
+    await wrapper
+      .get('[role="tab"][aria-controls="relations-history"]')
+      .trigger("click");
+
+    expect(wrapper.get('[role="tabpanel"]').text()).toContain(
+      "Révision native",
+    );
+    expect(wrapper.find('[data-action="create-restore-point"]').exists()).toBe(
+      true,
+    );
+  });
+
+  it("affiche les snapshots seulement en mode récupération", async () => {
+    const wrapper = mount(NoteRelationsPanel, {
+      props: {
+        backlinks: [],
+        history: [{ label: "Snapshot", revision: 4, recoverySnapshot: true }],
+        recoveryView: true,
+      },
+    });
+
+    await wrapper
+      .get('[role="tab"][aria-controls="relations-history"]')
+      .trigger("click");
+
+    expect(wrapper.get('[role="tabpanel"]').text()).toContain("Snapshot");
+    expect(wrapper.find('[data-action="create-restore-point"]').exists()).toBe(
+      false,
+    );
   });
 
   it("émet close depuis l’en-tête du panneau", async () => {

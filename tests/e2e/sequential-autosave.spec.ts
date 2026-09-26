@@ -70,7 +70,7 @@ test("a draft started before its preceding autosave is acknowledged does not con
         }),
       )
       .toBe(acceptedRevision);
-    await page.clock.runFor(1000);
+    await page.clock.runFor(2500);
     await expect
       .poll(() => persistedMarkdown(page, DEFAULT_PASSPHRASE))
       .toContain(latest);

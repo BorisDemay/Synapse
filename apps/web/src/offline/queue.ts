@@ -59,14 +59,22 @@ export async function persistPendingOperation(
   operation: EncryptedPushOperation,
   supersedes: string[] = [],
   localOnly = false,
-): Promise<number> {
+  recovery: { forceSnapshot?: boolean; preserveRevisions?: number[] } = {},
+): Promise<number | undefined> {
   const db = await openOfflineDb();
   const tx = db.transaction(
     ["notes", "queue", "note_revisions", "meta"],
     "readwrite",
   );
   try {
-    await tx.objectStore("notes").put(
+    const noteStore = tx.objectStore("notes");
+    const cachedNoteKey = noteKey(
+      userId,
+      operation.vault_id,
+      operation.note_id,
+    );
+    const previousNote = await noteStore.get(cachedNoteKey);
+    await noteStore.put(
       {
         userId,
         vaultId: operation.vault_id,
@@ -76,7 +84,7 @@ export async function persistPendingOperation(
         ciphertextHash: operation.ciphertext_hash,
         nonce: operation.nonce,
       },
-      noteKey(userId, operation.vault_id, operation.note_id),
+      cachedNoteKey,
     );
     const sequenceKey = `${userId}:${operation.vault_id}:outbox-sequence`;
     const counter = await tx.objectStore("meta").get(sequenceKey);
@@ -89,32 +97,76 @@ export async function persistPendingOperation(
       await tx
         .objectStore("queue")
         .put({ ...operation, userId, sequence }, operation.operation_id);
-    const previous = await tx
-      .objectStore("note_revisions")
-      .getAll(
-        IDBKeyRange.bound(
-          `${userId}:${operation.vault_id}:${operation.note_id}:`,
-          `${userId}:${operation.vault_id}:${operation.note_id}:\uffff`,
+    const revisionStore = tx.objectStore("note_revisions");
+    const prefix = `${userId}:${operation.vault_id}:${operation.note_id}:`;
+    const previous = await revisionStore.getAll(
+      IDBKeyRange.bound(prefix, `${prefix}\uffff`),
+    );
+    const now = Date.now();
+    const latestSnapshot = previous
+      .filter((row) => row.recoverySnapshot)
+      .reduce(
+        (latest, row) => Math.max(latest, Date.parse(row.recordedAt) || 0),
+        0,
+      );
+    const shouldSnapshot =
+      recovery.forceSnapshot === true ||
+      latestSnapshot === 0 ||
+      now - latestSnapshot >= 5 * 60_000;
+    let snapshotRevision: number | undefined;
+    if (shouldSnapshot) {
+      const source =
+        recovery.forceSnapshot && previousNote
+          ? previousNote
+          : {
+              revision: operation.base_revision,
+              ciphertext: operation.ciphertext,
+              nonce: operation.nonce,
+            };
+      snapshotRevision =
+        Math.max(
+          operation.base_revision,
+          ...previous.map((row) => row.revision),
+        ) + 1;
+      await revisionStore.put(
+        {
+          userId,
+          vaultId: operation.vault_id,
+          noteId: operation.note_id,
+          baseRevision: source.revision,
+          revision: snapshotRevision,
+          ciphertext: source.ciphertext,
+          nonce: source.nonce,
+          recordedAt: new Date(now).toISOString(),
+          recoverySnapshot: true,
+        },
+        revisionKey(
+          userId,
+          operation.vault_id,
+          operation.note_id,
+          snapshotRevision,
         ),
       );
-    const revision =
-      Math.max(
-        operation.base_revision,
-        ...previous.map((row) => row.revision),
-      ) + 1;
-    await tx.objectStore("note_revisions").put(
-      {
-        userId,
-        vaultId: operation.vault_id,
-        noteId: operation.note_id,
-        baseRevision: operation.base_revision,
-        revision,
-        ciphertext: operation.ciphertext,
-        nonce: operation.nonce,
-        recordedAt: new Date().toISOString(),
-      },
-      revisionKey(userId, operation.vault_id, operation.note_id, revision),
-    );
+    }
+    const protectedRevisions = new Set(recovery.preserveRevisions ?? []);
+    for (const row of previous) {
+      const recordedAt = Date.parse(row.recordedAt);
+      if (
+        row.recoverySnapshot &&
+        (!Number.isFinite(recordedAt) ||
+          now - recordedAt > 7 * 24 * 60 * 60_000) &&
+        !protectedRevisions.has(row.revision)
+      ) {
+        await revisionStore.delete(
+          revisionKey(
+            userId,
+            operation.vault_id,
+            operation.note_id,
+            row.revision,
+          ),
+        );
+      }
+    }
     for (const supersededId of supersedes) {
       const old = await tx.objectStore("queue").get(supersededId);
       if (
@@ -127,7 +179,7 @@ export async function persistPendingOperation(
           .put({ ...old, supersededBy: operation.operation_id }, supersededId);
     }
     await tx.done;
-    return revision;
+    return snapshotRevision;
   } catch (error) {
     try {
       tx.abort();

@@ -219,7 +219,7 @@ it("keeps offline delete and restore as normal pending operations without plaint
   const revisions = (await db.getAll("note_revisions")).filter(
     (row) => row.noteId === note,
   );
-  expect(revisions).toHaveLength(3);
+  expect(revisions.filter((row) => row.recoverySnapshot)).toHaveLength(2);
 });
 
 it("refuses to resurrect an item that is no longer deleted", async () => {

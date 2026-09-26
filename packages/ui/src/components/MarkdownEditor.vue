@@ -80,6 +80,7 @@ let pendingExternalValue: string | undefined;
 let pendingFocus = false;
 let pendingListConversion = false;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingSaveValue: string | undefined;
 let activeTableCell: HTMLTableCellElement | undefined;
 
 function localAssetBase(): string {
@@ -119,15 +120,24 @@ function wikilinkHints(query: string) {
     }));
 }
 
-function scheduleSave(value: string) {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-  }
+function cancelScheduledSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = undefined;
+  pendingSaveValue = undefined;
+}
 
-  saveTimer = setTimeout(() => {
-    saveTimer = undefined;
-    emit("save", value);
-  }, 500);
+function flushScheduledSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = undefined;
+  const value = pendingSaveValue;
+  pendingSaveValue = undefined;
+  if (value !== undefined) emit("save", value);
+}
+
+function scheduleSave(value: string) {
+  if (saveTimer) clearTimeout(saveTimer);
+  pendingSaveValue = value;
+  saveTimer = setTimeout(flushScheduledSave, 2000);
 }
 
 function handleInput(value: string) {
@@ -582,7 +592,11 @@ function focusWritingArea() {
   focusEditor();
 }
 
-defineExpose({ focus: focusWritingArea });
+defineExpose({
+  cancelSave: cancelScheduledSave,
+  flushSave: flushScheduledSave,
+  focus: focusWritingArea,
+});
 
 function handleTableFocus(event: FocusEvent) {
   const cell = tableCellFromTarget(event.target);
@@ -837,6 +851,7 @@ watch(
       return;
     }
 
+    cancelScheduledSave();
     applyExternalValue(value);
     rewriteAttachmentUrls();
   },
@@ -863,9 +878,7 @@ watch(themeMode, (mode) => {
 });
 
 onBeforeUnmount(() => {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-  }
+  flushScheduledSave();
   teardownTableInteractions();
   editor?.destroy();
 });

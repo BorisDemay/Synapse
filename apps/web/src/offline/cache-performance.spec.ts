@@ -83,6 +83,6 @@ it("prunes only the selected note in the same durable revision transaction", asy
     (await listNoteRevisions(userId, vaultId, "note-a")).map(
       (row) => row.revision,
     ),
-  ).toEqual(Array.from({ length: 50 }, (_, i) => 60 - i));
+  ).toEqual(Array.from({ length: 61 }, (_, i) => 60 - i));
   expect(await listNoteRevisions(userId, vaultId, "note-b")).toHaveLength(60);
 });

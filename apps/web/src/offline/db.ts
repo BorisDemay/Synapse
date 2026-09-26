@@ -64,6 +64,7 @@ export interface CachedRevisionRecord {
   noteId: string;
   recordedAt: string;
   revision: number;
+  recoverySnapshot?: true;
   userId: string;
   vaultId: string;
 }
