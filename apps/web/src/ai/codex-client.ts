@@ -148,6 +148,22 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
   if (!Array.isArray(body.output)) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
+  for (const item of body.output) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    if (item.type !== "message" || !("content" in item)) {
+      continue;
+    }
+    if (!Array.isArray(item.content)) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    for (const part of item.content) {
+      if (!part || typeof part !== "object" || Array.isArray(part)) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+    }
+  }
   return body.output;
 }
 
@@ -287,10 +303,12 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       calls.push(...extractFunctionCalls([event.item]));
     }
     if (event.type === "response.completed") {
+      const response = event.response
+        ? extractAgentResponse(event.response)
+        : undefined;
       if (typeof event.output_text === "string") {
         completed = event.output_text;
-      } else if (event.response) {
-        const response = extractAgentResponse(event.response);
+      } else if (response) {
         completed = response.text;
         calls.push(...response.functionCalls);
       }

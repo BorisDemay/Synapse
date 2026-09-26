@@ -301,6 +301,181 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it.each([
+    { item: null, label: "null" },
+    { item: "not-an-output-item", label: "string" },
+    { item: 42, label: "number" },
+    { item: [], label: "array" },
+  ])(
+    "rejects a JSON or completed SSE Responses $label output item before returning a local tool call",
+    async ({ item }) => {
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-malformed-output-item",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        new Response(JSON.stringify({ output: [item, validCall] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+        new Response(
+          `data: ${JSON.stringify({
+            response: { output: [item, validCall] },
+            type: "response.completed",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+        await expect(
+          completeCodexAgent({
+            instructions: "Utilise un outil local.",
+            messages: [{ content: "Crée une note.", role: "user" }],
+            model: "gpt-5.6-luna",
+            token,
+            toolChoice: "required",
+          }),
+        ).rejects.toMatchObject({
+          message: "L’assistant n’a pas pu répondre.",
+        });
+      }
+    },
+  );
+
+  it("accepts a message Responses item without content before a local tool call", async () => {
+    const functionCall = {
+      arguments: '{"markdown":"# Brouillon"}',
+      call_id: "call-after-message-without-content",
+      name: "create_note",
+      type: "function_call",
+    };
+    const responses = [
+      new Response(
+        JSON.stringify({ output: [{ type: "message" }, functionCall] }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      ),
+      new Response(
+        `data: ${JSON.stringify({
+          response: { output: [{ type: "message" }, functionCall] },
+          type: "response.completed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    ];
+
+    for (const response of responses) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).resolves.toMatchObject({
+        functionCalls: [{ callId: "call-after-message-without-content" }],
+      });
+    }
+  });
+
+  it("rejects completed SSE output items even when the event includes output_text", async () => {
+    const validCall = {
+      arguments: '{"markdown":"# Brouillon"}',
+      call_id: "call-before-completed-output-text",
+      name: "create_note",
+      type: "response.function_call_arguments.done",
+    };
+    const completed = {
+      output_text: "Réponse finale.",
+      response: { output: [null] },
+      type: "response.completed",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [validCall, completed]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }),
+    ).rejects.toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+  });
+
+  it.each([
+    { content: {}, label: "object" },
+    { content: "not-an-output-content-array", label: "string" },
+    { content: null, label: "null" },
+    { content: [null], label: "array containing null" },
+    {
+      content: ["not-an-output-content-item"],
+      label: "array containing string",
+    },
+    { content: [[]], label: "array containing array" },
+  ])(
+    "rejects a JSON or completed SSE message with $label content before returning a local tool call",
+    async ({ content }) => {
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-malformed-message-content",
+        name: "create_note",
+        type: "function_call",
+      };
+      const output = [{ content, type: "message" }, functionCall];
+      const responses = [
+        new Response(JSON.stringify({ output }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+        new Response(
+          `data: ${JSON.stringify({
+            response: { output },
+            type: "response.completed",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+        await expect(
+          completeCodexAgent({
+            instructions: "Utilise un outil local.",
+            messages: [{ content: "Crée une note.", role: "user" }],
+            model: "gpt-5.6-luna",
+            token,
+            toolChoice: "required",
+          }),
+        ).rejects.toMatchObject({
+          message: "L’assistant n’a pas pu répondre.",
+        });
+      }
+    },
+  );
+
   it("reads a local tool call from a streamed ChatGPT subscription response", async () => {
     vi.stubGlobal(
       "fetch",
