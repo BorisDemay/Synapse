@@ -983,12 +983,6 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--synapse-color-accent) 12%, transparent);
 }
 
-/* Demande ciblée : le bouton « Texte brut » (second bouton du sélecteur de mode)
-   reçoit un fond jaune, y compris à l'état pressé. */
-.markdown-editor-mode button:last-child {
-  background: #ffd83d;
-}
-
 .markdown-editor-mode button:hover,
 .markdown-editor-mode button:focus-visible {
   color: var(--synapse-color-text);

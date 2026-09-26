@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -150,6 +152,14 @@ async function openSubmenu(label: string) {
 }
 
 describe("MarkdownEditor", () => {
+  it("does not override the plain-text mode button's themed background", () => {
+    const source = readFileSync("src/components/MarkdownEditor.vue", "utf8");
+
+    expect(source).not.toMatch(
+      /\.markdown-editor-mode button:last-child\s*\{[^}]*background\s*:/s,
+    );
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     window.localStorage.clear();
