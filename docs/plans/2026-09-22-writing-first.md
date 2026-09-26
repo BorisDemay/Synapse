@@ -35,6 +35,10 @@ use separate worktrees. Candidate changes are not separately delivered releases.
 - "Saved on this device" requires successful durable local persistence. Network
   pending, offline, synchronized and conflict/error states remain distinct. Local
   mode must not claim remote synchronization.
+- Recovery is a separate local view: the editor saves after 2 s idle; ciphertext
+  snapshots are at least 5 min apart and retained 7 days. This is not save-by-save
+  history or a backup. Legacy dense revisions remain untouched; named restore
+  points stay available and no new manual point creation is exposed. See ADR 0020.
 - Only explicitly attached notes go to an optional AI provider. Backlinks and
   history must not require opening AI or connecting a provider.
 - The editor remains usable offline; network work never gates local editing.
@@ -54,6 +58,9 @@ use separate worktrees. Candidate changes are not separately delivered releases.
    from browser checks.
 5. Final review must verify no regression to unsaved-draft guards, lock/logout
    purging, attachment consent, import/path validation or operation durability.
+   Navigation waits for durable persistence and is blocked on failure. Abrupt close
+   inside the 2 s idle interval can still lose the unsaved draft. Expired snapshots
+   for dormant notes are physically pruned only on a later save.
 
 ## Initial evidence
 

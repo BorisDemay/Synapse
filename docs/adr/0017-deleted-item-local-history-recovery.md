@@ -24,7 +24,7 @@ mémoire et sont retirés lors du verrouillage ou du changement de coffre/compte
 Une restauration conserve l’identité de l’élément et son chemin validé. Elle
 passe par les sauvegardes ordinaires : nouveau `operation_id`, `base_revision`,
 chiffrement et persistance durable existants. Elle n’efface ni historique ni
-opération en attente et n’outrepasse pas les conflits de synchronisation.
+opération en attente et n’outrepasse pas les conflits de synchronisation. Le ciphertext capturé avant suppression est conservé comme récupération forcée, distincte des snapshots périodiques (ADR 0020); la rétention des snapshots actifs ne masque pas le parcours de récupération des éléments supprimés.
 Le client refuse de restaurer un élément qui n’est plus supprimé ou dont le
 chemin est occupé par un autre élément vivant, plutôt que d’écraser ce dernier.
 Les vérifications de session, clé et coffre sont répétées après les attentes

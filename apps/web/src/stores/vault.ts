@@ -280,7 +280,12 @@ export const useVaultStore = defineStore("vault", () => {
   const historyByNote = reactive(
     new Map<
       string,
-      { content: string; recordedAt: string; revision: number }[]
+      {
+        content: string;
+        recordedAt: string;
+        revision: number;
+        recoverySnapshot?: boolean;
+      }[]
     >(),
   );
   const pendingNoteIds = ref<string[]>([]);
@@ -630,6 +635,7 @@ export const useVaultStore = defineStore("vault", () => {
         content: string;
         recordedAt: string;
         revision: number;
+        recoverySnapshot?: boolean;
       }[] = [];
       for (const record of records) {
         try {
@@ -643,6 +649,7 @@ export const useVaultStore = defineStore("vault", () => {
             entries.push({
               content: markdown,
               recordedAt: record.recordedAt,
+              recoverySnapshot: record.recoverySnapshot,
               revision: record.revision,
             });
           }
@@ -1517,12 +1524,19 @@ export const useVaultStore = defineStore("vault", () => {
     if (editBase) pendingEditBases.set(operation.operation_id, editBase);
     let historyRevision: number;
     try {
-      historyRevision = await persistPendingOperation(
-        userId,
-        operation,
-        supersedes,
-        useAuthStore().isLocalMode,
-      );
+      historyRevision =
+        (await persistPendingOperation(
+          userId,
+          operation,
+          supersedes,
+          useAuthStore().isLocalMode,
+          {
+            forceSnapshot: isDeletedNoteContent(input.content),
+            preserveRevisions: preferences.value.restorePoints
+              .filter((point) => point.noteId === input.id)
+              .map((point) => point.revision),
+          },
+        )) ?? 0;
     } catch (error) {
       localReceipts.delete(operation.operation_id);
       pendingEditBases.delete(operation.operation_id);
@@ -1545,7 +1559,8 @@ export const useVaultStore = defineStore("vault", () => {
     }
 
     pendingNoteIds.value = [...new Set([...pendingNoteIds.value, input.id])];
-    await rememberHistory(userId, operation, input.content, historyRevision);
+    if (historyRevision > 0 && !isDeletedNoteContent(input.content))
+      await rememberHistory(userId, operation, input.content, historyRevision);
     if (useAuthStore().isLocalMode) {
       localReceipts.delete(operation.operation_id);
       pendingEditBases.delete(operation.operation_id);

@@ -536,6 +536,22 @@ it("does not claim an offline unsaved draft is already durable", async () => {
   wrapper.unmount();
 });
 
+it("blocks route navigation when the durable draft save fails", async () => {
+  const { wrapper, router, vault } = await mountVault();
+  vi.spyOn(vault, "saveNote").mockRejectedValue(new Error("quota"));
+  (
+    wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
+  ).vm.$emit("update:modelValue", "# unsaved route draft");
+  await flushPromises();
+  await router.push("/login");
+  await flushPromises();
+  expect(router.currentRoute.value.path).toBe("/vault");
+  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
+    "# unsaved route draft",
+  );
+  wrapper.unmount();
+});
+
 it("saves the latest draft before deleting and offers an explicit undo", async () => {
   const { wrapper, vault } = await mountVault();
   const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);

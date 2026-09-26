@@ -454,8 +454,9 @@ watch([noteId, noteHistoryOpen], ([id, open]) => {
 
 const historyEntries = computed(() =>
   vault.historyFor(noteId.value).map((entry) => ({
-    label: `Révision ${entry.revision}`,
+    label: `Snapshot de récupération · révision ${entry.revision}`,
     recordedAt: entry.recordedAt,
+    recoverySnapshot: entry.recoverySnapshot,
     revision: entry.revision,
   })),
 );
@@ -792,7 +793,19 @@ watch(
   },
 );
 
+const removeDraftNavigationGuard = router.beforeEach(async (_to, from) => {
+  if (
+    from.path !== "/vault" ||
+    (draftBaseRevision.value === null &&
+      pendingSaves.size === 0 &&
+      !saveInFlight)
+  )
+    return true;
+  return await save(content.value);
+});
+
 async function save(nextContent = content.value) {
+  editorSurface.value?.cancelSave?.();
   if (!vault.notes.has(noteId.value) && isNewNoteDraft(nextContent)) {
     return true;
   }
@@ -1309,6 +1322,7 @@ async function reopenMostRecentNote() {
 }
 
 onUnmounted(() => {
+  removeDraftNavigationGuard();
   clearToasts();
   attachmentOverlay.value?.release();
   attachmentOverlay.value = undefined;
@@ -1792,6 +1806,7 @@ watch(settingsOpen, (open) => {
       />
       <NoteRelationsPanel
         v-else
+        recovery-view
         :backlinks="currentBacklinks"
         :history="historyEntries"
         :restore-points="restorePoints"

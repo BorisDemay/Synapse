@@ -288,26 +288,8 @@ export async function putNoteRevision(
   const tx = db.transaction("note_revisions", "readwrite");
   try {
     await tx.store.put(record, key);
-    const prefix = `${record.userId}:${record.vaultId}:${record.noteId}:`;
-    const all = (
-      await tx.store.getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`))
-    )
-      .filter(
-        (row) =>
-          row.userId === record.userId &&
-          row.vaultId === record.vaultId &&
-          row.noteId === record.noteId,
-      )
-      .sort((left, right) => right.revision - left.revision);
-    await Promise.all(
-      all
-        .slice(50)
-        .map((row) =>
-          tx.store.delete(
-            revisionKey(row.userId, row.vaultId, row.noteId, row.revision),
-          ),
-        ),
-    );
+    // Legacy revisions and named restore-point targets are user data; only the
+    // recovery-snapshot writer may expire records it explicitly owns.
     await tx.done;
   } catch (error) {
     try {

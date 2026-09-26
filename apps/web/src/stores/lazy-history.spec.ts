@@ -34,10 +34,8 @@ it("opens current ciphertexts without materializing every note's revision histor
     ),
   ).toHaveLength(0);
   await vault.loadHistory(note);
-  expect(vault.historyFor(note).map((row) => row.content)).toEqual([
-    "second",
-    "first",
-  ]);
+  expect(vault.historyFor(note).map((row) => row.content)).toEqual(["first"]);
+  expect(vault.historyFor(note)[0]?.recoverySnapshot).toBe(true);
   expect(
     reads.mock.contexts.filter(
       (store) =>

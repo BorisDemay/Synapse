@@ -7,11 +7,15 @@ import HistoryPanel, {
   type HistoryRestorePoint,
 } from "./HistoryPanel.vue";
 
-defineProps<{
-  backlinks: Backlink[];
-  history: HistoryPanelEntry[];
-  restorePoints?: HistoryRestorePoint[];
-}>();
+withDefaults(
+  defineProps<{
+    backlinks: Backlink[];
+    history: HistoryPanelEntry[];
+    restorePoints?: HistoryRestorePoint[];
+    recoveryView?: boolean;
+  }>(),
+  { recoveryView: false },
+);
 
 const emit = defineEmits<{
   close: [];
@@ -84,6 +88,7 @@ const activeTab = ref<"backlinks" | "history">("backlinks");
       tabindex="0"
     >
       <HistoryPanel
+        :recovery-view="recoveryView"
         :entries="history"
         :restore-points="restorePoints"
         @create-restore-point="emit('createRestorePoint')"

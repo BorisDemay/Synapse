@@ -92,10 +92,7 @@ it("serializes flush callers and preserves newer cached ciphertext when the firs
   expect(vault.notes.get(note)?.content).toBe("second");
   expect(await listPendingOperations(user, vaultId)).toHaveLength(0);
   expect(fetch).toHaveBeenCalledTimes(2);
-  expect(vault.historyFor(note).map((row) => row.content)).toEqual([
-    "second",
-    "first",
-  ]);
+  expect(vault.historyFor(note).map((row) => row.content)).toEqual(["first"]);
 });
 it("replays an attempted request unchanged after an unknown network outcome", async () => {
   const sent: string[] = [];

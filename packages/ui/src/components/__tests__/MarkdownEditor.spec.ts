@@ -362,8 +362,11 @@ describe("MarkdownEditor", () => {
     const input = vditorMock.options()?.input;
 
     input?.("- premier");
+    await vi.advanceTimersByTimeAsync(1500);
     input?.("- premier\n- second");
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(wrapper.emitted("save")).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
 
     expect(wrapper.emitted("update:modelValue")).toEqual([
       ["- premier"],
@@ -424,22 +427,21 @@ describe("MarkdownEditor", () => {
     });
     vditorMock.options()?.input?.("old unsaved draft");
     await wrapper.setProps({ modelValue: "different note" });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(wrapper.emitted("save")).toBeUndefined();
     wrapper.unmount();
   });
 
-  it("destroys the editor and cancels pending saves on unmount", () => {
+  it("flushes a pending draft when the editor unmounts", () => {
     const wrapper = mount(MarkdownEditor, {
       props: { modelValue: "" },
     });
     vditorMock.options()?.input?.("contenu non enregistré");
 
     wrapper.unmount();
-    vi.runAllTimers();
 
     expect(vditorMock.instance.destroy).toHaveBeenCalledOnce();
-    expect(wrapper.emitted("save")).toBeUndefined();
+    expect(wrapper.emitted("save")).toEqual([["contenu non enregistré"]]);
   });
 
   it("opens a context menu of editor tools on right-click in the writing area", async () => {
