@@ -141,12 +141,25 @@ function chatgptHeaders(
   return headers;
 }
 
-function outputText(body: CodexResponseBody): string {
+function outputItems(body: CodexResponseBody): CodexOutputItem[] {
+  if (body.output === undefined) {
+    return [];
+  }
+  if (!Array.isArray(body.output)) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  return body.output;
+}
+
+function outputText(
+  body: CodexResponseBody,
+  output: CodexOutputItem[],
+): string {
   if (typeof body.output_text === "string" && body.output_text.trim()) {
     return body.output_text;
   }
   const chunks: string[] = [];
-  for (const item of body.output ?? []) {
+  for (const item of output) {
     for (const part of item.content ?? []) {
       if (part.type === "output_text" && typeof part.text === "string") {
         chunks.push(part.text);
@@ -178,14 +191,15 @@ function extractFunctionCalls(
 }
 
 function extractAgentResponse(body: CodexResponseBody): CodexAgentResponse {
+  const output = outputItems(body);
   return {
-    functionCalls: extractFunctionCalls(body.output),
-    text: outputText(body),
+    functionCalls: extractFunctionCalls(output),
+    text: outputText(body, output),
   };
 }
 
 function extractOutputText(body: CodexResponseBody): string {
-  const text = outputText(body);
+  const text = outputText(body, outputItems(body));
   if (!text) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }

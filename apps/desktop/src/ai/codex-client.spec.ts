@@ -167,6 +167,140 @@ describe("completeCodexChat", () => {
     ]);
   });
 
+  it.each([
+    { label: "object", output: {} },
+    { label: "null", output: null },
+    { label: "string", output: "not-an-output-array" },
+  ])(
+    "rejects a JSON Responses $label output before returning an agent response",
+    async ({ output }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({ output, output_text: "Ignore this." }),
+            {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+    },
+  );
+
+  it.each([
+    { label: "object", output: {} },
+    { label: "null", output: null },
+    { label: "string", output: "not-an-output-array" },
+  ])(
+    "rejects a completed SSE Responses $label output after a valid local tool call",
+    async ({ output }) => {
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-before-malformed-completed-output",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      const completed = {
+        response: { output, output_text: "Ignore this." },
+        type: "response.completed",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              [validCall, completed]
+                .map((event) => `data: ${JSON.stringify(event)}`)
+                .join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+    },
+  );
+
+  it("accepts array Responses output in JSON and response.completed SSE flows", async () => {
+    const functionCall = {
+      arguments: '{"markdown":"# Brouillon"}',
+      call_id: "call-valid-array-output",
+      name: "create_note",
+      type: "function_call",
+    };
+    const responses = [
+      new Response(
+        JSON.stringify({
+          output: [
+            {
+              content: [{ text: "Brouillon JSON.", type: "output_text" }],
+              type: "message",
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      ),
+      new Response(
+        `data: ${JSON.stringify({
+          response: { output: [functionCall] },
+          type: "response.completed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    ];
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(responses[0]));
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Rédige.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+      }),
+    ).resolves.toEqual({ functionCalls: [], text: "Brouillon JSON." });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(responses[1]));
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: '{"markdown":"# Brouillon"}',
+          callId: "call-valid-array-output",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
   it("reads a local tool call from a streamed ChatGPT subscription response", async () => {
     vi.stubGlobal(
       "fetch",
