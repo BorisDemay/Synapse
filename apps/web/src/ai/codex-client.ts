@@ -314,6 +314,16 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         name: event.name,
       });
     }
+    if (event.type === "response.output_item.added") {
+      if (
+        !event.item ||
+        typeof event.item !== "object" ||
+        Array.isArray(event.item)
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      outputItems({ output: [event.item as CodexOutputItem] });
+    }
     if (event.type === "response.output_item.done") {
       if (
         !event.item ||

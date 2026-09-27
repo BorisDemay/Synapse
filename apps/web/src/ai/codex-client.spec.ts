@@ -1232,6 +1232,62 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it("rejects a non-assistant added SSE message before returning a local tool call without exposing its text", async () => {
+    const providerText = "Fournisseur: message ajouté inattendu.";
+    const addedMessage = {
+      content: [{ text: providerText, type: "output_text" }],
+      role: "user",
+      type: "message",
+    };
+    const validCall = {
+      arguments: '{"operation":"create"}',
+      call_id: "call-after-non-assistant-added-message",
+      name: "create_note",
+      type: "response.function_call_arguments.done",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              { item: addedMessage, type: "response.output_item.added" },
+              validCall,
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    let response: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+    const error = await completeCodexAgent({
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "gpt-5.6-luna",
+      token,
+      toolChoice: "required",
+    })
+      .then((result) => {
+        response = result;
+        return undefined;
+      })
+      .catch((reason: unknown) => reason);
+
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as Error),
+    );
+    expect(response).toBeUndefined();
+    expect(String(error)).not.toContain(providerText);
+    expect(serialized).not.toContain(providerText);
+  });
+
   it.each([
     { content: {}, label: "object" },
     { content: "not-an-output-content-array", label: "string" },
