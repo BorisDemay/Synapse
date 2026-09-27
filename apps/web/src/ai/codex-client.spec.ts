@@ -1150,6 +1150,83 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    { label: "null", text: null },
+    { label: "number", text: 42 },
+    { label: "boolean", text: true },
+    { label: "object", text: { providerMarkdown: "# Markdown fournisseur" } },
+    { label: "array", text: ["# Markdown fournisseur"] },
+  ])(
+    "rejects a $label output_text part from every Responses flow before returning a local tool call",
+    async ({ text }) => {
+      const malformedMessage = {
+        content: [{ text, type: "output_text" }],
+        type: "message",
+      };
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-malformed-output-text-part",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        () =>
+          new Response(
+            JSON.stringify({ output: [malformedMessage, validCall] }),
+            {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            },
+          ),
+        () =>
+          new Response(
+            [
+              { item: malformedMessage, type: "response.output_item.done" },
+              { ...validCall, type: "response.function_call_arguments.done" },
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        () =>
+          new Response(
+            `data: ${JSON.stringify({
+              response: { output: [malformedMessage, validCall] },
+              type: "response.completed",
+            })}\n\n`,
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response()));
+
+        try {
+          await completeCodexAgent({
+            instructions: "Utilise un outil local.",
+            messages: [{ content: "Crée une note.", role: "user" }],
+            model: "gpt-5.6-luna",
+            token,
+            toolChoice: "required",
+          });
+          throw new Error(
+            "Expected malformed output_text part to be rejected.",
+          );
+        } catch (error) {
+          const serialized = JSON.stringify(
+            error,
+            Object.getOwnPropertyNames(error),
+          );
+          expect(error).toMatchObject({
+            message: "L’assistant n’a pas pu répondre.",
+          });
+          expect(String(error)).toBe("Error: L’assistant n’a pas pu répondre.");
+          expect(serialized).not.toContain("Markdown fournisseur");
+        }
+      }
+    },
+  );
+
   it.each(["", "   "])(
     "rejects blank function call arguments from every Responses API flow",
     async (argumentsValue) => {

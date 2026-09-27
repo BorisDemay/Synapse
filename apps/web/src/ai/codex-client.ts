@@ -165,6 +165,9 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
       if (!part || typeof part !== "object" || Array.isArray(part)) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
+      if (part.type === "output_text" && typeof part.text !== "string") {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
     }
   }
   return body.output;
