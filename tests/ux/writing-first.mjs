@@ -622,7 +622,10 @@ test("mobile right-click keeps the last command and submenus clickable", async (
   const { page, close } = await fixture({ width: 390, height: 700 });
   try {
     await openNote(page, "Website");
-    const editor = page.getByRole("textbox", { name: "Éditeur Markdown", exact: true });
+    const editor = page.getByRole("textbox", {
+      name: "Éditeur Markdown",
+      exact: true,
+    });
     await editor.click({ button: "right", position: { x: 180, y: 45 } });
     const menu = page.getByRole("menu", { name: "Outils Markdown" });
     await expect(menu).toBeVisible();
@@ -641,7 +644,9 @@ test("mobile right-click keeps the last command and submenus clickable", async (
     );
     await menu.getByRole("menuitem", { name: "Émojis" }).hover();
     const submenu = page.getByRole("menu", { name: "Émojis" });
-    await expect(submenu.getByRole("menuitem", { name: "😄 Sourire" })).toBeInViewport();
+    await expect(
+      submenu.getByRole("menuitem", { name: "😄 Sourire" }),
+    ).toBeInViewport();
   } finally {
     await close();
   }
