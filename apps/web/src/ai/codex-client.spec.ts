@@ -1269,6 +1269,76 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    {
+      label: "a JSON Responses body",
+      response: new Response(
+        JSON.stringify({
+          output: [
+            {
+              content: [{ text: "fixture-safe", type: "output_text" }],
+              type: "reasoning",
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      ),
+    },
+    {
+      label: "a response.output_item.done event before a valid local tool call",
+      response: new Response(
+        [
+          {
+            item: {
+              content: [{ text: "fixture-safe", type: "output_text" }],
+              type: "reasoning",
+            },
+            type: "response.output_item.done",
+          },
+          {
+            arguments: '{"operation":"create"}',
+            call_id: "call-after-reasoning-content",
+            name: "create_note",
+            type: "response.function_call_arguments.done",
+          },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    },
+  ])(
+    "rejects Responses content on a non-message item from $label without returning a local action",
+    async ({ response }) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      })
+        .then((response) => {
+          result = response;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain("fixture-safe");
+      expect(serialized).not.toContain("fixture-safe");
+    },
+  );
+
   it("rejects a non-assistant added SSE message before returning a local tool call without exposing its text", async () => {
     const providerText = "Fournisseur: message ajouté inattendu.";
     const addedMessage = {

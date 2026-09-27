@@ -159,7 +159,7 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
     if (!("content" in item)) {
       continue;
     }
-    if (item.type === "message" && item.role !== "assistant") {
+    if (item.type !== "message" || item.role !== "assistant") {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     if (!Array.isArray(item.content)) {
