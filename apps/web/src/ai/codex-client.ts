@@ -322,7 +322,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      outputItems({ output: [event.item as CodexOutputItem] });
+      extractFunctionCalls(
+        outputItems({ output: [event.item as CodexOutputItem] }),
+      );
     }
     if (event.type === "response.output_item.done") {
       if (
