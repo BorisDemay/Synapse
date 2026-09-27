@@ -221,6 +221,95 @@ describe("completeCodexChat", () => {
   });
 
   it.each([
+    {
+      label: "a JSON Responses body",
+      response: new Response(
+        JSON.stringify({
+          output: [
+            {
+              content: [
+                {
+                  text: "Fournisseur: contenu texte à ne jamais exécuter.",
+                  type: "output_text",
+                },
+              ],
+              role: "assistant",
+              type: "message",
+            },
+            {
+              arguments: '{"markdown":"# Brouillon"}',
+              call_id: "call-mixed-json",
+              name: "create_note",
+              type: "function_call",
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      ),
+    },
+    {
+      label: "streamed Responses text deltas",
+      response: new Response(
+        [
+          {
+            delta: "Fournisseur: contenu texte à ne jamais exécuter.",
+            type: "response.output_text.delta",
+          },
+          {
+            arguments: '{"markdown":"# Brouillon"}',
+            call_id: "call-mixed-sse",
+            name: "create_note",
+            type: "response.function_call_arguments.done",
+          },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    },
+    {
+      label: "a completed streamed Responses response",
+      response: new Response(
+        `data: ${JSON.stringify({
+          response: {
+            output: [
+              {
+                arguments: '{"markdown":"# Brouillon"}',
+                call_id: "call-mixed-completed",
+                name: "create_note",
+                type: "function_call",
+              },
+            ],
+            output_text: "Fournisseur: contenu texte à ne jamais exécuter.",
+          },
+          type: "response.completed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    },
+  ])(
+    "rejects text mixed with a valid local tool call from $label without exposing provider text",
+    async ({ response }) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(String(error)).not.toContain(
+        "Fournisseur: contenu texte à ne jamais exécuter.",
+      );
+    },
+  );
+
+  it.each([
     { label: "object", output: {} },
     { label: "null", output: null },
     { label: "string", output: "not-an-output-array" },

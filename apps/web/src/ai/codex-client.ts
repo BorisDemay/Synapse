@@ -119,6 +119,9 @@ function rejectMultipleFunctionCalls(
   if (response.functionCalls.length > 1) {
     throw assistantError("L’assistant a fourni plusieurs actions.");
   }
+  if (response.functionCalls.length > 0 && response.text.trim()) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
   return response;
 }
 
