@@ -556,6 +556,106 @@ describe("completeCodexChat", () => {
   });
 
   it.each([
+    {
+      event: (providerText: string) => ({
+        item: {
+          content: [{ text: providerText, type: "output_text" }],
+          role: "assistant",
+          type: "message",
+        },
+        type: "response.output_item.done",
+      }),
+      label: "output_item.done",
+    },
+    {
+      event: (providerText: string) => ({
+        text: providerText,
+        type: "response.output_text.done",
+      }),
+      label: "output_text.done",
+    },
+    {
+      event: (providerText: string) => ({
+        part: { text: providerText, type: "output_text" },
+        type: "response.content_part.added",
+      }),
+      label: "content_part.added",
+    },
+    {
+      event: (providerText: string) => ({
+        part: { text: providerText, type: "output_text" },
+        type: "response.content_part.done",
+      }),
+      label: "content_part.done",
+    },
+    {
+      event: (providerText: string) => ({
+        response: {
+          output: [
+            {
+              content: [{ text: providerText, type: "output_text" }],
+              role: "assistant",
+              type: "message",
+            },
+          ],
+        },
+        type: "response.completed",
+      }),
+      label: "completed",
+    },
+  ])(
+    "rejects streamed Responses $label text alongside an authorized local action without exposing it",
+    async ({ event }) => {
+      const providerText =
+        "Fournisseur: texte à ne jamais exécuter ni divulguer.";
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-mixed-streamed-provider-text",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              [functionCall, event(providerText)]
+                .map((item) => `data: ${JSON.stringify(item)}`)
+                .join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerText);
+      expect(serialized).not.toContain(providerText);
+    },
+  );
+
+  it.each([
     { item: null, label: "null" },
     { item: "not-an-output-item", label: "string" },
     { item: 42, label: "number" },
@@ -1211,7 +1311,7 @@ describe("completeCodexChat", () => {
     },
   );
 
-  it("accepts a message output item before a valid local tool call", async () => {
+  it("rejects a message output item before a valid local tool call", async () => {
     const messageItem = {
       content: [{ text: "Je prépare la note.", type: "output_text" }],
       role: "assistant",
@@ -1248,15 +1348,8 @@ describe("completeCodexChat", () => {
         token,
         toolChoice: "required",
       }),
-    ).resolves.toEqual({
-      functionCalls: [
-        {
-          arguments: '{"markdown":"# Brouillon"}',
-          callId: "call-after-message-output-item",
-          name: "create_note",
-        },
-      ],
-      text: "",
+    ).rejects.toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
     });
   });
 

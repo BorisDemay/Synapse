@@ -295,6 +295,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       item?: unknown;
       name?: unknown;
       output_text?: unknown;
+      part?: unknown;
       response?: unknown;
       text?: unknown;
       type?: unknown;
@@ -327,6 +328,22 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       }
       done = event.text;
     }
+    if (
+      event.type === "response.content_part.added" ||
+      event.type === "response.content_part.done"
+    ) {
+      if (
+        !event.part ||
+        typeof event.part !== "object" ||
+        Array.isArray(event.part)
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      const part = event.part as CodexOutputText;
+      if (part.type === "output_text") {
+        deltas += deltaText(part.text);
+      }
+    }
     if (event.type === "response.function_call_arguments.done") {
       if (!hasRequiredFunctionCallFields(event)) {
         throw assistantError("L’assistant n’a pas pu répondre.");
@@ -357,11 +374,11 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      calls.push(
-        ...extractFunctionCalls(
-          outputItems({ output: [event.item as CodexOutputItem] }),
-        ),
-      );
+      const itemResponse = extractAgentResponse({
+        output: [event.item as CodexOutputItem],
+      });
+      calls.push(...itemResponse.functionCalls);
+      done += itemResponse.text;
     }
     if (event.type === "response.completed") {
       let response: CodexAgentResponse | undefined;
@@ -398,6 +415,12 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     return false;
   });
   if (!text && responseCalls.length === 0) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  if (
+    responseCalls.length > 0 &&
+    (completed.trim() || done.trim() || deltas.trim())
+  ) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
   return { functionCalls: responseCalls, text };
