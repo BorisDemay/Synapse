@@ -471,6 +471,7 @@ describe("completeCodexChat", () => {
           output: [
             {
               content: [{ text: "Brouillon JSON.", type: "output_text" }],
+              role: "assistant",
               type: "message",
             },
           ],
@@ -1160,6 +1161,76 @@ describe("completeCodexChat", () => {
       text: "",
     });
   });
+
+  it.each([
+    {
+      label: "a JSON Responses body",
+      response: (messageItem: object, _validCall: object) =>
+        new Response(JSON.stringify({ output: [messageItem] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+    },
+    {
+      label: "a response.output_item.done event before a valid local tool call",
+      response: (messageItem: object, validCall: object) =>
+        new Response(
+          [{ item: messageItem, type: "response.output_item.done" }, validCall]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+    },
+    {
+      label: "a response.completed event",
+      response: (messageItem: object, _validCall: object) =>
+        new Response(
+          `data: ${JSON.stringify({
+            response: { output: [messageItem] },
+            type: "response.completed",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+    },
+  ])(
+    "rejects a non-assistant Responses message with content from $label without exposing its text",
+    async ({ response }) => {
+      const providerText = "Fournisseur: message utilisateur inattendu.";
+      const messageItem = {
+        content: [{ text: providerText, type: "output_text" }],
+        role: "user",
+        type: "message",
+      };
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-non-assistant-message",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(response(messageItem, validCall)),
+      );
+
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerText);
+      expect(serialized).not.toContain(providerText);
+    },
+  );
 
   it.each([
     { content: {}, label: "object" },
