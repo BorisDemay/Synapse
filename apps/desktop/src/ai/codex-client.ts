@@ -78,6 +78,7 @@ interface CodexOutputItem {
   call_id?: unknown;
   content?: CodexOutputText[];
   name?: unknown;
+  role?: unknown;
   type?: unknown;
 }
 
@@ -337,6 +338,26 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         callId: event.call_id,
         name: event.name,
       });
+    }
+    if (event.type === "response.output_item.added") {
+      if (
+        !event.item ||
+        typeof event.item !== "object" ||
+        Array.isArray(event.item)
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      const item = event.item as CodexOutputItem;
+      if (
+        item.type === "message" &&
+        (item.role !== "assistant" ||
+          !("content" in item) ||
+          !Array.isArray(item.content))
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      outputItems({ output: [item] });
+      extractFunctionCalls([item]);
     }
     if (event.type === "response.output_item.done") {
       if (
