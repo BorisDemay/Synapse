@@ -12,6 +12,7 @@ const token = "sk-test-secret-token-do-not-leak";
 
 describe("completeCodexChat", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -83,6 +84,35 @@ describe("completeCodexChat", () => {
         token,
       }),
     ).resolves.toBe(outputText);
+  });
+
+  it("rejects a malformed JSON body containing an SSE marker without leaking it", async () => {
+    const noteFragment = "fragment-de-note-confidentiel";
+    vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+      throw new Error(`L’assistant ${noteFragment} data:`);
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(`{"output_text":"${noteFragment} data:`, {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      ),
+    );
+
+    const error = await completeCodexChat({
+      instructions: "Rédige du Markdown.",
+      messages: [{ content: "Réponds.", role: "user" }],
+      model: "gpt-5.6-luna",
+      token,
+    }).catch((reason: unknown) => reason);
+
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    expect(String(error)).not.toContain(noteFragment);
+    expect(String(error)).not.toContain("data:");
   });
 
   it("reads assistant text from typed output items when output_text is absent", async () => {

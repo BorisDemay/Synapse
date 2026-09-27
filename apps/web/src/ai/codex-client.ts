@@ -350,9 +350,13 @@ function readAgentResponse(
 ): CodexAgentResponse {
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
-    const response = extractAgentResponse(
-      JSON.parse(trimmed) as CodexResponseBody,
-    );
+    let body: CodexResponseBody;
+    try {
+      body = JSON.parse(trimmed) as CodexResponseBody;
+    } catch {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    const response = extractAgentResponse(body);
     if (!response.text && response.functionCalls.length === 0) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
