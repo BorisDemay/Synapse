@@ -563,6 +563,68 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    {
+      label: "a JSON Responses body",
+      response: (item: object) =>
+        new Response(JSON.stringify({ output: [item] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+    },
+    {
+      label: "a response.output_item.done event",
+      response: (item: object) =>
+        new Response(
+          `data: ${JSON.stringify({
+            item,
+            type: "response.output_item.done",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+    },
+    {
+      label: "a response.completed event",
+      response: (item: object) =>
+        new Response(
+          `data: ${JSON.stringify({
+            response: { output: [item] },
+            type: "response.completed",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+    },
+  ])(
+    "rejects a non-message output_text with non-text content from $label before returning its valid local tool call",
+    async ({ response }) => {
+      const providerPayload = "Fournisseur: partie output_text non textuelle.";
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-with-malformed-non-message-output-text",
+        content: [{ text: { providerPayload }, type: "output_text" }],
+        name: "create_note",
+        type: "function_call",
+      };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(functionCall)));
+
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(String(error)).not.toContain(providerPayload);
+      expect(
+        JSON.stringify(error, Object.getOwnPropertyNames(error as Error)),
+      ).not.toContain(providerPayload);
+    },
+  );
+
   it("accepts a message Responses item without content before a local tool call", async () => {
     const functionCall = {
       arguments: '{"markdown":"# Brouillon"}',

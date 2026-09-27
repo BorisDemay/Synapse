@@ -155,7 +155,7 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
-    if (item.type !== "message" || !("content" in item)) {
+    if (!("content" in item)) {
       continue;
     }
     if (!Array.isArray(item.content)) {
