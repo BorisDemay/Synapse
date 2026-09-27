@@ -577,6 +577,100 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("rejects a streamed ChatGPT response that combines an authorized local tool call and text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              'data: {"type":"response.function_call_arguments.done","call_id":"call-mixed-stream","name":"create_note","arguments":"{\\\"markdown\\\":\\\"# Brouillon\\\"}"}',
+              'data: {"type":"response.output_text.delta","delta":"Texte non blanc."}',
+              'data: {"type":"response.completed"}',
+            ].join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: {
+              additionalProperties: false,
+              properties: { markdown: { type: "string" } },
+              required: ["markdown"],
+              type: "object",
+            },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).rejects.toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+  });
+
+  it("rejects streamed Responses output items that combine an authorized local tool call and text", async () => {
+    const functionCall = {
+      arguments: '{"markdown":"# Brouillon"}',
+      call_id: "call-mixed-output-items",
+      name: "create_note",
+      type: "function_call",
+    };
+    const message = {
+      content: [{ text: "Texte non blanc.", type: "output_text" }],
+      type: "message",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [functionCall, message]
+            .map((item) =>
+              JSON.stringify({ item, type: "response.output_item.done" }),
+            )
+            .map((event) => `data: ${event}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: {
+              additionalProperties: false,
+              properties: { markdown: { type: "string" } },
+              required: ["markdown"],
+              type: "object",
+            },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).rejects.toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+  });
   it.each([
     { contentType: "text/event-stream", label: "an SSE content type" },
     { contentType: "application/json", label: "an SSE body" },
@@ -704,7 +798,7 @@ describe("completeCodexChat", () => {
     },
   );
 
-  it("accepts a message output item before a valid local tool call", async () => {
+  it("rejects a message output item with text before a valid local tool call", async () => {
     const messageItem = {
       content: [{ text: "Je prépare la note.", type: "output_text" }],
       role: "assistant",
@@ -741,15 +835,8 @@ describe("completeCodexChat", () => {
         token,
         toolChoice: "required",
       }),
-    ).resolves.toEqual({
-      functionCalls: [
-        {
-          arguments: '{"markdown":"# Brouillon"}',
-          callId: "call-after-message-output-item",
-          name: "create_note",
-        },
-      ],
-      text: "",
+    ).rejects.toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
     });
   });
 

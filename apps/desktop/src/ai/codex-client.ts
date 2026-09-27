@@ -122,6 +122,15 @@ function rejectMultipleFunctionCalls(
   return response;
 }
 
+function rejectTextWithFunctionCalls(
+  response: CodexAgentResponse,
+): CodexAgentResponse {
+  if (response.functionCalls.length > 0 && response.text.trim()) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  return response;
+}
+
 function rejectUnofferedFunctionCalls(
   response: CodexAgentResponse,
   tools: CodexTool[] | undefined,
@@ -273,7 +282,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       item?: unknown;
       name?: unknown;
       output_text?: unknown;
+      part?: unknown;
       response?: unknown;
+      text?: unknown;
       type?: unknown;
     };
     try {
@@ -298,6 +309,25 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     if (event.type === "response.output_text.delta") {
       deltas += deltaText(event.delta);
     }
+    if (event.type === "response.output_text.done") {
+      completed = deltaText(event.text);
+    }
+    if (
+      event.type === "response.content_part.added" ||
+      event.type === "response.content_part.done"
+    ) {
+      if (
+        !event.part ||
+        typeof event.part !== "object" ||
+        Array.isArray(event.part)
+      ) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      const part = event.part as CodexOutputText;
+      if (part.type === "output_text") {
+        deltas += deltaText(part.text);
+      }
+    }
     if (event.type === "response.function_call_arguments.done") {
       if (!hasRequiredFunctionCallFields(event)) {
         throw assistantError("L’assistant n’a pas pu répondre.");
@@ -316,11 +346,11 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      calls.push(
-        ...extractFunctionCalls(
-          outputItems({ output: [event.item as CodexOutputItem] }),
-        ),
-      );
+      const itemResponse = extractAgentResponse({
+        output: [event.item as CodexOutputItem],
+      });
+      calls.push(...itemResponse.functionCalls);
+      completed += itemResponse.text;
     }
     if (event.type === "response.completed") {
       let response: CodexAgentResponse | undefined;
@@ -342,7 +372,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       }
     }
   }
-  const text = (completed || deltas).trim();
+  const text = (completed.trim() || deltas).trim();
   const responseCalls = calls.filter((call) => {
     const first = calls.find((candidate) => candidate.callId === call.callId);
     if (!first || first === call) {
@@ -354,6 +384,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     return false;
   });
   if (!text && responseCalls.length === 0) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  if (responseCalls.length > 0 && (completed.trim() || deltas.trim())) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
   return { functionCalls: responseCalls, text };
@@ -369,7 +402,10 @@ function readAgentResponse(
     contentType.includes("event-stream") || trimmed.includes("data:");
   if (isSse) {
     return rejectMultipleFunctionCalls(
-      rejectUnofferedFunctionCalls(parseResponsesSse(raw), tools),
+      rejectUnofferedFunctionCalls(
+        rejectTextWithFunctionCalls(parseResponsesSse(raw)),
+        tools,
+      ),
     );
   }
   if (trimmed.startsWith("{")) {
@@ -380,7 +416,10 @@ function readAgentResponse(
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     return rejectMultipleFunctionCalls(
-      rejectUnofferedFunctionCalls(response, tools),
+      rejectUnofferedFunctionCalls(
+        rejectTextWithFunctionCalls(response),
+        tools,
+      ),
     );
   }
   throw assistantError("L’assistant n’a pas pu répondre.");
@@ -967,10 +1006,10 @@ async function completeChatCompletionsAgent(
   if (functionCalls.length === 0 && !text.trim()) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
-  if (functionCalls.length > 0 && text.trim()) {
-    throw assistantError("L’assistant n’a pas pu répondre.");
-  }
   return rejectMultipleFunctionCalls(
-    rejectUnofferedFunctionCalls({ functionCalls, text }, input.tools),
+    rejectUnofferedFunctionCalls(
+      rejectTextWithFunctionCalls({ functionCalls, text }),
+      input.tools,
+    ),
   );
 }
