@@ -261,6 +261,7 @@ function deltaText(value: unknown): string {
 
 function parseResponsesSse(raw: string): CodexAgentResponse {
   let deltas = "";
+  let done = "";
   let completed = "";
   const calls: CodexFunctionCall[] = [];
   for (const block of raw.split(/(?:\r\n|\n|\r)(?:\r\n|\n|\r)+/)) {
@@ -280,6 +281,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       name?: unknown;
       output_text?: unknown;
       response?: unknown;
+      text?: unknown;
       type?: unknown;
     };
     try {
@@ -303,6 +305,12 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
     }
     if (event.type === "response.output_text.delta") {
       deltas += deltaText(event.delta);
+    }
+    if (event.type === "response.output_text.done") {
+      if (typeof event.text !== "string") {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      done = event.text;
     }
     if (event.type === "response.function_call_arguments.done") {
       if (!hasRequiredFunctionCallFields(event)) {
@@ -363,7 +371,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       }
     }
   }
-  const text = (completed || deltas).trim();
+  const text = (completed || done || deltas).trim();
   const responseCalls = calls.filter((call) => {
     const first = calls.find((candidate) => candidate.callId === call.callId);
     if (!first || first === call) {

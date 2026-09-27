@@ -309,6 +309,43 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it("rejects completed streamed text mixed with a valid local tool call without exposing provider text", async () => {
+    const providerText = "Texte final fournisseur à ne jamais exécuter.";
+    const response = new Response(
+      [
+        { text: providerText, type: "response.output_text.done" },
+        {
+          arguments: '{"markdown":"# Brouillon"}',
+          call_id: "call-mixed-output-text-done",
+          name: "create_note",
+          type: "response.function_call_arguments.done",
+        },
+      ]
+        .map((event) => `data: ${JSON.stringify(event)}`)
+        .join("\n\n"),
+      { headers: { "content-type": "text/event-stream" }, status: 200 },
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+    const error = await completeCodexAgent({
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "gpt-5.6-luna",
+      token,
+      toolChoice: "required",
+    }).catch((reason: unknown) => reason);
+
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as Error),
+    );
+    expect(String(error)).not.toContain(providerText);
+    expect(serialized).not.toContain(providerText);
+  });
+
   it.each([
     { label: "null", outputText: null },
     { label: "number", outputText: 42 },
