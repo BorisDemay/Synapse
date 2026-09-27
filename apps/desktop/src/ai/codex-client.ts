@@ -122,6 +122,15 @@ function rejectMultipleFunctionCalls(
   return response;
 }
 
+function rejectMixedTextAndFunctionCalls(
+  response: CodexAgentResponse,
+): CodexAgentResponse {
+  if (response.functionCalls.length > 0 && response.text.trim()) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  return response;
+}
+
 function rejectUnofferedFunctionCalls(
   response: CodexAgentResponse,
   tools: CodexTool[] | undefined,
@@ -369,7 +378,10 @@ function readAgentResponse(
     contentType.includes("event-stream") || trimmed.includes("data:");
   if (isSse) {
     return rejectMultipleFunctionCalls(
-      rejectUnofferedFunctionCalls(parseResponsesSse(raw), tools),
+      rejectUnofferedFunctionCalls(
+        rejectMixedTextAndFunctionCalls(parseResponsesSse(raw)),
+        tools,
+      ),
     );
   }
   if (trimmed.startsWith("{")) {
@@ -380,7 +392,10 @@ function readAgentResponse(
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     return rejectMultipleFunctionCalls(
-      rejectUnofferedFunctionCalls(response, tools),
+      rejectUnofferedFunctionCalls(
+        rejectMixedTextAndFunctionCalls(response),
+        tools,
+      ),
     );
   }
   throw assistantError("L’assistant n’a pas pu répondre.");

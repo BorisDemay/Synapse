@@ -753,6 +753,49 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("rejects a ChatGPT SSE create_note call mixed with non-blank text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            {
+              arguments: '{"markdown":"# Brouillon"}',
+              call_id: "call-mixed-text-and-tool",
+              name: "create_note",
+              type: "response.function_call_arguments.done",
+            },
+            {
+              delta: "Une action est prête.",
+              type: "response.output_text.delta",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).rejects.toThrow("L’assistant n’a pas pu répondre.");
+  });
+
   it("rejects an unoffered streamed Responses tool before returning a later offered action without exposing its fixture", async () => {
     const providerFixture = "provider-unoffered-tool-fixture";
     vi.stubGlobal(
