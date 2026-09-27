@@ -1269,6 +1269,76 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    {
+      label: "a JSON Responses body",
+      response: (reasoningItem: object, validCall: object) =>
+        new Response(JSON.stringify({ output: [reasoningItem, validCall] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+    },
+    {
+      label: "a response.output_item.done event before a valid local tool call",
+      response: (reasoningItem: object, validCall: object) =>
+        new Response(
+          [
+            { item: reasoningItem, type: "response.output_item.done" },
+            validCall,
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+    },
+  ])(
+    "rejects a non-message Responses item with content from $label before returning text or a local tool call",
+    async ({ response }) => {
+      const providerText = "fixture-safe";
+      const reasoningItem = {
+        content: [{ text: providerText, type: "output_text" }],
+        type: "reasoning",
+      };
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-reasoning-content",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(response(reasoningItem, validCall)),
+      );
+
+      let agentResponse:
+        | Awaited<ReturnType<typeof completeCodexAgent>>
+        | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      })
+        .then((result) => {
+          agentResponse = result;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(agentResponse).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerText);
+      expect(serialized).not.toContain(providerText);
+    },
+  );
+
   it("rejects a non-assistant added SSE message before returning a local tool call without exposing its text", async () => {
     const providerText = "Fournisseur: message ajouté inattendu.";
     const addedMessage = {
