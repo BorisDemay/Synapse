@@ -577,6 +577,48 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("reads a local tool call from CRLF-framed ChatGPT subscription events", async () => {
+    const functionCall = {
+      arguments: '{"markdown":"# Brouillon CRLF"}',
+      call_id: "call-stream-crlf-1",
+      name: "create_note",
+      type: "response.function_call_arguments.done",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [functionCall, { type: "response.completed" }]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\r\n\r\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: '{"markdown":"# Brouillon CRLF"}',
+          callId: "call-stream-crlf-1",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
   it.each([
     { contentType: "text/event-stream", label: "an SSE content type" },
     { contentType: "application/json", label: "an SSE body" },
