@@ -122,6 +122,21 @@ function rejectMultipleFunctionCalls(
   return response;
 }
 
+function rejectUnofferedFunctionCalls(
+  response: CodexAgentResponse,
+  tools: CodexTool[] | undefined,
+): CodexAgentResponse {
+  if (
+    tools !== undefined &&
+    response.functionCalls.some(
+      (functionCall) => !tools.some((tool) => tool.name === functionCall.name),
+    )
+  ) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  return response;
+}
+
 function chatgptHeaders(
   token: string,
   accountId?: string,
@@ -347,12 +362,15 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
 function readAgentResponse(
   contentType: string,
   raw: string,
+  tools?: CodexTool[],
 ): CodexAgentResponse {
   const trimmed = raw.trim();
   const isSse =
     contentType.includes("event-stream") || trimmed.includes("data:");
   if (isSse) {
-    return rejectMultipleFunctionCalls(parseResponsesSse(raw));
+    return rejectMultipleFunctionCalls(
+      rejectUnofferedFunctionCalls(parseResponsesSse(raw), tools),
+    );
   }
   if (trimmed.startsWith("{")) {
     const response = extractAgentResponse(
@@ -361,7 +379,9 @@ function readAgentResponse(
     if (!response.text && response.functionCalls.length === 0) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
-    return rejectMultipleFunctionCalls(response);
+    return rejectMultipleFunctionCalls(
+      rejectUnofferedFunctionCalls(response, tools),
+    );
   }
   throw assistantError("L’assistant n’a pas pu répondre.");
 }
@@ -783,7 +803,11 @@ export async function completeCodexAgent(
 
   try {
     const raw = await response.text();
-    return readAgentResponse(response.headers.get("content-type") ?? "", raw);
+    return readAgentResponse(
+      response.headers.get("content-type") ?? "",
+      raw,
+      input.tools,
+    );
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("L’assistant")) {
       throw error;
@@ -946,5 +970,7 @@ async function completeChatCompletionsAgent(
   if (functionCalls.length > 0 && text.trim()) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
-  return rejectMultipleFunctionCalls({ functionCalls, text });
+  return rejectMultipleFunctionCalls(
+    rejectUnofferedFunctionCalls({ functionCalls, text }, input.tools),
+  );
 }
