@@ -7,6 +7,7 @@ export type Toast = {
   kind: ToastKind;
   message: string;
   action?: ToastAction;
+  pending?: boolean;
 };
 type ToastInput = Omit<Toast, "id"> & { duration?: number };
 
@@ -29,10 +30,17 @@ export function clearToasts() {
 
 export function notify({ duration, ...toast }: ToastInput): number {
   const id = ++nextId;
-  if (toasts.value.length >= 4) dismissToast(toasts.value[0]!.id);
+  if (
+    !toast.pending &&
+    toasts.value.filter((item) => !item.pending).length >= 4
+  ) {
+    const evictable = toasts.value.find((item) => !item.pending);
+    if (evictable) dismissToast(evictable.id);
+  }
   toasts.value = [...toasts.value, { ...toast, id }];
-  const lifetime =
-    duration ?? (toast.kind === "error" ? 0 : toast.action ? 12000 : 7000);
+  const lifetime = toast.pending
+    ? 0
+    : (duration ?? (toast.kind === "error" ? 0 : toast.action ? 12000 : 7000));
   if (lifetime > 0)
     timers.set(
       id,

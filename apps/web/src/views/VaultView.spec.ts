@@ -1122,11 +1122,397 @@ describe("VaultView quick assistant prompt", () => {
     await flushPromises();
 
     expect(setModel).toHaveBeenCalledWith("model-b");
-    expect(newConversation).toHaveBeenCalledOnce();
+    expect(newConversation).toHaveBeenCalledTimes(1);
+    expect(newConversation).toHaveBeenCalledWith(noteId);
     expect(send).toHaveBeenCalledWith("Write a plan");
     expect(prompt.props("open")).toBe(false);
     expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
       false,
     );
+  });
+
+  it("shows persistent external progress through a deferred response and replaces it with informational success", async () => {
+    const { wrapper, vault } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    let release!: (value: string) => void;
+    vi.spyOn(assistant, "send").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Question sans écriture");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(
+      toasts.value.some(
+        (toast) =>
+          toast.pending &&
+          toast.message === "L’assistant travaille sur votre demande.",
+      ),
+    ).toBe(true);
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      false,
+    );
+    release("");
+    await flushPromises();
+    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "info",
+      message: "La réponse de l’assistant est disponible.",
+    });
+    expect(toasts.value.at(-1)?.message).not.toContain(
+      "Question sans écriture",
+    );
+    wrapper.unmount();
+  });
+
+  it("allows create-note requests without an active note or vault context", async () => {
+    const { wrapper, vault } = await mountVault({ emptyVault: true });
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    const newConversation = vi.spyOn(assistant, "newConversation");
+    const send = vi.spyOn(assistant, "send").mockResolvedValue("");
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    expect(prompt.get('[role="note"]').text()).toContain("Aucune note active");
+    await prompt.get("input").setValue("Create a new note");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(newConversation).toHaveBeenCalledWith(undefined);
+    expect(send).toHaveBeenCalledWith("Create a new note");
+    wrapper.unmount();
+  });
+
+  it("suppresses deferred completion and clears progress after the vault locks", async () => {
+    const { wrapper, vault } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    let release!: (value: string) => void;
+    vi.spyOn(assistant, "send").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Private request");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(toasts.value.some((toast) => toast.pending)).toBe(true);
+    vault.lock();
+    await flushPromises();
+    expect(toasts.value).toHaveLength(0);
+    release("");
+    await flushPromises();
+    expect(toasts.value).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it.each(["account", "vault"] as const)(
+    "suppresses deferred completion after a %s switch",
+    async (scope) => {
+      const { wrapper, vault, auth } = await mountVault();
+      const assistant = useAssistantStore();
+      assistant.connected = true;
+      assistant.model = "model-a";
+      assistant.models = models;
+      vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+      let release!: (value: string) => void;
+      vi.spyOn(assistant, "send").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+      );
+      await flushPromises();
+      const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+      await prompt.get("input").setValue("Private request");
+      await prompt.get("form").trigger("submit");
+      await flushPromises();
+      expect(toasts.value.some((toast) => toast.pending)).toBe(true);
+      if (scope === "account") auth.userId = "user-2";
+      else vault.currentVaultId = "vault-2";
+      await flushPromises();
+      expect(toasts.value).toHaveLength(0);
+      release("");
+      await flushPromises();
+      expect(toasts.value).toHaveLength(0);
+      wrapper.unmount();
+    },
+  );
+
+  it("replaces provider failures with a persistent generic notification", async () => {
+    const { wrapper, vault } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    vi.spyOn(assistant, "send").mockRejectedValue(
+      new Error("private request detail"),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Private request");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "error",
+      message:
+        "L’assistant n’a pas pu terminer la demande. Votre contenu local est conservé.",
+    });
+    expect(JSON.stringify(toasts.value)).not.toContain(
+      "private request detail",
+    );
+    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("links only the opened note by default and saves its dirty draft before sending", async () => {
+    const { wrapper, vault } = await mountVault();
+    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+    const order: string[] = [];
+    save.mockImplementation(async () => {
+      order.push("save");
+      return {} as never;
+    });
+    const newConversation = vi
+      .spyOn(assistant, "newConversation")
+      .mockImplementation(async (id) => {
+        order.push(`conversation:${id}`);
+        return "conversation";
+      });
+    vi.spyOn(assistant, "send").mockImplementation(async () => {
+      order.push("send");
+      return "";
+    });
+    (
+      wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
+    ).vm.$emit("update:modelValue", "# Updated active draft");
+    await flushPromises();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Rewrite");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(newConversation).toHaveBeenCalledWith(noteId);
+    expect(order).toEqual(["save", `conversation:${noteId}`, "send"]);
+    wrapper.unmount();
+  });
+
+  it("saves a meaningful new-note draft, links its exact id, and announces it as active context", async () => {
+    const { wrapper, vault } = await mountVault({ emptyVault: true });
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    const saved = vi
+      .spyOn(vault, "saveNote")
+      .mockImplementation(async (input) => {
+        vault.notes.set(input.id, {
+          content: input.content,
+          path: "draft.md",
+          revision: 1,
+        });
+        return {} as never;
+      });
+    const newConversation = vi.spyOn(assistant, "newConversation");
+    vi.spyOn(assistant, "send").mockResolvedValue("");
+    const editor = wrapper.findComponent(
+      '[data-test="markdown-editor"]',
+    ) as VueWrapper;
+    editor.vm.$emit("update:modelValue", "# Draft note\n\nMeaningful draft.");
+    await flushPromises();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    expect(prompt.get('[role="note"]').text()).toContain(
+      "note actuellement ouverte",
+    );
+    await prompt.get("input").setValue("Improve this draft");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(saved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "# Draft note\n\nMeaningful draft.",
+      }),
+    );
+    const savedId = saved.mock.calls[0]?.[0].id;
+    expect(savedId).toBeTruthy();
+    expect(newConversation, JSON.stringify(toasts.value)).toHaveBeenCalledWith(
+      savedId,
+    );
+    wrapper.unmount();
+  });
+
+  it("replaces pending progress with a generic failure if the linked note is deleted during the response", async () => {
+    const { wrapper, vault } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    let release!: (value: string) => void;
+    vi.spyOn(assistant, "send").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Request");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    vault.notes.delete(noteId);
+    release("");
+    await flushPromises();
+    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("La note liée n’est plus disponible"),
+    });
+    wrapper.unmount();
+  });
+
+  it("keeps completion available after navigating to another note during a deferred response", async () => {
+    const { wrapper, vault } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    let release!: (value: string) => void;
+    vi.spyOn(assistant, "send").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Question sans écriture");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+    release("");
+    await flushPromises();
+    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "info",
+      message: "La réponse de l’assistant est disponible.",
+    });
+    wrapper.unmount();
+  });
+
+  it("dismisses pending progress when the linked note disappears during conversation creation", async () => {
+    const { wrapper, vault } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    let release!: () => void;
+    vi.spyOn(assistant, "newConversation").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve("new-thread");
+        }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Request");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    vault.notes.delete(noteId);
+    release();
+    await flushPromises();
+    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
+    expect(toasts.value.at(-1)).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("La note liée n’est plus disponible"),
+    });
+    wrapper.unmount();
+  });
+
+  it("keeps the popup and draft when flushing the active note fails without sending", async () => {
+    const { wrapper, vault } = await mountVault();
+    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    vi.spyOn(vault, "saveNote").mockRejectedValue(
+      new Error("private save failure"),
+    );
+    const send = vi.spyOn(assistant, "send");
+    (
+      wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
+    ).vm.$emit("update:modelValue", "# Private draft");
+    await flushPromises();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    await prompt.get("input").setValue("Do something");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+    expect(prompt.props("open")).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect(JSON.stringify(toasts.value)).not.toContain("Private draft");
+    expect(JSON.stringify(toasts.value)).not.toContain("private save failure");
+    wrapper.unmount();
   });
 });

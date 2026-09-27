@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import {
   catalogFastTier,
@@ -25,6 +25,7 @@ import type {
   AssistantConversationSnapshot,
 } from "../crypto/ai-conversation";
 import { uuidV7 } from "../crypto/vault-key";
+import { useAuthStore } from "./auth";
 import { useVaultStore } from "./vault";
 
 export const ASSISTANT_INSTRUCTIONS = `Tu es l'assistant d'écriture de Synapse.
@@ -201,6 +202,8 @@ export const useAssistantStore = defineStore("assistant", () => {
   let providerBaseUrl = "";
   let chatgptAbort: AbortController | undefined;
   let conversationPersistence = Promise.resolve();
+  let sessionGeneration = 0;
+  let activeSendId: symbol | undefined;
 
   const attachments = computed<AssistantAttachment[]>(() => {
     const vault = useVaultStore();
@@ -271,9 +274,24 @@ export const useAssistantStore = defineStore("assistant", () => {
 
   function persistConversations(): Promise<void> {
     const snapshot = conversationSnapshot();
+    const vault = useVaultStore();
+    const auth = useAuthStore();
+    const vaultId = vault.currentVaultId;
+    const userId = auth.userId;
+    const generation = sessionGeneration;
     const write = conversationPersistence
       .catch(() => undefined)
-      .then(() => useVaultStore().persistAssistantConversations(snapshot));
+      .then(() => {
+        if (
+          generation !== sessionGeneration ||
+          !vault.isUnlocked ||
+          vault.currentVaultId !== vaultId ||
+          auth.userId !== userId
+        ) {
+          throw new Error("La session de coffre a changé.");
+        }
+        return vault.persistAssistantConversations(snapshot);
+      });
     conversationPersistence = write;
     return write;
   }
@@ -317,11 +335,19 @@ export const useAssistantStore = defineStore("assistant", () => {
     }
   }
 
-  async function newConversation(): Promise<string> {
+  async function newConversation(linkedNoteId?: string): Promise<string> {
     if (busy.value) {
       throw new Error("L’assistant termine l’action en cours.");
     }
+    const vault = useVaultStore();
+    if (linkedNoteId && (!vault.isUnlocked || !vault.notes.has(linkedNoteId))) {
+      throw new Error("La note active n’est pas disponible dans ce coffre.");
+    }
     const conversation = createConversation();
+    if (linkedNoteId) {
+      conversation.attachedNoteIds = [linkedNoteId];
+      attachedNoteIds.value = [linkedNoteId];
+    }
     await persistConversations();
     return conversation.id;
   }
@@ -341,6 +367,8 @@ export const useAssistantStore = defineStore("assistant", () => {
   }
 
   function lockSession() {
+    sessionGeneration++;
+    activeSendId = undefined;
     chatgptAbort?.abort();
     chatgptAbort = undefined;
     token = undefined;
@@ -363,6 +391,29 @@ export const useAssistantStore = defineStore("assistant", () => {
     reasoningEffort.value = "";
     fast.value = false;
   }
+
+  const vaultSession = useVaultStore();
+  const authSession = useAuthStore();
+  watch(
+    [
+      () => vaultSession.isUnlocked,
+      () => vaultSession.currentVaultId,
+      () => authSession.userId,
+    ],
+    (
+      [unlocked, vaultId, userId],
+      [previousUnlocked, previousVaultId, previousUserId],
+    ) => {
+      if (
+        unlocked !== previousUnlocked ||
+        vaultId !== previousVaultId ||
+        userId !== previousUserId
+      ) {
+        lockSession();
+      }
+    },
+    { flush: "sync" },
+  );
 
   function attachNote(noteId: string) {
     ensureCurrentConversation();
@@ -663,36 +714,76 @@ export const useAssistantStore = defineStore("assistant", () => {
 Tu exécutes le modèle ${modelId}, fourni par ${providerLabel}. Si on te demande quel modèle tu es, réponds avec cette information.`;
   }
 
+  function isSendSessionCurrent(session: {
+    accountId: string | undefined;
+    generation: number;
+    token: string;
+    userId: string | null;
+    vaultId: string | null;
+  }): boolean {
+    const vault = useVaultStore();
+    return (
+      session.generation === sessionGeneration &&
+      session.accountId === accountId &&
+      session.token === token &&
+      session.userId === useAuthStore().userId &&
+      session.vaultId === vault.currentVaultId &&
+      vault.isUnlocked
+    );
+  }
+
+  function assertSendSessionCurrent(
+    session: Parameters<typeof isSendSessionCurrent>[0],
+  ) {
+    if (!isSendSessionCurrent(session)) {
+      throw new Error("La session de coffre a changé.");
+    }
+  }
+
   async function send(prompt: string): Promise<string> {
     const trimmed = prompt.trim();
-    if (!trimmed) {
-      throw new Error("Message vide.");
-    }
-    if (!token) {
-      throw new Error("Connectez l’assistant pour écrire.");
-    }
-    if (
-      authKind === "chatgpt" &&
-      refreshToken &&
-      (expiresAt === undefined || expiresAt - 5 * 60 * 1000 <= Date.now())
-    ) {
-      const refreshed = await refreshChatgptTokens(refreshToken);
-      token = refreshed.accessToken;
-      refreshToken = refreshed.refreshToken;
-      expiresAt = refreshed.expiresAt;
-      accountId = refreshed.accountId ?? accountId;
-      await persistCurrentCredential();
-    }
+    if (!trimmed) throw new Error("Message vide.");
+    if (!token) throw new Error("Connectez l’assistant pour écrire.");
+
+    const vault = useVaultStore();
+    const session = {
+      accountId,
+      generation: sessionGeneration,
+      token,
+      userId: useAuthStore().userId,
+      vaultId: vault.currentVaultId,
+    };
+    const sendId = Symbol("assistant-send");
+    activeSendId = sendId;
     error.value = "";
     busy.value = true;
-    ensureCurrentConversation();
-    messages.value = [
-      ...messages.value,
-      { content: trimmed, id: uuidV7(), role: "user" },
-    ];
-    await saveCurrentConversation();
-    const prefix = contextPrefix();
     try {
+      assertSendSessionCurrent(session);
+      if (
+        authKind === "chatgpt" &&
+        refreshToken &&
+        (expiresAt === undefined || expiresAt - 5 * 60 * 1000 <= Date.now())
+      ) {
+        const refreshed = await refreshChatgptTokens(refreshToken);
+        assertSendSessionCurrent(session);
+        token = refreshed.accessToken;
+        refreshToken = refreshed.refreshToken;
+        expiresAt = refreshed.expiresAt;
+        accountId = refreshed.accountId ?? accountId;
+        session.token = token;
+        session.accountId = accountId;
+        await persistCurrentCredential();
+        assertSendSessionCurrent(session);
+      }
+      ensureCurrentConversation();
+      messages.value = [
+        ...messages.value,
+        { content: trimmed, id: uuidV7(), role: "user" },
+      ];
+      await saveCurrentConversation();
+      assertSendSessionCurrent(session);
+      const prefix = contextPrefix();
+      const requestToken = token;
       const response = await completeCodexAgent({
         accountId,
         baseUrl: providerBaseUrl || undefined,
@@ -709,48 +800,51 @@ Tu exécutes le modèle ${modelId}, fourni par ${providerLabel}. Si on te demand
         model: model.value,
         reasoningEffort: reasoningEffort.value || undefined,
         serviceTier: fast.value ? fastTier.value?.id : undefined,
-        token,
+        token: requestToken,
         toolChoice: "auto",
         tools: ASSISTANT_TOOLS,
         transport: authKind === "chatgpt" ? "chatgpt" : "platform",
       });
+      assertSendSessionCurrent(session);
       if (response.functionCalls.length === 0) {
         const answer = response.text.trim();
-        if (!answer) {
-          throw new Error("L’assistant n’a pas choisi d’action.");
-        }
-        // Informational request: the model answered in plain text instead of
-        // calling a write tool, which is valid for non-writing requests.
+        if (!answer) throw new Error("L’assistant n’a pas choisi d’action.");
         messages.value = [
           ...messages.value,
           { content: answer, id: uuidV7(), role: "assistant" },
         ];
         await saveCurrentConversation();
+        assertSendSessionCurrent(session);
         return "";
       }
       if (response.functionCalls.length > 1) {
         throw new Error("L’assistant a fourni plusieurs actions.");
       }
       const [call] = response.functionCalls;
+      assertSendSessionCurrent(session);
       const action = await executeToolCall(call!);
+      assertSendSessionCurrent(session);
       messages.value = [
         ...messages.value,
-        {
-          content: action.message,
-          id: uuidV7(),
-          role: "assistant",
-        },
+        { content: action.message, id: uuidV7(), role: "assistant" },
       ];
       await saveCurrentConversation();
+      assertSendSessionCurrent(session);
       return action.noteId;
     } catch (caught) {
+      if (!isSendSessionCurrent(session)) {
+        throw new Error("La session de coffre a changé.");
+      }
       error.value =
         caught instanceof Error
           ? caught.message
           : "L’assistant n’a pas pu répondre.";
       throw caught;
     } finally {
-      busy.value = false;
+      if (activeSendId === sendId) {
+        activeSendId = undefined;
+        busy.value = false;
+      }
     }
   }
 

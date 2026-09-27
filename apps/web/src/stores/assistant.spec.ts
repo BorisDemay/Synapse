@@ -329,6 +329,164 @@ describe("assistant store", () => {
     expect(assistant.messages[0]?.content).toBe(prompt);
   });
 
+  it("starts a fresh quick conversation with only the validated active note", async () => {
+    await unlockVault();
+    stubOpenAi({ output_text: "Réponse." });
+    const assistant = useAssistantStore();
+    await assistant.connect(token);
+    const priorId = await assistant.newConversation();
+    assistant.attachNote(otherNoteId);
+    await assistant.send("Ancienne conversation.");
+
+    const quickId = await assistant.newConversation(noteId);
+    expect(quickId).not.toBe(priorId);
+    expect(assistant.attachedNoteIds).toEqual([noteId]);
+    vi.mocked(fetch).mockClear();
+    stubOpenAi({ output_text: "Réponse." });
+    await assistant.send("Nouvelle demande.");
+    const payload = JSON.parse(
+      String(
+        vi
+          .mocked(fetch)
+          .mock.calls.find(([url]) => String(url).includes("/responses"))?.[1]
+          ?.body,
+      ),
+    );
+    expect(JSON.stringify(payload)).toContain("Secret diary");
+    expect(JSON.stringify(payload)).not.toContain("Not attached.");
+
+    await expect(assistant.newConversation("missing-note")).rejects.toThrow();
+  });
+
+  it("does not apply a deferred provider tool after the vault session locks", async () => {
+    await unlockVault();
+    const assistant = useAssistantStore();
+    await assistant.connect(token);
+    await assistant.setModel("gpt-5.6-sol");
+    assistant.attachNote(noteId);
+    const noteBefore = useVaultStore().notes.get(noteId)?.content;
+    let release!: (value: Response) => void;
+    stubOpenAi();
+    vi.mocked(fetch).mockImplementation((url) => {
+      if (String(url).includes("/responses"))
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      return Promise.resolve(jsonResponse({ data: [{ id: "gpt-5.6-sol" }] }));
+    });
+    const sending = assistant.send("Replace this note");
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    assistant.lockSession();
+    assistant.busy = true;
+    assistant.error = "new session status";
+    release(
+      jsonResponse({
+        output: [
+          {
+            arguments: JSON.stringify({
+              markdown: "# Stale overwrite",
+              note_id: noteId,
+            }),
+            call_id: "stale-call",
+            name: "replace_linked_note",
+            type: "function_call",
+          },
+        ],
+      }),
+    );
+    await expect(sending).rejects.toThrow("session de coffre a changé");
+    expect(useVaultStore().notes.get(noteId)?.content).toBe(noteBefore);
+    expect(assistant.messages).toEqual([]);
+    expect(assistant.busy).toBe(true);
+    expect(assistant.error).toBe("new session status");
+  });
+
+  it("does not restore refreshed credentials when the session locks during refresh", async () => {
+    await unlockVault();
+    const vault = useVaultStore();
+    vi.spyOn(vault, "loadAssistantCredential").mockResolvedValue({
+      authKind: "chatgpt",
+      expiresAt: 0,
+      model: "gpt-5.6-sol",
+      provider: "codex",
+      refreshToken: "old-refresh-token",
+      token: "old-access-token",
+    });
+    stubOpenAi();
+    const assistant = useAssistantStore();
+    await assistant.restore();
+    const persistCredential = vi.spyOn(vault, "persistAssistantCredential");
+    let release!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementation((url) => {
+      if (String(url).includes("/oauth/token"))
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      return Promise.resolve(jsonResponse({ data: [{ id: "gpt-5.6-sol" }] }));
+    });
+    const sending = assistant.send("Request");
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    assistant.lockSession();
+    release(
+      jsonResponse({
+        access_token: "stale-access-token",
+        refresh_token: "stale-refresh-token",
+        expires_in: 3600,
+      }),
+    );
+    await expect(sending).rejects.toThrow("session de coffre a changé");
+    expect(persistCredential).not.toHaveBeenCalled();
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([url]) => String(url).includes("/responses")),
+    ).toBe(false);
+  });
+
+  it.each(["account", "vault"] as const)(
+    "aborts a deferred response after the %s changes without touching new session state",
+    async (scope) => {
+      await unlockVault();
+      const assistant = useAssistantStore();
+      await assistant.connect(token);
+      await assistant.setModel("gpt-5.6-sol");
+      let release!: (value: Response) => void;
+      stubOpenAi();
+      vi.mocked(fetch).mockImplementation((url) => {
+        if (String(url).includes("/responses"))
+          return new Promise((resolve) => {
+            release = resolve;
+          });
+        return Promise.resolve(jsonResponse({ data: [{ id: "gpt-5.6-sol" }] }));
+      });
+      const sending = assistant.send("Private request");
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      if (scope === "account") useAuthStore().userId = "user-switched";
+      else useVaultStore().currentVaultId = "vault-switched";
+      assistant.busy = true;
+      assistant.error = "new session status";
+      release(jsonResponse({ output_text: "Stale private answer" }));
+      await expect(sending).rejects.toThrow("session de coffre a changé");
+      expect(assistant.messages).toEqual([]);
+      expect(assistant.busy).toBe(true);
+      expect(assistant.error).toBe("new session status");
+    },
+  );
+
+  it("clears busy when initial encrypted conversation persistence fails", async () => {
+    await unlockVault();
+    stubOpenAi();
+    const assistant = useAssistantStore();
+    await assistant.connect(token);
+    vi.spyOn(
+      useVaultStore(),
+      "persistAssistantConversations",
+    ).mockRejectedValueOnce(new Error("storage"));
+
+    await expect(assistant.send("Hello")).rejects.toThrow("storage");
+    expect(assistant.busy).toBe(false);
+  });
+
   it("refuses a mutation targeting a note that was not explicitly attached", async () => {
     await unlockVault();
     stubOpenAi({
@@ -465,6 +623,7 @@ describe("assistant store", () => {
     });
     const assistant = useAssistantStore();
     await assistant.connect(token, { provider: "glm" });
+    await assistant.newConversation();
     const notesBefore = useVaultStore().notes.size;
 
     await expect(assistant.send("Quel modèle es-tu ?")).resolves.toBe("");
@@ -474,6 +633,11 @@ describe("assistant store", () => {
     );
     expect(assistant.messages.at(-1)?.role).toBe("assistant");
     expect(useVaultStore().notes.size).toBe(notesBefore);
+    const request = JSON.stringify(
+      vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body,
+    );
+    expect(request).not.toContain("Secret diary");
+    expect(request).not.toContain("Not attached.");
   });
 
   it("tells the model which model and provider it runs as", async () => {
