@@ -349,11 +349,6 @@ function readAgentResponse(
   raw: string,
 ): CodexAgentResponse {
   const trimmed = raw.trim();
-  const isSse =
-    contentType.includes("event-stream") || trimmed.includes("data:");
-  if (isSse) {
-    return rejectMultipleFunctionCalls(parseResponsesSse(raw));
-  }
   if (trimmed.startsWith("{")) {
     const response = extractAgentResponse(
       JSON.parse(trimmed) as CodexResponseBody,
@@ -362,6 +357,11 @@ function readAgentResponse(
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     return rejectMultipleFunctionCalls(response);
+  }
+  const isSse =
+    contentType.includes("event-stream") || trimmed.includes("data:");
+  if (isSse) {
+    return rejectMultipleFunctionCalls(parseResponsesSse(raw));
   }
   throw assistantError("L’assistant n’a pas pu répondre.");
 }

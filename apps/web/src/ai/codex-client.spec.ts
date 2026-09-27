@@ -62,6 +62,29 @@ describe("completeCodexChat", () => {
     expect(body).not.toHaveProperty("service_tier");
   });
 
+  it("reads a JSON Responses text containing the literal SSE marker", async () => {
+    const outputText =
+      "Le texte contient littéralement data: sans être un flux.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ output_text: outputText }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      ),
+    );
+
+    await expect(
+      completeCodexChat({
+        instructions: "Rédige du Markdown.",
+        messages: [{ content: "Réponds.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+      }),
+    ).resolves.toBe(outputText);
+  });
+
   it("reads assistant text from typed output items when output_text is absent", async () => {
     vi.stubGlobal(
       "fetch",
