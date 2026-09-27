@@ -704,12 +704,7 @@ describe("completeCodexChat", () => {
     },
   );
 
-  it("accepts a message output item before a valid local tool call", async () => {
-    const messageItem = {
-      content: [{ text: "Je prépare la note.", type: "output_text" }],
-      role: "assistant",
-      type: "message",
-    };
+  it("rejects a ChatGPT SSE response that mixes text and a local tool call", async () => {
     const validCall = {
       arguments: '{"markdown":"# Brouillon"}',
       call_id: "call-after-message-output-item",
@@ -723,7 +718,7 @@ describe("completeCodexChat", () => {
         .mockResolvedValue(
           new Response(
             [
-              { item: messageItem, type: "response.output_item.done" },
+              { delta: "Réponse prête.", type: "response.output_text.delta" },
               validCall,
             ]
               .map((event) => `data: ${JSON.stringify(event)}`)
@@ -741,15 +736,8 @@ describe("completeCodexChat", () => {
         token,
         toolChoice: "required",
       }),
-    ).resolves.toEqual({
-      functionCalls: [
-        {
-          arguments: '{"markdown":"# Brouillon"}',
-          callId: "call-after-message-output-item",
-          name: "create_note",
-        },
-      ],
-      text: "",
+    ).rejects.toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
     });
   });
 
