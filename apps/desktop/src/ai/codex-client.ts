@@ -177,10 +177,10 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
-    if (item.type !== "message" || !("content" in item)) {
+    if (item.type !== "message") {
       continue;
     }
-    if (!Array.isArray(item.content)) {
+    if (item.role !== "assistant" || !Array.isArray(item.content)) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     for (const part of item.content) {

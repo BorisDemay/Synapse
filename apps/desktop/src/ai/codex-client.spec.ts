@@ -255,6 +255,7 @@ describe("completeCodexChat", () => {
           output: [
             {
               content: [{ text: "Brouillon JSON.", type: "output_text" }],
+              role: "assistant",
               type: "message",
             },
           ],
@@ -347,23 +348,37 @@ describe("completeCodexChat", () => {
     },
   );
 
-  it("accepts a message Responses item without content before a local tool call", async () => {
+  it("rejects a non-assistant message without content before returning a local tool call", async () => {
     const functionCall = {
-      arguments: '{"markdown":"# Brouillon"}',
-      call_id: "call-after-message-without-content",
+      arguments: "{}",
+      call_id: "call-after-non-assistant-message",
       name: "create_note",
       type: "function_call",
     };
+    const nonAssistantMessage = { role: "user", type: "message" };
+    const providerFixture = "provider-structure-fixture";
     const responses = [
       new Response(
-        JSON.stringify({ output: [{ type: "message" }, functionCall] }),
+        JSON.stringify({ output: [nonAssistantMessage, functionCall] }),
         { headers: { "content-type": "application/json" }, status: 200 },
       ),
       new Response(
         `data: ${JSON.stringify({
-          response: { output: [{ type: "message" }, functionCall] },
+          response: { output: [nonAssistantMessage, functionCall] },
           type: "response.completed",
         })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+      new Response(
+        [
+          {
+            item: nonAssistantMessage,
+            type: "response.output_item.done",
+          },
+          { ...functionCall, type: "response.function_call_arguments.done" },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
         { headers: { "content-type": "text/event-stream" }, status: 200 },
       ),
     ];
@@ -371,18 +386,79 @@ describe("completeCodexChat", () => {
     for (const response of responses) {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
 
-      await expect(
-        completeCodexAgent({
-          instructions: "Utilise un outil local.",
-          messages: [{ content: "Crée une note.", role: "user" }],
-          model: "gpt-5.6-luna",
-          token,
-          toolChoice: "required",
-        }),
-      ).resolves.toMatchObject({
-        functionCalls: [{ callId: "call-after-message-without-content" }],
-      });
+      const outcome = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+      }).then(
+        (response) => ({ error: undefined, response }),
+        (error: unknown) => ({ error, response: undefined }),
+      );
+
+      expect(outcome.response).toBeUndefined();
+      expect(outcome.error).toBeInstanceOf(Error);
+      if (!(outcome.error instanceof Error)) {
+        throw new Error("Expected a local assistant error.");
+      }
+      expect(outcome.error.message).toBe("L’assistant n’a pas pu répondre.");
+      expect(String(outcome.error)).not.toContain(providerFixture);
+      expect(JSON.stringify(outcome.error)).not.toContain(providerFixture);
     }
+  });
+
+  it("accepts an assistant message with structurally valid content before a local tool call", async () => {
+    const functionCall = {
+      arguments: "{}",
+      call_id: "call-after-valid-assistant-message",
+      name: "create_note",
+      type: "function_call",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [{ type: "output_text" }],
+                role: "assistant",
+                type: "message",
+              },
+              functionCall,
+            ],
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      functionCalls: [{ callId: "call-after-valid-assistant-message" }],
+    });
   });
 
   it("rejects completed SSE output items even when the event includes output_text", async () => {
