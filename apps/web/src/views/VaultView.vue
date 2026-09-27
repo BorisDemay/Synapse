@@ -122,6 +122,9 @@ const deletingIds = new Set<string>();
 const lastDeletedItem = ref<{ id: string; label: string } | null>(null);
 let lastDeletionToastId: number | null = null;
 let errorToastId: number | null = null;
+let quickAssistantToastId: number | null = null;
+let quickAssistantInFlight = false;
+let quickAssistantRunId: symbol | null = null;
 let vaultViewEpoch = 0;
 
 watch(
@@ -129,7 +132,14 @@ watch(
   (message) => {
     if (errorToastId !== null) dismissToast(errorToastId);
     errorToastId =
-      message && vault.isUnlocked ? notify({ kind: "error", message }) : null;
+      message && vault.isUnlocked
+        ? notify({
+            kind: "error",
+            message: quickAssistantInFlight
+              ? "Une opération locale a échoué. Votre contenu est conservé."
+              : message,
+          })
+        : null;
   },
 );
 watch(settingsStatus, (message) => {
@@ -653,16 +663,127 @@ function toggleQuickAssistantFromShortcut(event: KeyboardEvent) {
   openQuickAssistant();
 }
 
-async function deliverQuickAssistantPrompt(prompt: string) {
+function quickAssistantBaseSessionIsCurrent(context: {
+  accountId: string | null;
+  epoch: number;
+  vaultId: string | null;
+}): boolean {
+  return (
+    context.epoch === vaultViewEpoch &&
+    context.accountId === auth.userId &&
+    context.vaultId === vault.currentVaultId &&
+    vault.isUnlocked
+  );
+}
+
+function quickAssistantSessionIsCurrent(context: {
+  accountId: string | null;
+  editingNoteId: string;
+  epoch: number;
+  vaultId: string | null;
+}): boolean {
+  return (
+    quickAssistantBaseSessionIsCurrent(context) &&
+    context.editingNoteId === noteId.value
+  );
+}
+
+function quickAssistantNoteIsCurrent(noteId: string | null): boolean {
+  return !noteId || vault.notes.has(noteId);
+}
+
+function dismissQuickProgress(id: number) {
+  if (quickAssistantToastId !== id) return;
+  dismissToast(id);
+  quickAssistantToastId = null;
+}
+
+async function deliverQuickAssistantPrompt(
+  prompt: string,
+  context: {
+    accountId: string | null;
+    editingNoteId: string;
+    epoch: number;
+    noteId: string | null;
+    vaultId: string | null;
+  },
+  pendingToastId: number,
+  runId: symbol,
+) {
   try {
-    const createdNoteId = await assistant.send(prompt);
-    if (createdNoteId) await showNote(createdNoteId);
-    notify({ kind: "success", message: "Demande envoyée à l’assistant." });
+    const resultNoteId = await assistant.send(prompt);
+    if (!quickAssistantBaseSessionIsCurrent(context)) {
+      dismissQuickProgress(pendingToastId);
+      return;
+    }
+    if (!quickAssistantNoteIsCurrent(context.noteId)) {
+      dismissQuickProgress(pendingToastId);
+      quickAssistantToastId = notify({
+        kind: "error",
+        message:
+          "La note liée n’est plus disponible. Aucune réponse n’a été affichée.",
+      });
+      return;
+    }
+    dismissQuickProgress(pendingToastId);
+    if (resultNoteId) {
+      if (noteId.value === context.editingNoteId) {
+        await showNote(resultNoteId);
+        if (!quickAssistantBaseSessionIsCurrent(context)) return;
+      }
+      notify({
+        kind: "success",
+        message: "L’action de l’assistant a été appliquée.",
+        ...(noteId.value !== resultNoteId
+          ? {
+              action: {
+                label: "Ouvrir la note",
+                run: () => {
+                  if (quickAssistantBaseSessionIsCurrent(context))
+                    void showNote(resultNoteId);
+                },
+              },
+            }
+          : {}),
+      });
+    } else {
+      notify({
+        kind: "info",
+        message: "La réponse de l’assistant est disponible.",
+        action: {
+          label: "Voir la réponse",
+          run: () => {
+            if (quickAssistantBaseSessionIsCurrent(context))
+              assistantOpen.value = true;
+          },
+        },
+      });
+    }
   } catch {
-    notify({
+    if (!quickAssistantBaseSessionIsCurrent(context)) {
+      dismissQuickProgress(pendingToastId);
+      return;
+    }
+    if (!quickAssistantNoteIsCurrent(context.noteId)) {
+      dismissQuickProgress(pendingToastId);
+      quickAssistantToastId = notify({
+        kind: "error",
+        message:
+          "La note liée n’est plus disponible. Aucune réponse n’a été affichée.",
+      });
+      return;
+    }
+    dismissQuickProgress(pendingToastId);
+    quickAssistantToastId = notify({
       kind: "error",
-      message: assistant.error || "L’assistant n’a pas pu répondre.",
+      message:
+        "L’assistant n’a pas pu terminer la demande. Votre contenu local est conservé.",
     });
+  } finally {
+    if (quickAssistantRunId === runId) {
+      quickAssistantRunId = null;
+      quickAssistantInFlight = false;
+    }
   }
 }
 
@@ -677,21 +798,104 @@ async function submitQuickAssistantPrompt(payload: {
     !model ||
     !assistant.connected ||
     assistant.busy ||
+    quickAssistantInFlight ||
     !vault.isUnlocked
   )
     return;
+  const runId = Symbol("quick-assistant-run");
+  quickAssistantRunId = runId;
+  quickAssistantInFlight = true;
+  let handedToDelivery = false;
+  const context = {
+    accountId: auth.userId,
+    editingNoteId: noteId.value,
+    epoch: vaultViewEpoch,
+    noteId:
+      (selectedNoteId.value && vault.notes.has(noteId.value)) ||
+      (!vault.notes.has(noteId.value) && !isNewNoteDraft(content.value))
+        ? noteId.value
+        : null,
+    vaultId: vault.currentVaultId,
+  };
+  const progressToastId = notify({
+    kind: "info",
+    message: "L’assistant travaille sur votre demande.",
+    pending: true,
+  });
+  quickAssistantToastId = progressToastId;
   try {
     await assistant.setModel(model);
-    await assistant.newConversation();
+    if (!quickAssistantSessionIsCurrent(context)) return;
+    if (
+      context.noteId &&
+      (!vault.notes.has(context.noteId) ||
+        draftBaseRevision.value !== null ||
+        pendingSaves.size > 0 ||
+        Boolean(saveInFlight) ||
+        vault.notes.get(context.noteId)?.content !== content.value)
+    ) {
+      if (!(await save(content.value))) {
+        if (quickAssistantSessionIsCurrent(context)) {
+          dismissToast(quickAssistantToastId!);
+          quickAssistantToastId = notify({
+            kind: "error",
+            message:
+              "La note n’a pas pu être enregistrée. Aucune demande n’a été envoyée.",
+          });
+          quickAssistantOpen.value = true;
+        }
+        return;
+      }
+    }
+    if (!quickAssistantSessionIsCurrent(context)) return;
+    if (!quickAssistantNoteIsCurrent(context.noteId)) {
+      dismissQuickProgress(progressToastId);
+      quickAssistantToastId = notify({
+        kind: "error",
+        message:
+          "La note liée n’est plus disponible. Aucune demande n’a été envoyée.",
+      });
+      return;
+    }
+    await assistant.newConversation(context.noteId ?? undefined);
+    if (!quickAssistantSessionIsCurrent(context)) return;
+    if (!quickAssistantNoteIsCurrent(context.noteId)) {
+      dismissQuickProgress(progressToastId);
+      quickAssistantToastId = notify({
+        kind: "error",
+        message:
+          "La note liée n’est plus disponible. Aucune demande n’a été envoyée.",
+      });
+      return;
+    }
+    closeQuickAssistant();
+    const pendingToastId = quickAssistantToastId;
+    if (pendingToastId !== null) {
+      handedToDelivery = true;
+      void deliverQuickAssistantPrompt(prompt, context, pendingToastId, runId);
+    }
   } catch {
-    notify({
-      kind: "error",
-      message: assistant.error || "Nouvelle conversation impossible.",
-    });
-    return;
+    if (quickAssistantSessionIsCurrent(context)) {
+      dismissQuickProgress(progressToastId);
+      quickAssistantToastId = notify({
+        kind: "error",
+        message:
+          "L’assistant n’a pas pu démarrer. Aucune demande n’a été envoyée.",
+      });
+    }
+    if (quickAssistantRunId === runId) {
+      quickAssistantRunId = null;
+      quickAssistantInFlight = false;
+    }
+  } finally {
+    if (!handedToDelivery) {
+      dismissQuickProgress(progressToastId);
+      if (quickAssistantRunId === runId) {
+        quickAssistantRunId = null;
+        quickAssistantInFlight = false;
+      }
+    }
   }
-  closeQuickAssistant();
-  void deliverQuickAssistantPrompt(prompt);
 }
 
 async function showNote(id: string) {
@@ -1432,6 +1636,9 @@ watch(
   () => {
     quickAssistantOpen.value = false;
     vaultViewEpoch++;
+    quickAssistantToastId = null;
+    quickAssistantRunId = null;
+    quickAssistantInFlight = false;
     clearToasts();
     errorToastId = null;
     lastDeletionToastId = null;
@@ -2008,6 +2215,12 @@ watch(settingsOpen, (open) => {
     @update:query="searchQuery = $event"
   />
   <QuickAssistantPrompt
+    :active-note="
+      Boolean(
+        (selectedNoteId && vault.notes.has(selectedNoteId)) ||
+          (!vault.notes.has(noteId) && !isNewNoteDraft(content)),
+      )
+    "
     :busy="assistant.busy"
     :connected="assistant.connected"
     :model="assistant.model"

@@ -10,13 +10,14 @@ import type { CodexModelOption } from "../ai/codex-client";
 
 const props = withDefaults(
   defineProps<{
+    activeNote: boolean;
     busy?: boolean;
     connected: boolean;
     model: string;
     models: CodexModelOption[];
     open: boolean;
   }>(),
-  { busy: false },
+  { activeNote: false, busy: false },
 );
 
 const emit = defineEmits<{
@@ -146,6 +147,13 @@ watch(
             </option>
           </select></label
         >
+        <p class="quick-assistant-consent" role="note">
+          {{
+            props.activeNote
+              ? "Avant l’envoi : le texte en clair de la note actuellement ouverte (y compris son brouillon enregistré juste avant l’envoi) sera transmis par cet appareil au fournisseur d’IA configuré."
+              : "Aucune note active ne sera transmise comme contexte. Vous pouvez demander à l’assistant de créer une note."
+          }}
+        </p>
         <p v-if="unavailableHint" class="quick-assistant-hint" role="status">
           {{ unavailableHint }}
         </p>
@@ -236,6 +244,14 @@ watch(
   color: var(--synapse-color-text-muted);
   font-size: 0.78rem;
   font-weight: 600;
+}
+.quick-assistant-consent {
+  margin: 0;
+  padding: 0.65rem;
+  border-inline-start: 3px solid var(--synapse-color-accent);
+  color: var(--synapse-color-text);
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 .quick-assistant-hint {
   margin: 0;

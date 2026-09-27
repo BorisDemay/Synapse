@@ -41,8 +41,14 @@ L’assistant est une fonctionnalité **optionnelle du client déverrouillé**.
   active et notes liées sont chiffrés avec la clé de coffre et un AAD dédié
   avant IndexedDB (web) ou SQLite local (desktop). Ils ne sont jamais envoyés
   au serveur Synapse et sont purgés de la mémoire au verrouillage.
-- Ctrl+clic (ou ⌘+clic) sur une note de l’arborescence l’attache au fil actif ;
-  seules les notes attachées quittent l’appareil vers Codex.
+- Ctrl+clic (ou ⌘+clic) sur une note de l’arborescence l’attache au fil actif.
+  Dans le chat ordinaire, seules les notes explicitement attachées quittent
+  l’appareil vers Codex. Le prompt rapide ouvre un fil neuf et lie uniquement
+  la note active persistée (aucun ancien lien n’est repris) ; avant envoi, il
+  indique visiblement que son texte en clair sera transmis depuis l’appareil au
+  fournisseur d’IA configuré. La soumission de ce prompt après cet avis est le
+  consentement explicite à transmettre cette note. Sans note active, aucun
+  contexte de coffre n’est envoyé et une demande de création reste permise.
 - Codex reçoit des outils locaux stricts, pas une convention de mots-clés :
   `create_note`, `replace_linked_note` et `append_to_linked_note`. Il choisit
   l’action selon la demande et le client l’exécute via `saveNote`.
@@ -71,12 +77,17 @@ Les fournisseurs suivants devront implémenter la même frontière : appel
 direct depuis le client, credential enveloppé localement, consentement
 explicite, aucune persistance serveur.
 
-L’utilisateur doit attacher une note avant de demander sa modification. Cela
-constitue le consentement de transmettre son contenu à Codex et limite la
-capacité d’écriture de l’assistant à la sélection explicite. Les mutations
-restent des sauvegardes locales ordinaires : elles passent par la file de
-synchronisation chiffrée, avec les mêmes révisions et règles de conflit qu’une
-édition manuelle.
+Dans le chat ordinaire, l’utilisateur doit attacher une note avant de demander
+sa modification ; ce geste est le consentement de transmettre son contenu et
+limite la capacité d’écriture à cette sélection. Pour le prompt rapide, la note
+active est le seul contexte lié par défaut, mais elle n’est jamais transmise
+silencieusement : l’avis affiché avant la soumission décrit le transfert en
+clair vers le fournisseur configuré, et la soumission constitue le consentement.
+Le client sauvegarde durablement tout brouillon actif avant de lier ou envoyer
+la note ; un échec de sauvegarde bloque l’envoi. Sans note active, seules les
+demandes sans contexte ou de création sont possibles. Les mutations restent des
+sauvegardes locales ordinaires : elles passent par la file de synchronisation
+chiffrée, avec les mêmes révisions et règles de conflit qu’une édition manuelle.
 
 La persistance des fils augmente la quantité de contenu local chiffré, mais ne
 crée ni synchronisation, ni sauvegarde serveur, ni restauration inter-appareil

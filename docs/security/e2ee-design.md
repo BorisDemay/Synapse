@@ -12,6 +12,17 @@ La clé de coffre est enveloppée localement avec une clé dérivée de la phras
 
 La phrase secrète est distincte du mot de passe d’authentification et ne traverse jamais l’API. L’enveloppe sérialisée contient seulement le sel, le nonce et le ciphertext de la clé de coffre.
 
+## Assistant IA côté client
+
+L’assistant optionnel est une exception explicite à la confidentialité E2EE vis-à-vis
+du fournisseur IA choisi : le texte des notes liées est déchiffré sur le client
+et envoyé directement au fournisseur, jamais au serveur Synapse. Le prompt rapide
+lie uniquement la note active persistée à un fil neuf. Un avis visible avant sa
+soumission explique le transfert en clair ; la soumission après cet avis vaut
+consentement. Sans note active, aucun contenu du coffre n’est inclus. Un brouillon
+sale ou une sauvegarde en cours est durablement sauvegardé avant le transfert ;
+une erreur de persistance bloque l’envoi. Voir [ADR 0008](../adr/0008-client-side-codex-assistant.md).
+
 ## Limites et récupération
 
 - Une phrase secrète perdue rend le coffre irrécupérable sans mécanisme de récupération explicitement conçu ; le MVP n’en fournit pas.

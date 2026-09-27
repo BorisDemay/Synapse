@@ -8,11 +8,17 @@ const models = [
   { id: "model-b", label: "Model B", reasoningLevels: [], serviceTiers: [] },
 ];
 function mountPrompt(
-  options: { connected?: boolean; model?: string; open?: boolean } = {},
+  options: {
+    activeNote?: boolean;
+    connected?: boolean;
+    model?: string;
+    open?: boolean;
+  } = {},
 ): VueWrapper {
   return mount(QuickAssistantPrompt, {
     attachTo: document.body,
     props: {
+      activeNote: options.activeNote ?? false,
       connected: options.connected ?? true,
       model: options.model ?? "model-a",
       models,
@@ -40,6 +46,16 @@ describe("QuickAssistantPrompt", () => {
     expect(wrapper.emitted("submit")).toEqual([
       [{ model: "model-b", prompt: "Draft a plan" }],
     ]);
+  });
+  it("discloses the active note plaintext transfer before submission", async () => {
+    wrapper = mountPrompt({ activeNote: true });
+    expect(wrapper.get('[role="note"]').text()).toContain(
+      "texte en clair de la note actuellement ouverte",
+    );
+    await wrapper.setProps({ activeNote: false });
+    expect(wrapper.get('[role="note"]').text()).toContain(
+      "Aucune note active ne sera transmise",
+    );
   });
   it("disables submission while disconnected, busy, or empty", async () => {
     wrapper = mountPrompt({ connected: false });

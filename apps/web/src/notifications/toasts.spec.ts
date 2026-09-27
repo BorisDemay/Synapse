@@ -47,6 +47,33 @@ it("stacks accessible color-coded notifications in the top-right and dismisses t
   wrapper.unmount();
 });
 
+it("keeps pending progress visible with an accessible spinner until dismissed", async () => {
+  const wrapper = mount(ToastHost);
+  const id = notify({
+    kind: "info",
+    message: "Assistant en cours",
+    pending: true,
+  });
+  await wrapper.vm.$nextTick();
+  expect(wrapper.get(`[data-kind="info"]`).attributes("role")).toBe("status");
+  expect(wrapper.get(".toast-spinner").attributes("aria-label")).toBe(
+    "En cours",
+  );
+  vi.advanceTimersByTime(60_000);
+  await wrapper.vm.$nextTick();
+  expect(toasts.value.some((toast) => toast.id === id)).toBe(true);
+  expect(wrapper.find('[aria-label="Fermer la notification"]').exists()).toBe(
+    false,
+  );
+
+  for (let index = 0; index < 4; index++)
+    notify({ kind: "success", message: `Fini ${index}` });
+  expect(toasts.value.some((toast) => toast.id === id)).toBe(true);
+  expect(toasts.value.filter((toast) => !toast.pending)).toHaveLength(4);
+  dismissToast(id);
+  wrapper.unmount();
+});
+
 it("supports a one-shot asynchronous undo action, and clears sensitive text", async () => {
   const undo = vi.fn().mockResolvedValue(undefined);
   const wrapper = mount(ToastHost);

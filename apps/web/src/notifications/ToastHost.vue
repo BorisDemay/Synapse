@@ -37,6 +37,11 @@ async function runAction(toast: Toast) {
             error: "Erreur",
           }[toast.kind]
         }}</span>
+        <span
+          v-if="toast.pending"
+          class="toast-spinner"
+          aria-label="En cours"
+        ></span>
         <span class="toast-message">{{ toast.message }}</span>
         <button
           v-if="toast.action"
@@ -49,6 +54,7 @@ async function runAction(toast: Toast) {
         </button>
       </div>
       <button
+        v-if="!toast.pending"
         class="toast-dismiss"
         type="button"
         aria-label="Fermer la notification"
@@ -107,6 +113,25 @@ async function runAction(toast: Toast) {
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
+}
+.toast-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  border: 2px solid var(--toast-accent);
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: toast-spin 0.8s linear infinite;
+}
+@keyframes toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-spinner {
+    animation: none;
+  }
 }
 .toast-action {
   width: fit-content;

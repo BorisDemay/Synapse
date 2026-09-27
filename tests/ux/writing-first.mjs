@@ -147,6 +147,78 @@ test("Ctrl+Alt+K opens and closes the quick assistant without opening the assist
   }
 });
 
+test("quick assistant shows linked-note progress and a generic error toast", async () => {
+  const { page, close } = await fixture();
+  try {
+    await openNote(page, "Website");
+    await page.evaluate(async () => {
+      const { useAssistantStore } = await import("/src/stores/assistant.ts");
+      const { useVaultStore } = await import("/src/stores/vault.ts");
+      const assistant = useAssistantStore();
+      const vault = useVaultStore();
+      const [noteId] =
+        [...vault.notes.entries()].find(
+          ([, item]) => item.path === "Projects/Website.md",
+        ) ?? [];
+      if (!noteId) throw new Error("Synthetic active note missing");
+      window.__quickAssistantTest = { noteId, linkedNoteId: null };
+      assistant.connected = true;
+      assistant.models = [{ id: "synthetic-model", label: "Synthetic model" }];
+      assistant.model = "synthetic-model";
+      assistant.setModel = async () => {};
+      assistant.newConversation = async (noteId) => {
+        window.__quickAssistantTest.linkedNoteId = noteId ?? null;
+        return "synthetic-conversation";
+      };
+      assistant.send = () =>
+        new Promise((_, reject) => {
+          window.__quickAssistantTest.reject = reject;
+        });
+    });
+    await page.keyboard.press("Control+Alt+k");
+    await page
+      .getByRole("textbox", { name: "Prompt à envoyer à l’assistant" })
+      .fill("SYNTHETIC PRIVATE PROMPT");
+    await page.getByRole("button", { name: "Envoyer", exact: true }).click();
+
+    const progress = page.getByRole("status").filter({
+      hasText: "L’assistant travaille sur votre demande.",
+    });
+    await expect(progress).toBeVisible();
+    const spinner = progress.locator(".toast-spinner");
+    await expect(spinner).toBeVisible();
+    const spinnerBox = await spinner.boundingBox();
+    assert.ok(spinnerBox && Math.abs(spinnerBox.width - spinnerBox.height) < 1);
+    await expect(page.locator(".app-shell-assistant")).toHaveCount(0);
+    await expect(
+      page.getByRole("dialog", { name: "Prompt rapide à l’assistant" }),
+    ).toBeHidden();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.__quickAssistantTest.linkedNoteId ===
+          window.__quickAssistantTest.noteId,
+        ),
+      )
+      .toBe(true);
+
+    await page.evaluate(() =>
+      window.__quickAssistantTest.reject(new Error("PRIVATE provider detail")),
+    );
+    const error = page.getByRole("alert");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText(
+      "L’assistant n’a pas pu terminer la demande. Votre contenu local est conservé.",
+    );
+    await expect(error).not.toContainText("SYNTHETIC PRIVATE PROMPT");
+    await expect(error).not.toContainText("PRIVATE provider detail");
+    await expect(error.locator(".toast-spinner")).toHaveCount(0);
+    await expect(progress).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});
+
 test("Ctrl+K palette exposes the quick assistant command", async () => {
   const { page, close } = await fixture();
   try {
