@@ -242,9 +242,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
   let deltas = "";
   let completed = "";
   const calls: CodexFunctionCall[] = [];
-  for (const block of raw.split(/\r?\n\r?\n+/)) {
+  for (const block of raw.split(/(?:\r\n|\n|\r)(?:\r\n|\n|\r)+/)) {
     const data = block
-      .split(/\r?\n/)
+      .split(/\r\n|\n|\r/)
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice(5).trim())
       .join("");

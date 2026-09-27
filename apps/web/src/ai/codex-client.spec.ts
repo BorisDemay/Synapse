@@ -619,6 +619,51 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("reads a local tool call from CR-only-framed ChatGPT subscription events", async () => {
+    const functionCall = {
+      arguments: '{"markdown":"# Brouillon CR"}',
+      call_id: "call-stream-cr-1",
+      name: "create_note",
+      type: "response.function_call_arguments.done",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [functionCall, { type: "response.completed" }]
+              .map(
+                (event) =>
+                  `event: ${event.type}\rdata: ${JSON.stringify(event)}`,
+              )
+              .join("\r\r"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: '{"markdown":"# Brouillon CR"}',
+          callId: "call-stream-cr-1",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
   it.each([
     { contentType: "text/event-stream", label: "an SSE content type" },
     { contentType: "application/json", label: "an SSE body" },
