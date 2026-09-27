@@ -326,6 +326,8 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         completed = event.output_text;
       } else if (response) {
         completed = response.text;
+      }
+      if (response) {
         calls.push(...response.functionCalls);
       }
     }

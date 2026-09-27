@@ -566,6 +566,49 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("rejects completed SSE event text alongside a nested local tool call without exposing provider text", async () => {
+    const providerText = "# Markdown fournisseur à ne jamais afficher.";
+    const completed = {
+      output_text: providerText,
+      response: {
+        output: [
+          {
+            arguments: '{"markdown":"# Brouillon"}',
+            call_id: "call-completed-output-text-and-tool",
+            name: "create_note",
+            type: "function_call",
+          },
+        ],
+      },
+      type: "response.completed",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(`data: ${JSON.stringify(completed)}\n\n`, {
+          headers: { "content-type": "text/event-stream" },
+          status: 200,
+        }),
+      ),
+    );
+
+    const completion = completeCodexAgent({
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "gpt-5.6-luna",
+      token,
+      toolChoice: "required",
+    });
+
+    await expect(completion).rejects.toThrow(
+      "L’assistant n’a pas pu répondre.",
+    );
+    await completion.catch((error: unknown) => {
+      expect(JSON.stringify(error)).not.toContain(providerText);
+      expect(String(error)).not.toContain(providerText);
+    });
+  });
+
   it.each([
     { label: "null", response: null },
     { label: "string", response: "not-a-response-object" },
