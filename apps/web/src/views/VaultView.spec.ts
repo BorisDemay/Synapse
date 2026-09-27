@@ -11,6 +11,7 @@ import {
   synapseTooltip,
 } from "@synapse/ui";
 import { useAuthStore } from "../stores/auth";
+import { useAssistantStore } from "../stores/assistant";
 import { useVaultStore } from "../stores/vault";
 import VaultView from "./VaultView.vue";
 import { clearToasts, toasts } from "../notifications/toasts";
@@ -1033,5 +1034,99 @@ describe("VaultView attachment preview accessibility", () => {
     expect(wrapper.find(".attachment-preview-backdrop").exists()).toBe(false);
     expect(document.body.style.overflow).toBe("");
     wrapper.unmount();
+  });
+});
+
+describe("VaultView quick assistant prompt", () => {
+  const models = [
+    { id: "model-a", label: "Model A", reasoningLevels: [], serviceTiers: [] },
+    { id: "model-b", label: "Model B", reasoningLevels: [], serviceTiers: [] },
+  ];
+  it("closes and clears the prompt when the vault locks or changes", async () => {
+    const { vault, wrapper } = await mountVault();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    await prompt.get("input").setValue("synthetic private prompt");
+
+    vault.lock();
+    await flushPromises();
+    expect(prompt.props("open")).toBe(false);
+    vault.unlock(new Uint8Array(32), "vault-2");
+    await flushPromises();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    expect(prompt.props("open")).toBe(true);
+    expect((prompt.get("input").element as HTMLInputElement).value).toBe("");
+
+    await prompt.get("input").setValue("another synthetic prompt");
+    vault.lock();
+    vault.unlock(new Uint8Array(32), "vault-3");
+    await flushPromises();
+    expect(prompt.props("open")).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("accepts physical KeyK on modified layouts but ignores AltGraph", async () => {
+    const { wrapper } = await mountVault();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        altKey: true,
+        key: "å",
+        code: "KeyK",
+      }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    expect(prompt.props("open")).toBe(true);
+    const altGraphEvent = new KeyboardEvent("keydown", {
+      ctrlKey: true,
+      altKey: true,
+      key: "k",
+      code: "KeyK",
+    });
+    Object.defineProperty(altGraphEvent, "getModifierState", {
+      value: (modifier: string) => modifier === "AltGraph",
+    });
+    window.dispatchEvent(altGraphEvent);
+    await flushPromises();
+    expect(prompt.props("open")).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("starts a background conversation with the selected model without opening the panel", async () => {
+    const { vault, wrapper } = await mountVault();
+    const assistant = useAssistantStore();
+    assistant.connected = true;
+    assistant.model = "model-a";
+    assistant.models = models;
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    const setModel = vi.spyOn(assistant, "setModel");
+    const newConversation = vi.spyOn(assistant, "newConversation");
+    const send = vi.spyOn(assistant, "send").mockResolvedValue("");
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
+    );
+    await flushPromises();
+    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+    expect(prompt.props("open")).toBe(true);
+    await prompt.get("input").setValue("  Write a plan  ");
+    await prompt.get("select").setValue("model-b");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(setModel).toHaveBeenCalledWith("model-b");
+    expect(newConversation).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith("Write a plan");
+    expect(prompt.props("open")).toBe(false);
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      false,
+    );
   });
 });

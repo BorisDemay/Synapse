@@ -123,6 +123,72 @@ for (const mode of ["Markdown", "Texte brut"]) {
   });
 }
 
+test("Ctrl+Alt+K opens and closes the quick assistant without opening the assistant panel", async () => {
+  const { page, close } = await fixture();
+  try {
+    const editor = page.getByRole("textbox", {
+      name: "Éditeur Markdown",
+      exact: true,
+    });
+    await editor.focus();
+    await page.keyboard.press("Control+Alt+k");
+    const dialog = page.getByRole("dialog", {
+      name: "Prompt rapide à l’assistant",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Prompt à envoyer à l’assistant" }),
+    ).toBeFocused();
+    await page.keyboard.press("Control+Alt+k");
+    await expect(dialog).toBeHidden();
+    await expect(page.locator(".app-shell-assistant")).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});
+
+test("Ctrl+K palette exposes the quick assistant command", async () => {
+  const { page, close } = await fixture();
+  try {
+    await page.keyboard.press("Control+k");
+    const search = page.getByRole("searchbox", {
+      name: "Rechercher une note ou une commande",
+    });
+    await search.fill("Prompt rapide");
+    await page
+      .getByRole("option", { name: /Prompt rapide à l’assistant/ })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "Prompt rapide à l’assistant" }),
+    ).toBeVisible();
+  } finally {
+    await close();
+  }
+});
+
+test("quick assistant shortcut does not stack over settings and Escape restores focus", async () => {
+  const { page, close } = await fixture();
+  try {
+    const trigger = page.getByRole("button", { name: "Ouvrir les paramètres" });
+    await trigger.click();
+    const settings = page.getByRole("dialog", {
+      name: "Paramètres",
+      exact: true,
+    });
+    await expect(settings).toBeVisible();
+    await page.keyboard.press("Control+Alt+k");
+    await expect(settings).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Prompt rapide à l’assistant" }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(settings).toBeHidden();
+    await expect(trigger).toBeFocused();
+  } finally {
+    await close();
+  }
+});
+
 test("duplicate filenames retain full folder context in search", async () => {
   const { page, close } = await fixture();
   try {
