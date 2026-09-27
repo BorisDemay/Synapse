@@ -936,6 +936,67 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("rejects an unoffered streamed Responses tool before returning a later offered action without exposing its fixture", async () => {
+    const providerFixture = "provider-unoffered-tool-fixture";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            {
+              arguments: '{"markdown":"# À ne pas exécuter"}',
+              call_id: "call-unoffered",
+              name: providerFixture,
+              type: "response.function_call_arguments.done",
+            },
+            {
+              arguments: '{"markdown":"# Action connue"}',
+              call_id: "call-offered-after-unoffered",
+              name: "create_note",
+              type: "response.function_call_arguments.done",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ),
+    );
+
+    let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+    const error = await completeCodexAgent({
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "gpt-5.6-luna",
+      token,
+      toolChoice: "required",
+      tools: [
+        {
+          description: "Crée une note.",
+          name: "create_note",
+          parameters: { type: "object" },
+        },
+      ],
+      transport: "chatgpt",
+    })
+      .then((response) => {
+        result = response;
+        return undefined;
+      })
+      .catch((reason: unknown) => reason);
+
+    expect(result).toBeUndefined();
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as Error),
+    );
+    expect(String(error)).not.toContain(providerFixture);
+    expect(serialized).not.toContain(providerFixture);
+  });
+
   it("reads a local tool call from CRLF-framed ChatGPT subscription events", async () => {
     const functionCall = {
       arguments: '{"markdown":"# Brouillon CRLF"}',

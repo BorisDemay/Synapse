@@ -126,6 +126,21 @@ function rejectMultipleFunctionCalls(
   return response;
 }
 
+function rejectUnofferedFunctionCalls(
+  response: CodexAgentResponse,
+  tools: CodexTool[] | undefined,
+): CodexAgentResponse {
+  if (
+    tools !== undefined &&
+    response.functionCalls.some(
+      (functionCall) => !tools.some((tool) => tool.name === functionCall.name),
+    )
+  ) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  return response;
+}
+
 function chatgptHeaders(
   token: string,
   accountId?: string,
@@ -391,6 +406,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
 function readAgentResponse(
   contentType: string,
   raw: string,
+  tools?: CodexTool[],
 ): CodexAgentResponse {
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
@@ -404,12 +420,16 @@ function readAgentResponse(
     if (!response.text && response.functionCalls.length === 0) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
-    return rejectMultipleFunctionCalls(response);
+    return rejectMultipleFunctionCalls(
+      rejectUnofferedFunctionCalls(response, tools),
+    );
   }
   const isSse =
     contentType.includes("event-stream") || trimmed.includes("data:");
   if (isSse) {
-    return rejectMultipleFunctionCalls(parseResponsesSse(raw));
+    return rejectMultipleFunctionCalls(
+      rejectUnofferedFunctionCalls(parseResponsesSse(raw), tools),
+    );
   }
   throw assistantError("L’assistant n’a pas pu répondre.");
 }
@@ -760,7 +780,10 @@ export async function completeCodexAgent(
 
   const chatgpt = input.transport === "chatgpt";
   if (input.baseUrl && !chatgpt) {
-    return completeChatCompletionsAgent(input);
+    return rejectUnofferedFunctionCalls(
+      await completeChatCompletionsAgent(input),
+      input.tools,
+    );
   }
   const payload: Record<string, unknown> = {
     input: chatgpt
@@ -831,7 +854,14 @@ export async function completeCodexAgent(
 
   try {
     const raw = await response.text();
-    return readAgentResponse(response.headers.get("content-type") ?? "", raw);
+    return rejectUnofferedFunctionCalls(
+      readAgentResponse(
+        response.headers.get("content-type") ?? "",
+        raw,
+        input.tools,
+      ),
+      input.tools,
+    );
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("L’assistant")) {
       throw error;
