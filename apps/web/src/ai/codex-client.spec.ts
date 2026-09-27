@@ -310,6 +310,80 @@ describe("completeCodexChat", () => {
   );
 
   it.each([
+    { label: "null", outputText: null },
+    { label: "number", outputText: 42 },
+    { label: "boolean", outputText: false },
+    {
+      label: "object",
+      outputText: { providerPayload: "Fournisseur: output_text non textuel." },
+    },
+    {
+      label: "array",
+      outputText: ["Fournisseur: output_text non textuel."],
+    },
+  ])(
+    "rejects a $label Responses output_text in every Responses flow before returning a local tool call",
+    async ({ outputText }) => {
+      const providerPayload = "Fournisseur: output_text non textuel.";
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-before-malformed-output-text",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        new Response(
+          JSON.stringify({ output: [functionCall], output_text: outputText }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+        new Response(
+          [
+            { ...functionCall, type: "response.function_call_arguments.done" },
+            { output_text: outputText, type: "response.completed" },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+        new Response(
+          [
+            { ...functionCall, type: "response.function_call_arguments.done" },
+            {
+              response: { output: [functionCall], output_text: outputText },
+              type: "response.completed",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+        const error = await completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }).catch((reason: unknown) => reason);
+
+        expect(error).toMatchObject({
+          message: "L’assistant n’a pas pu répondre.",
+        });
+        const serialized = JSON.stringify(
+          error,
+          Object.getOwnPropertyNames(error as Error),
+        );
+        expect(String(error)).not.toContain(providerPayload);
+        expect(serialized).not.toContain(providerPayload);
+      }
+    },
+  );
+
+  it.each([
     { label: "object", output: {} },
     { label: "null", output: null },
     { label: "string", output: "not-an-output-array" },
