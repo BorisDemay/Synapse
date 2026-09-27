@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import LocalFolderPanel from "./LocalFolderPanel.vue";
 import DeletedItemsPanel from "./DeletedItemsPanel.vue";
+import QuickAssistantPrompt from "../components/QuickAssistantPrompt.vue";
 import {
   AiChat,
   AiConversationPanel,
@@ -83,6 +84,7 @@ const formError = ref("");
 const editorSurface = ref<InstanceType<typeof MarkdownEditor> | null>(null);
 const shell = ref<InstanceType<typeof AppShell> | null>(null);
 const assistantOpen = ref(false);
+const quickAssistantOpen = ref(false);
 const assistantHistoryOpen = ref(false);
 const noteHistoryOpen = ref(false);
 const compactAssistant = useCompactAssistantLayout();
@@ -279,6 +281,11 @@ const searchResults = computed(() =>
 
 const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: "new-note", label: "Nouvelle note" },
+  {
+    id: "quick-assistant",
+    label: "Prompt rapide à l’assistant",
+    hint: "Ctrl+Alt+K",
+  },
   { id: "new-folder", label: "Nouveau dossier" },
   { id: "lock", label: "Verrouiller le coffre" },
   { id: "settings", label: "Paramètres" },
@@ -604,6 +611,87 @@ async function sendAssistant(prompt: string) {
   } catch {
     // The store already exposes a safe, redacted error.
   }
+}
+
+function openQuickAssistant() {
+  if (vault.isUnlocked) quickAssistantOpen.value = true;
+}
+
+function closeQuickAssistant() {
+  quickAssistantOpen.value = false;
+}
+
+function isAnotherModalOpen(): boolean {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[role="dialog"][aria-modal="true"], dialog[open]',
+    ),
+  ).some(
+    (element) =>
+      element.getClientRects().length > 0 &&
+      getComputedStyle(element).visibility !== "hidden",
+  );
+}
+
+function toggleQuickAssistantFromShortcut(event: KeyboardEvent) {
+  if (
+    !(event.ctrlKey || event.metaKey) ||
+    !event.altKey ||
+    event.shiftKey ||
+    event.getModifierState("AltGraph") ||
+    event.repeat ||
+    (event.key.toLowerCase() !== "k" && event.code !== "KeyK")
+  )
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (quickAssistantOpen.value) {
+    closeQuickAssistant();
+    return;
+  }
+  if (isAnotherModalOpen()) return;
+  openQuickAssistant();
+}
+
+async function deliverQuickAssistantPrompt(prompt: string) {
+  try {
+    const createdNoteId = await assistant.send(prompt);
+    if (createdNoteId) await showNote(createdNoteId);
+    notify({ kind: "success", message: "Demande envoyée à l’assistant." });
+  } catch {
+    notify({
+      kind: "error",
+      message: assistant.error || "L’assistant n’a pas pu répondre.",
+    });
+  }
+}
+
+async function submitQuickAssistantPrompt(payload: {
+  model: string;
+  prompt: string;
+}) {
+  const prompt = payload.prompt.trim();
+  const model = payload.model.trim();
+  if (
+    !prompt ||
+    !model ||
+    !assistant.connected ||
+    assistant.busy ||
+    !vault.isUnlocked
+  )
+    return;
+  try {
+    await assistant.setModel(model);
+    await assistant.newConversation();
+  } catch {
+    notify({
+      kind: "error",
+      message: assistant.error || "Nouvelle conversation impossible.",
+    });
+    return;
+  }
+  closeQuickAssistant();
+  void deliverQuickAssistantPrompt(prompt);
 }
 
 async function showNote(id: string) {
@@ -1168,6 +1256,8 @@ async function deleteAccount(password: string) {
 function runCommand(id: string) {
   if (id === "new-note") {
     startNewNote();
+  } else if (id === "quick-assistant") {
+    openQuickAssistant();
   } else if (id === "new-folder") {
     const name = window.prompt("Nom du dossier");
     if (name?.trim()) {
@@ -1299,6 +1389,7 @@ function refreshBlobUrls() {
 
 onMounted(() => {
   window.addEventListener("online", onOnline);
+  window.addEventListener("keydown", toggleQuickAssistantFromShortcut);
   if (navigator.onLine) {
     void vault.synchronize();
   }
@@ -1330,6 +1421,7 @@ onUnmounted(() => {
   vaultViewEpoch++;
   closeDeletedItems();
   window.removeEventListener("online", onOnline);
+  window.removeEventListener("keydown", toggleQuickAssistantFromShortcut);
   for (const url of Object.values(blobUrls.value)) {
     URL.revokeObjectURL(url);
   }
@@ -1338,6 +1430,7 @@ onUnmounted(() => {
 watch(
   [() => vault.isUnlocked, () => vault.currentVaultId, () => auth.userId],
   () => {
+    quickAssistantOpen.value = false;
     vaultViewEpoch++;
     clearToasts();
     errorToastId = null;
@@ -1913,6 +2006,15 @@ watch(settingsOpen, (open) => {
     @run="runCommand"
     @select="selectNote"
     @update:query="searchQuery = $event"
+  />
+  <QuickAssistantPrompt
+    :busy="assistant.busy"
+    :connected="assistant.connected"
+    :model="assistant.model"
+    :models="assistant.models"
+    :open="quickAssistantOpen"
+    @close="closeQuickAssistant"
+    @submit="submitQuickAssistantPrompt"
   />
   <div
     v-if="attachmentPreview"
