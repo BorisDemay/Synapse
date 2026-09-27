@@ -1234,6 +1234,49 @@ describe("completeCodexChat", () => {
     ]);
   });
 
+  it.each([
+    { delta: null, label: "null" },
+    { delta: 42, label: "number" },
+    { delta: [], label: "array" },
+    { delta: {}, label: "object without text" },
+    { delta: { text: 42 }, label: "object with non-string text" },
+  ])(
+    "rejects a streamed $label text delta before returning a valid local tool call",
+    async ({ delta }) => {
+      const validCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-after-malformed-text-delta",
+        name: "create_note",
+        type: "response.function_call_arguments.done",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              [{ delta, type: "response.output_text.delta" }, validCall]
+                .map((event) => `data: ${JSON.stringify(event)}`)
+                .join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).rejects.toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+    },
+  );
+
   it("lists ChatGPT Codex models without sending notes", async () => {
     vi.stubGlobal(
       "fetch",

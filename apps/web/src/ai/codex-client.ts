@@ -229,12 +229,13 @@ function deltaText(value: unknown): string {
   if (
     value &&
     typeof value === "object" &&
+    !Array.isArray(value) &&
     "text" in value &&
     typeof (value as { text: unknown }).text === "string"
   ) {
     return (value as { text: string }).text;
   }
-  return "";
+  throw assistantError("L’assistant n’a pas pu répondre.");
 }
 
 function parseResponsesSse(raw: string): CodexAgentResponse {
