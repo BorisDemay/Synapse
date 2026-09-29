@@ -77,6 +77,7 @@ interface CodexOutputItem {
   arguments?: unknown;
   call_id?: unknown;
   content?: CodexOutputText[];
+  id?: unknown;
   name?: unknown;
   role?: unknown;
   type?: unknown;
@@ -299,6 +300,44 @@ function parseResponsesSse(
   let deltas = "";
   let completed = "";
   const calls: CodexFunctionCall[] = [];
+  const officialReferences: Array<{
+    arguments: string;
+    itemId: string;
+    outputIndex: number;
+  }> = [];
+  let sawOfficialPartial = false;
+
+  function finalFunctionCalls(
+    item: CodexOutputItem,
+    outputIndex: unknown,
+  ): CodexFunctionCall[] {
+    const finalCalls = extractFunctionCalls([item]);
+    if (!sawOfficialPartial || finalCalls.length === 0) {
+      return finalCalls;
+    }
+    if (
+      typeof item.id !== "string" ||
+      !item.id.trim() ||
+      !Number.isInteger(outputIndex) ||
+      (outputIndex as number) < 0
+    ) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    for (const finalCall of finalCalls) {
+      const referenceIndex = officialReferences.findIndex(
+        (reference) =>
+          reference.itemId === item.id &&
+          reference.outputIndex === outputIndex &&
+          reference.arguments === finalCall.arguments,
+      );
+      if (referenceIndex === -1) {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      officialReferences.splice(referenceIndex, 1);
+    }
+    return finalCalls;
+  }
+
   for (const block of raw.split(/\n\n+/)) {
     const data = block
       .split("\n")
@@ -380,6 +419,13 @@ function parseResponsesSse(
         (event.output_index as number) < 0
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
+      } else {
+        sawOfficialPartial = true;
+        officialReferences.push({
+          arguments: event.arguments,
+          itemId: event.item_id,
+          outputIndex: event.output_index as number,
+        });
       }
       // Official Responses streams identify this partial event by item_id and
       // output_index. Only a validated final output item may yield an action.
@@ -407,10 +453,9 @@ function parseResponsesSse(
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      const itemResponse = extractAgentResponse({
-        output: [event.item as CodexOutputItem],
-      });
-      calls.push(...itemResponse.functionCalls);
+      const item = event.item as CodexOutputItem;
+      const itemResponse = extractAgentResponse({ output: [item] });
+      calls.push(...finalFunctionCalls(item, event.output_index));
       completed += itemResponse.text;
     }
     if (event.type === "response.completed") {
@@ -426,7 +471,14 @@ function parseResponsesSse(
         ) {
           throw assistantError("L’assistant n’a pas pu répondre.");
         }
-        response = extractAgentResponse(event.response as CodexResponseBody);
+        const body = event.response as CodexResponseBody;
+        const output = outputItems(body);
+        response = {
+          functionCalls: output.flatMap((item, outputIndex) =>
+            finalFunctionCalls(item, outputIndex),
+          ),
+          text: outputText(body, output),
+        };
       }
       if (typeof event.output_text === "string") {
         completed = event.output_text;
@@ -435,6 +487,9 @@ function parseResponsesSse(
         calls.push(...response.functionCalls);
       }
     }
+  }
+  if (officialReferences.length > 0) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
   }
   const text = (completed.trim() || deltas).trim();
   const responseCalls = calls.filter((call) => {

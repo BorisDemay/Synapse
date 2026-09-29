@@ -754,9 +754,11 @@ describe("completeCodexChat", () => {
               item: {
                 arguments: argumentsValue,
                 call_id: "call-official-tool-call",
+                id: "item-official-tool-call",
                 name: "create_note",
                 type: "function_call",
               },
+              output_index: 0,
               type: "response.output_item.done",
             },
           ]
@@ -794,6 +796,158 @@ describe("completeCodexChat", () => {
       text: "",
     });
   });
+
+  it("reads an official Responses tool completion from a matching response.completed item", async () => {
+    const argumentsValue = '{"markdown":"# Brouillon officiel terminé"}';
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            {
+              arguments: argumentsValue,
+              item_id: "item-official-completed-tool-call",
+              output_index: 0,
+              type: "response.function_call_arguments.done",
+            },
+            {
+              response: {
+                output: [
+                  {
+                    arguments: argumentsValue,
+                    call_id: "call-official-completed-tool-call",
+                    id: "item-official-completed-tool-call",
+                    name: "create_note",
+                    type: "function_call",
+                  },
+                ],
+              },
+              type: "response.completed",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: argumentsValue,
+          callId: "call-official-completed-tool-call",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
+  it.each([
+    {
+      arguments: '{"markdown":"# Brouillon officiel"}',
+      itemId: "item-official-mismatched-final",
+      label: "item identifier",
+      outputIndex: 0,
+    },
+    {
+      arguments: '{"markdown":"# Brouillon officiel"}',
+      itemId: "item-official-partial",
+      label: "output index",
+      outputIndex: 1,
+    },
+    {
+      arguments: '{"markdown":"provider-official-mismatched-final-fixture"}',
+      itemId: "item-official-partial",
+      label: "arguments",
+      outputIndex: 0,
+    },
+  ])(
+    "rejects an official Responses final item with a mismatched $label without exposing its fixture",
+    async ({ arguments: argumentsValue, itemId, outputIndex }) => {
+      const providerFixture = "provider-official-mismatched-final-fixture";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            [
+              {
+                arguments: '{"markdown":"# Brouillon officiel"}',
+                item_id: "item-official-partial",
+                output_index: 0,
+                type: "response.function_call_arguments.done",
+              },
+              {
+                item: {
+                  arguments: argumentsValue,
+                  call_id: "call-official-mismatched-final",
+                  id: itemId,
+                  name: "create_note",
+                  type: "function_call",
+                },
+                output_index: outputIndex,
+                type: "response.output_item.done",
+              },
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+      );
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(String(error)).toBe("Error: L’assistant n’a pas pu répondre.");
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    },
+  );
 
   it.each([
     {
