@@ -1142,7 +1142,11 @@ describe("completeCodexChat", () => {
         output_index: 0,
         type: "response.function_call_arguments.done",
       },
-      { item: functionCall, type: "response.output_item.done" },
+      {
+        item: functionCall,
+        output_index: 0,
+        type: "response.output_item.done",
+      },
       { response: { output: [functionCall] }, type: "response.completed" },
     ];
     vi.stubGlobal(
@@ -1178,6 +1182,161 @@ describe("completeCodexChat", () => {
       text: "",
     });
   });
+
+  it.each([
+    {
+      finalEvent: (functionCall: Record<string, unknown>) => ({
+        item: functionCall,
+        output_index: 0,
+        type: "response.output_item.done",
+      }),
+      label: "response.output_item.done",
+    },
+    {
+      finalEvent: (functionCall: Record<string, unknown>) => ({
+        response: { output: [functionCall] },
+        type: "response.completed",
+      }),
+      label: "response.completed",
+    },
+  ])(
+    "accepts an official partial function-call reference only when $label resolves it exactly",
+    async ({ finalEvent }) => {
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon officiel"}',
+        call_id: "call-official-correlated",
+        id: "fc-official-correlated",
+        name: "create_note",
+        type: "function_call",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            [
+              {
+                arguments: functionCall.arguments,
+                item_id: functionCall.id,
+                output_index: 0,
+                type: "response.function_call_arguments.done",
+              },
+              finalEvent(functionCall),
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        }),
+      ).resolves.toEqual({
+        functionCalls: [
+          {
+            arguments: functionCall.arguments,
+            callId: functionCall.call_id,
+            name: functionCall.name,
+          },
+        ],
+        text: "",
+      });
+    },
+  );
+
+  it.each([
+    {
+      finalEvent: (functionCall: Record<string, unknown>) => ({
+        item: { ...functionCall, id: "fc-official-other" },
+        output_index: 0,
+        type: "response.output_item.done",
+      }),
+      label: "item_id divergent",
+    },
+    {
+      finalEvent: (functionCall: Record<string, unknown>) => ({
+        item: functionCall,
+        output_index: 1,
+        type: "response.output_item.done",
+      }),
+      label: "output_index divergent",
+    },
+    {
+      finalEvent: (functionCall: Record<string, unknown>) => ({
+        item: {
+          ...functionCall,
+          arguments: '{"markdown":"# Final différent"}',
+        },
+        output_index: 0,
+        type: "response.output_item.done",
+      }),
+      label: "arguments divergents",
+    },
+    {
+      finalEvent: () => undefined,
+      label: "référence partielle non résolue",
+    },
+  ])(
+    "rejects an official partial function-call reference with $label without exposing its fixture",
+    async ({ finalEvent }) => {
+      const providerFixture =
+        "fixture-fournisseur-officielle-a-ne-pas-divulguer";
+      const functionCall = {
+        arguments: JSON.stringify({ markdown: providerFixture }),
+        call_id: "call-official-mismatch",
+        id: "fc-official-mismatch",
+        name: "create_note",
+        type: "function_call",
+      };
+      const final = finalEvent(functionCall);
+      const events = [
+        {
+          arguments: functionCall.arguments,
+          item_id: functionCall.id,
+          output_index: 0,
+          type: "response.function_call_arguments.done",
+        },
+        ...(final ? [final] : []),
+      ];
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              events
+                .map((event) => `data: ${JSON.stringify(event)}`)
+                .join("\n\n"),
+              { headers: { "content-type": "text/event-stream" }, status: 200 },
+            ),
+          ),
+      );
+
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    },
+  );
 
   it("reads a local tool call from CRLF-framed ChatGPT subscription events", async () => {
     const functionCall = {

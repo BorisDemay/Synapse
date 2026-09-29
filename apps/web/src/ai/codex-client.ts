@@ -77,6 +77,7 @@ interface CodexOutputItem {
   arguments?: unknown;
   call_id?: unknown;
   content?: CodexOutputText[];
+  id?: unknown;
   name?: unknown;
   role?: unknown;
   type?: unknown;
@@ -286,6 +287,56 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
   let done = "";
   let completed = "";
   const calls: CodexFunctionCall[] = [];
+  const officialReferences: Array<{
+    arguments: string;
+    itemId: string;
+    outputIndex: number;
+  }> = [];
+  const resolvedOfficialCalls = new Set<string>();
+  let sawOfficialPartial = false;
+
+  function finalFunctionCalls(
+    item: CodexOutputItem,
+    outputIndex: unknown,
+  ): CodexFunctionCall[] {
+    const finalCalls = extractFunctionCalls([item]);
+    if (!sawOfficialPartial || finalCalls.length === 0) {
+      return finalCalls;
+    }
+    if (
+      typeof item.id !== "string" ||
+      !item.id.trim() ||
+      !Number.isInteger(outputIndex) ||
+      (outputIndex as number) < 0
+    ) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    for (const finalCall of finalCalls) {
+      const finalCallKey = JSON.stringify([
+        item.id,
+        outputIndex,
+        finalCall.arguments,
+        finalCall.callId,
+        finalCall.name,
+      ]);
+      const referenceIndex = officialReferences.findIndex(
+        (reference) =>
+          reference.itemId === item.id &&
+          reference.outputIndex === outputIndex &&
+          reference.arguments === finalCall.arguments,
+      );
+      if (referenceIndex === -1) {
+        if (resolvedOfficialCalls.has(finalCallKey)) {
+          continue;
+        }
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
+      officialReferences.splice(referenceIndex, 1);
+      resolvedOfficialCalls.add(finalCallKey);
+    }
+    return finalCalls;
+  }
+
   for (const block of raw.split(/(?:\r\n|\n|\r)(?:\r\n|\n|\r)+/)) {
     const data = block
       .split(/\r\n|\n|\r/)
@@ -371,6 +422,13 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         (event.output_index as number) < 0
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
+      } else {
+        sawOfficialPartial = true;
+        officialReferences.push({
+          arguments: event.arguments,
+          itemId: event.item_id,
+          outputIndex: event.output_index as number,
+        });
       }
       // Responses streams identify this event by item_id, not call_id.
       // The completed output item (or response.completed) carries the call id
@@ -396,10 +454,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      const itemResponse = extractAgentResponse({
-        output: [event.item as CodexOutputItem],
-      });
-      calls.push(...itemResponse.functionCalls);
+      const item = event.item as CodexOutputItem;
+      const itemResponse = extractAgentResponse({ output: [item] });
+      calls.push(...finalFunctionCalls(item, event.output_index));
       done += itemResponse.text;
     }
     if (event.type === "response.completed") {
@@ -412,7 +469,14 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         ) {
           throw assistantError("L’assistant n’a pas pu répondre.");
         }
-        response = extractAgentResponse(event.response as CodexResponseBody);
+        const body = event.response as CodexResponseBody;
+        const output = outputItems(body);
+        response = {
+          functionCalls: output.flatMap((item, outputIndex) =>
+            finalFunctionCalls(item, outputIndex),
+          ),
+          text: outputText(body, output),
+        };
       }
       const eventOutputText = responseOutputText(event);
       if (eventOutputText !== null) {
@@ -424,6 +488,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         calls.push(...response.functionCalls);
       }
     }
+  }
+  if (officialReferences.length > 0) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
   }
   const text = (completed || done || deltas).trim();
   const responseCalls = calls.filter((call) => {
