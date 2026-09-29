@@ -222,6 +222,9 @@ function outputText(
   body: CodexResponseBody,
   output: CodexOutputItem[],
 ): string {
+  if ("output_text" in body && typeof body.output_text !== "string") {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
   if (typeof body.output_text === "string" && body.output_text.trim()) {
     return body.output_text;
   }
@@ -398,6 +401,9 @@ function parseResponsesSse(
       completed += itemResponse.text;
     }
     if (event.type === "response.completed") {
+      if ("output_text" in event && typeof event.output_text !== "string") {
+        throw assistantError("L’assistant n’a pas pu répondre.");
+      }
       let response: CodexAgentResponse | undefined;
       if ("response" in event) {
         if (

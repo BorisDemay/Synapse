@@ -168,6 +168,83 @@ describe("completeCodexChat", () => {
   });
 
   it.each([
+    { label: "null", outputText: null },
+    { label: "number", outputText: 42 },
+    {
+      label: "object",
+      outputText: { providerFixture: "provider-fixture-output-text" },
+    },
+    { label: "array", outputText: ["provider-fixture-output-text"] },
+  ])(
+    "rejects a JSON or completed SSE Responses $label output_text before returning a local tool call",
+    async ({ outputText }) => {
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon"}',
+        call_id: "call-valid-output-text-type",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        new Response(
+          JSON.stringify({ output: [functionCall], output_text: outputText }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+        new Response(
+          [
+            {
+              ...functionCall,
+              type: "response.function_call_arguments.done",
+            },
+            { output_text: outputText, type: "response.completed" },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+        let result: unknown;
+        let thrown: unknown;
+
+        try {
+          result = await completeCodexAgent({
+            instructions: "Utilise un outil local.",
+            messages: [{ content: "Crée une note.", role: "user" }],
+            model: "gpt-5.6-luna",
+            token,
+            toolChoice: "required",
+            tools: [
+              {
+                description: "Crée une note locale.",
+                name: "create_note",
+                parameters: {
+                  additionalProperties: false,
+                  properties: { markdown: { type: "string" } },
+                  required: ["markdown"],
+                  type: "object",
+                },
+              },
+            ],
+          });
+        } catch (error) {
+          thrown = error;
+        }
+
+        expect(result).toBeUndefined();
+        expect(thrown).toMatchObject({
+          message: "L’assistant n’a pas pu répondre.",
+        });
+        expect(String(thrown)).toBe("Error: L’assistant n’a pas pu répondre.");
+        expect(JSON.stringify(thrown)).not.toContain(
+          "provider-fixture-output-text",
+        );
+      }
+    },
+  );
+
+  it.each([
     { label: "object", output: {} },
     { label: "null", output: null },
     { label: "string", output: "not-an-output-array" },
