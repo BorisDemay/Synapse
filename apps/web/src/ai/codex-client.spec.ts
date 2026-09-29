@@ -763,21 +763,32 @@ describe("completeCodexChat", () => {
     },
   );
 
-  it("accepts a message Responses item without content before a local tool call", async () => {
+  it("rejects a non-assistant Responses message without content before a valid local tool call in every flow without exposing its fixture", async () => {
+    const providerFixture = "provider-non-assistant-message-without-content";
+    const message = { role: "user", type: "message" };
     const functionCall = {
-      arguments: '{"markdown":"# Brouillon"}',
-      call_id: "call-after-message-without-content",
+      arguments: JSON.stringify({ value: providerFixture }),
+      call_id: "call-after-non-assistant-message-without-content",
       name: "create_note",
       type: "function_call",
     };
     const responses = [
+      new Response(JSON.stringify({ output: [message, functionCall] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
       new Response(
-        JSON.stringify({ output: [{ type: "message" }, functionCall] }),
-        { headers: { "content-type": "application/json" }, status: 200 },
+        [
+          { item: message, type: "response.output_item.done" },
+          { ...functionCall, type: "response.function_call_arguments.done" },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
       ),
       new Response(
         `data: ${JSON.stringify({
-          response: { output: [{ type: "message" }, functionCall] },
+          response: { output: [message, functionCall] },
           type: "response.completed",
         })}\n\n`,
         { headers: { "content-type": "text/event-stream" }, status: 200 },
@@ -786,18 +797,37 @@ describe("completeCodexChat", () => {
 
     for (const response of responses) {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
 
-      await expect(
-        completeCodexAgent({
-          instructions: "Utilise un outil local.",
-          messages: [{ content: "Crée une note.", role: "user" }],
-          model: "gpt-5.6-luna",
-          token,
-          toolChoice: "required",
-        }),
-      ).resolves.toMatchObject({
-        functionCalls: [{ callId: "call-after-message-without-content" }],
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
       });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
     }
   });
 

@@ -183,11 +183,13 @@ function validateOutputItem(item: CodexOutputItem): void {
   if (item.type !== "message") {
     return;
   }
-  if (
-    item.role !== "assistant" ||
-    !("content" in item) ||
-    !Array.isArray(item.content)
-  ) {
+  if ("role" in item && item.role !== "assistant") {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  if (!("content" in item)) {
+    return;
+  }
+  if (!Array.isArray(item.content)) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
   for (const part of item.content) {

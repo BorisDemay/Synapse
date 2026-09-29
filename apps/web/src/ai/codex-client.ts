@@ -171,10 +171,17 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
+    if (
+      item.type === "message" &&
+      "role" in item &&
+      item.role !== "assistant"
+    ) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
     if (!("content" in item)) {
       continue;
     }
-    if (item.type !== "message" || item.role !== "assistant") {
+    if (item.type !== "message") {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     if (!Array.isArray(item.content)) {
