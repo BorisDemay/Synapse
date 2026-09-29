@@ -1384,6 +1384,79 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it("rejects non-JSON function call arguments from every Responses flow without exposing its fixture", async () => {
+    const providerFixture = "provider-non-json-arguments-fixture";
+    const functionCall = {
+      arguments: providerFixture,
+      call_id: "call-non-json-arguments",
+      name: "create_note",
+      type: "function_call",
+    };
+    const responses = [
+      new Response(JSON.stringify({ output: [functionCall] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+      new Response(
+        `data: ${JSON.stringify({
+          ...functionCall,
+          type: "response.function_call_arguments.done",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+      new Response(
+        `data: ${JSON.stringify({
+          item: functionCall,
+          type: "response.output_item.done",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+      new Response(
+        `data: ${JSON.stringify({
+          response: { output: [functionCall] },
+          type: "response.completed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    ];
+
+    for (const response of responses) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    }
+  });
+
   it.each(["", "   "])(
     "rejects blank Responses arguments even when another call is valid",
     async (argumentsValue) => {

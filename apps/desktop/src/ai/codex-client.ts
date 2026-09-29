@@ -91,6 +91,20 @@ function assistantError(message: string): Error {
   return new Error(message);
 }
 
+function hasObjectJsonArguments(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return (
+      Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function hasRequiredFunctionCallFields<
   T extends {
     arguments?: unknown;
@@ -109,8 +123,7 @@ function hasRequiredFunctionCallFields<
     Boolean(value.call_id.trim()) &&
     typeof value.name === "string" &&
     Boolean(value.name.trim()) &&
-    typeof value.arguments === "string" &&
-    Boolean(value.arguments.trim())
+    hasObjectJsonArguments(value.arguments)
   );
 }
 
