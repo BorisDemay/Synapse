@@ -862,6 +862,88 @@ describe("completeCodexChat", () => {
 
   it.each([
     {
+      finalEvents: (functionCall: Record<string, unknown>) => [
+        {
+          item: functionCall,
+          output_index: 0,
+          type: "response.output_item.done",
+        },
+        {
+          item: functionCall,
+          output_index: 0,
+          type: "response.output_item.done",
+        },
+      ],
+      label: "response.output_item.done",
+    },
+    {
+      finalEvents: (functionCall: Record<string, unknown>) => [
+        { response: { output: [functionCall] }, type: "response.completed" },
+        { response: { output: [functionCall] }, type: "response.completed" },
+      ],
+      label: "response.completed",
+    },
+  ])(
+    "deduplicates repeated correlated official Responses $label finals",
+    async ({ finalEvents }) => {
+      const functionCall = {
+        arguments: '{"markdown":"# Brouillon officiel répété"}',
+        call_id: "call-official-repeated-final",
+        id: "item-official-repeated-final",
+        name: "create_note",
+        type: "function_call",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            [
+              {
+                arguments: functionCall.arguments,
+                item_id: functionCall.id,
+                output_index: 0,
+                type: "response.function_call_arguments.done",
+              },
+              ...finalEvents(functionCall),
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+          tools: [
+            {
+              description: "Crée une note.",
+              name: "create_note",
+              parameters: { type: "object" },
+            },
+          ],
+          transport: "chatgpt",
+        }),
+      ).resolves.toEqual({
+        functionCalls: [
+          {
+            arguments: functionCall.arguments,
+            callId: functionCall.call_id,
+            name: functionCall.name,
+          },
+        ],
+        text: "",
+      });
+    },
+  );
+
+  it.each([
+    {
       arguments: '{"markdown":"# Brouillon officiel"}',
       itemId: "item-official-mismatched-final",
       label: "item identifier",

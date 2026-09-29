@@ -305,6 +305,7 @@ function parseResponsesSse(
     itemId: string;
     outputIndex: number;
   }> = [];
+  const resolvedOfficialCalls = new Set<string>();
   let sawOfficialPartial = false;
 
   function finalFunctionCalls(
@@ -324,6 +325,13 @@ function parseResponsesSse(
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     for (const finalCall of finalCalls) {
+      const finalCallKey = JSON.stringify([
+        item.id,
+        outputIndex,
+        finalCall.arguments,
+        finalCall.callId,
+        finalCall.name,
+      ]);
       const referenceIndex = officialReferences.findIndex(
         (reference) =>
           reference.itemId === item.id &&
@@ -331,9 +339,13 @@ function parseResponsesSse(
           reference.arguments === finalCall.arguments,
       );
       if (referenceIndex === -1) {
+        if (resolvedOfficialCalls.has(finalCallKey)) {
+          continue;
+        }
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
       officialReferences.splice(referenceIndex, 1);
+      resolvedOfficialCalls.add(finalCallKey);
     }
     return finalCalls;
   }
