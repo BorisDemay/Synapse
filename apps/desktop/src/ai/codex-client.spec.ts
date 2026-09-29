@@ -909,6 +909,88 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("rejects an output_text part without text before a valid local tool call in every Responses flow", async () => {
+    const providerFixture = "provider-output-text-without-text-fixture";
+    const messageItem = {
+      content: [{ type: "output_text" }],
+      role: "assistant",
+      type: "message",
+    };
+    const functionCall = {
+      arguments: JSON.stringify({ value: providerFixture }),
+      call_id: "call-after-output-text-without-text",
+      name: "create_note",
+      type: "function_call",
+    };
+    const responses = [
+      new Response(JSON.stringify({ output: [messageItem, functionCall] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+      new Response(
+        [
+          { item: messageItem, type: "response.output_item.done" },
+          { ...functionCall, type: "response.function_call_arguments.done" },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+      new Response(
+        [
+          { item: messageItem, type: "response.output_item.added" },
+          { ...functionCall, type: "response.function_call_arguments.done" },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+      new Response(
+        `data: ${JSON.stringify({
+          response: { output: [messageItem, functionCall] },
+          type: "response.completed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    ];
+
+    for (const response of responses) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    }
+  });
+
   it("rejects a ChatGPT SSE create_note call mixed with non-blank text", async () => {
     vi.stubGlobal(
       "fetch",
