@@ -2241,6 +2241,51 @@ describe("completeCodexAgent over chat completions", () => {
     },
   );
 
+  it("rejects malformed JSON chat tool arguments without exposing the provider fixture", async () => {
+    const providerFixture = "provider-malformed-chat-arguments-fixture";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        chatCompletionsToolCallResponse([
+          {
+            function: {
+              arguments: `{\"value\":\"${providerFixture}\"`,
+              name: "create_note",
+            },
+            id: "call-malformed-chat-arguments",
+            type: "function",
+          },
+        ]),
+      ),
+    );
+
+    let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+    const error = await completeCodexAgent({
+      baseUrl,
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "glm-4.6",
+      token,
+      toolChoice: "required",
+    })
+      .then((agentResponse) => {
+        result = agentResponse;
+        return undefined;
+      })
+      .catch((reason: unknown) => reason);
+
+    expect(result).toBeUndefined();
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as Error),
+    );
+    expect(String(error)).not.toContain(providerFixture);
+    expect(serialized).not.toContain(providerFixture);
+  });
+
   it("rejects several tool calls with a fixed local error", async () => {
     vi.stubGlobal(
       "fetch",

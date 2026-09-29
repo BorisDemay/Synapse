@@ -947,8 +947,7 @@ function extractChatCompletionsFunctionCalls(
       !toolCall.id.trim() ||
       typeof fn.name !== "string" ||
       !fn.name.trim() ||
-      typeof fn.arguments !== "string" ||
-      !fn.arguments.trim()
+      !hasObjectJsonArguments(fn.arguments)
     ) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
