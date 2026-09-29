@@ -1154,6 +1154,70 @@ describe("completeCodexChat", () => {
     expect(serialized).not.toContain(providerFixture);
   });
 
+  it("rejects an unoffered streamed added Responses tool before returning a later offered action without exposing its fixture", async () => {
+    const providerFixture = "provider-added-unoffered-tool-fixture";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            {
+              item: {
+                arguments: '{"value":"fixture"}',
+                call_id: "call-added-unoffered",
+                name: providerFixture,
+                type: "function_call",
+              },
+              type: "response.output_item.added",
+            },
+            {
+              arguments: '{"value":"fixture"}',
+              call_id: "call-offered-after-added-unoffered",
+              name: "create_note",
+              type: "response.function_call_arguments.done",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ),
+    );
+
+    let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+    const error = await completeCodexAgent({
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "gpt-5.6-luna",
+      token,
+      toolChoice: "required",
+      tools: [
+        {
+          description: "Crée une note.",
+          name: "create_note",
+          parameters: { type: "object" },
+        },
+      ],
+      transport: "chatgpt",
+    })
+      .then((response) => {
+        result = response;
+        return undefined;
+      })
+      .catch((reason: unknown) => reason);
+
+    expect(result).toBeUndefined();
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as Error),
+    );
+    expect(String(error)).not.toContain(providerFixture);
+    expect(serialized).not.toContain(providerFixture);
+  });
+
   it("rejects a streamed added user message before returning a later local action without exposing its fixture", async () => {
     const providerFixture = "provider-added-user-message-fixture";
     vi.stubGlobal(

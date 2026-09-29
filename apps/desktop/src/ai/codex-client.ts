@@ -287,7 +287,10 @@ function deltaText(value: unknown): string {
   throw assistantError("L’assistant n’a pas pu répondre.");
 }
 
-function parseResponsesSse(raw: string): CodexAgentResponse {
+function parseResponsesSse(
+  raw: string,
+  tools?: CodexTool[],
+): CodexAgentResponse {
   let deltas = "";
   let completed = "";
   const calls: CodexFunctionCall[] = [];
@@ -373,7 +376,10 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       }
       const item = event.item as CodexOutputItem;
       outputItems({ output: [item] });
-      extractFunctionCalls([item]);
+      rejectUnofferedFunctionCalls(
+        { functionCalls: extractFunctionCalls([item]), text: "" },
+        tools,
+      );
     }
     if (event.type === "response.output_item.done") {
       if (
@@ -440,7 +446,7 @@ function readAgentResponse(
   if (isSse) {
     return rejectMultipleFunctionCalls(
       rejectUnofferedFunctionCalls(
-        rejectMixedTextAndFunctionCalls(parseResponsesSse(raw)),
+        rejectMixedTextAndFunctionCalls(parseResponsesSse(raw, tools)),
         tools,
       ),
     );
