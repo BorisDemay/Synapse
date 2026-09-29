@@ -29,6 +29,7 @@ __pycache__/
 /playwright-report/
 /test-results/
 /.screens/
+/screenshots/
 /dist/
 /apps/desktop/dist/
 

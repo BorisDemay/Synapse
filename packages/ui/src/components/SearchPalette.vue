@@ -18,6 +18,7 @@ export interface SearchResult {
 }
 
 export interface PaletteCommand {
+  category?: string;
   hint?: string;
   id: string;
   label: string;
@@ -36,6 +37,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   close: [];
+  open: [];
   run: [id: string];
   select: [id: string];
   "update:query": [value: string];
@@ -98,6 +100,17 @@ const visibleCommands = computed(() => {
   );
 });
 
+const commandGroups = computed(() => {
+  const groups: { label: string; commands: PaletteCommand[] }[] = [];
+  for (const command of visibleCommands.value) {
+    const label = command.category ?? "Commandes";
+    const group = groups.find((entry) => entry.label === label);
+    if (group) group.commands.push(command);
+    else groups.push({ label, commands: [command] });
+  }
+  return groups;
+});
+
 const items = computed(() => [
   ...visibleCommands.value.map((command) => ({
     kind: "command" as const,
@@ -126,6 +139,7 @@ async function openPalette(query = "") {
   }
   isOpen.value = true;
   openOverlay();
+  emit("open");
   emit("update:query", query);
   await nextTick();
   dialogFocus.attach();
@@ -146,6 +160,7 @@ async function togglePaletteFromShortcut() {
   }
   isOpen.value = true;
   openOverlay();
+  emit("open");
   await nextTick();
   dialogFocus.attach();
   input.value?.focus();
@@ -233,29 +248,30 @@ defineExpose({ openPalette, closePalette, isOpen });
         class="search-palette-list"
         role="listbox"
       >
-        <li
-          v-if="visibleCommands.length"
-          aria-hidden="true"
-          class="search-palette-group"
-          role="presentation"
-        >
-          Commandes
-        </li>
-        <li v-for="command in visibleCommands" :key="`command-${command.id}`">
-          <button
-            :aria-selected="
-              items[activeIndex]?.kind === 'command' &&
-              items[activeIndex]?.id === command.id
-            "
-            class="search-palette-option"
-            role="option"
-            type="button"
-            @click="activate(visibleCommands.indexOf(command))"
+        <template v-for="group in commandGroups" :key="group.label">
+          <li
+            aria-hidden="true"
+            class="search-palette-group"
+            role="presentation"
           >
-            <span>{{ command.label }}</span>
-            <small v-if="command.hint">{{ command.hint }}</small>
-          </button>
-        </li>
+            {{ group.label }}
+          </li>
+          <li v-for="command in group.commands" :key="`command-${command.id}`">
+            <button
+              :aria-selected="
+                items[activeIndex]?.kind === 'command' &&
+                items[activeIndex]?.id === command.id
+              "
+              class="search-palette-option"
+              role="option"
+              type="button"
+              @click="activate(visibleCommands.indexOf(command))"
+            >
+              <span>{{ command.label }}</span>
+              <small v-if="command.hint">{{ command.hint }}</small>
+            </button>
+          </li>
+        </template>
         <li
           v-if="props.results.length"
           aria-hidden="true"
@@ -282,7 +298,13 @@ defineExpose({ openPalette, closePalette, isOpen });
           </button>
         </li>
       </ul>
-      <p v-else class="search-palette-empty" role="status">Aucun résultat.</p>
+      <div v-else class="search-palette-empty" role="status">
+        <strong>Aucun résultat.</strong>
+        <span
+          >Essayez un titre, un chemin, <code>tag:ux</code> ou
+          <code>property:status</code>.</span
+        >
+      </div>
     </section>
   </div>
 </template>
@@ -364,7 +386,23 @@ defineExpose({ openPalette, closePalette, isOpen });
 }
 
 .search-palette-empty {
+  display: grid;
+  gap: 0.25rem;
   margin: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
   color: var(--synapse-color-text-muted);
+  background: var(--synapse-color-surface);
+  line-height: 1.45;
+}
+
+.search-palette-empty strong {
+  color: var(--synapse-color-text);
+}
+
+.search-palette-empty code {
+  font-family: var(--synapse-font-mono);
+  font-size: 0.85em;
 }
 </style>

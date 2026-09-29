@@ -68,12 +68,9 @@ export async function persistPendingOperation(
   );
   try {
     const noteStore = tx.objectStore("notes");
-    const cachedNoteKey = noteKey(
-      userId,
-      operation.vault_id,
-      operation.note_id,
+    const previousNote = await noteStore.get(
+      noteKey(userId, operation.vault_id, operation.note_id),
     );
-    const previousNote = await noteStore.get(cachedNoteKey);
     await noteStore.put(
       {
         userId,
@@ -84,7 +81,7 @@ export async function persistPendingOperation(
         ciphertextHash: operation.ciphertext_hash,
         nonce: operation.nonce,
       },
-      cachedNoteKey,
+      noteKey(userId, operation.vault_id, operation.note_id),
     );
     const sequenceKey = `${userId}:${operation.vault_id}:outbox-sequence`;
     const counter = await tx.objectStore("meta").get(sequenceKey);
@@ -150,11 +147,9 @@ export async function persistPendingOperation(
     }
     const protectedRevisions = new Set(recovery.preserveRevisions ?? []);
     for (const row of previous) {
-      const recordedAt = Date.parse(row.recordedAt);
       if (
         row.recoverySnapshot &&
-        (!Number.isFinite(recordedAt) ||
-          now - recordedAt > 7 * 24 * 60 * 60_000) &&
+        now - Date.parse(row.recordedAt) > 7 * 24 * 60 * 60_000 &&
         !protectedRevisions.has(row.revision)
       ) {
         await revisionStore.delete(

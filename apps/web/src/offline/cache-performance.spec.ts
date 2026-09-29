@@ -45,7 +45,7 @@ it("bounds ciphertext materialization to the requested vault and note history", 
     );
   }
 });
-it("prunes only the selected note in the same durable revision transaction", async () => {
+it("preserves legacy revision records when appending a new record", async () => {
   const db = await openOfflineDb();
   const tx = db.transaction("note_revisions", "readwrite");
   for (let revision = 0; revision < 60; revision++) {

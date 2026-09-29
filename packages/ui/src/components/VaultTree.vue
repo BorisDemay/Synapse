@@ -22,6 +22,8 @@ const props = defineProps<{
   attachedIds?: string[];
   nested?: boolean;
   nodes: VaultTreeNode[];
+  /** Identifiants des notes épinglées ; la ligne reflète leur état. */
+  pinnedIds?: string[];
   /** External selection (palette, recents, backlinks); the tree follows it. */
   selectedId?: string | null;
 }>();
@@ -29,8 +31,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   attach: [id: string];
   delete: [id: string];
+  /** Clic droit (ou Maj+F10 / touche Menu) sur une ligne non dossier. */
+  menu: [payload: { id: string; x: number; y: number }];
+  pin: [id: string];
   select: [id: string];
 }>();
+
+function isPinned(id: string) {
+  return (props.pinnedIds ?? []).includes(id);
+}
 
 const activeId = ref<string>();
 const treeElement = ref<HTMLElement>();
@@ -302,6 +311,46 @@ function onDeleteClick(event: MouseEvent, index: number) {
   remove(index);
 }
 
+function togglePin(index: number) {
+  const node = visibleNodesInRange(index, index + 1)[0]?.node;
+  if (node && !isFolder(node)) {
+    emit("pin", node.id);
+  }
+}
+
+function onPinClick(event: MouseEvent, index: number) {
+  event.preventDefault();
+  event.stopPropagation();
+  togglePin(index);
+}
+
+/** Ouvre le menu contextuel d'une ligne non dossier ; le destinataire décide
+ * s'il agit (la vue n'ouvre le menu que pour une vraie note). */
+function openMenu(coordinates: { x: number; y: number }, index: number) {
+  const node = visibleNodesInRange(index, index + 1)[0]?.node;
+  if (!node || isFolder(node)) {
+    return;
+  }
+  emit("menu", { id: node.id, x: coordinates.x, y: coordinates.y });
+}
+
+function onRowContextMenu(event: MouseEvent, index: number) {
+  openMenu({ x: event.clientX, y: event.clientY }, index);
+}
+
+/** Coordonnées dérivées de la ligne focusée : le clavier n'a pas de pointeur. */
+function onRowMenuKey(index: number) {
+  const element = treeItems.get(index);
+  if (!element) {
+    return;
+  }
+  const rect = element.getBoundingClientRect();
+  openMenu(
+    { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+    index,
+  );
+}
+
 function onItemClick(event: MouseEvent, index: number) {
   if (
     (event.ctrlKey || event.metaKey) &&
@@ -360,56 +409,69 @@ async function selectNext(index: number) {
         (attachedIds ?? []).includes(entry.node.id) ? 'true' : undefined
       "
       :data-kind="entry.node.kind"
+      :data-nested="entry.level > 1 ? 'true' : undefined"
       :data-status="entry.node.syncStatus"
       :data-tree-index="renderedStart + renderedIndex"
       role="treeitem"
       :tabindex="renderedStart + renderedIndex === activeIndex ? 0 : -1"
       @click="onItemClick($event, renderedStart + renderedIndex)"
+      @contextmenu.prevent="
+        onRowContextMenu($event, renderedStart + renderedIndex)
+      "
+      @keydown.context-menu.prevent="
+        onRowMenuKey(renderedStart + renderedIndex)
+      "
       @keydown.delete.prevent="remove(renderedStart + renderedIndex)"
       @keydown.down.prevent="selectNext(renderedStart + renderedIndex)"
       @keydown.enter.ctrl.prevent="attach(renderedStart + renderedIndex)"
       @keydown.enter.meta.prevent="attach(renderedStart + renderedIndex)"
+      @keydown.shift.f10.prevent="onRowMenuKey(renderedStart + renderedIndex)"
     >
       <div class="vault-tree-row">
-        <span
-          class="vault-tree-kind"
-          :data-kind="entry.node.kind ?? 'note'"
-          aria-hidden="true"
-        >
+        <span class="vault-tree-disclosure" aria-hidden="true">
           <svg
             v-if="entry.node.kind === 'folder'"
             viewBox="0 0 24 24"
             focusable="false"
           >
             <path
-              fill="currentColor"
-              d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2Z"
-            />
-          </svg>
-          <svg
-            v-else-if="entry.node.kind === 'attachment'"
-            viewBox="0 0 24 24"
-            focusable="false"
-          >
-            <path
-              fill="currentColor"
-              d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5S13.5 3.62 13.5 5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5Z"
-            />
-          </svg>
-          <svg v-else viewBox="0 0 24 24" focusable="false">
-            <path
-              fill="currentColor"
-              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 2.5L18.5 9H14V4.5ZM8 13h8v2H8v-2Zm0 4h5v2H8v-2Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="m9 6 6 6-6 6"
             />
           </svg>
         </span>
-        <span
-          v-if="entry.node.kind === 'folder'"
-          class="vault-tree-disclosure"
-          aria-hidden="true"
-          >{{ isExpanded(entry.node.id) ? "▾" : "▸" }}</span
-        >
         <span class="vault-tree-label">{{ entry.node.label }}</span>
+        <button
+          v-if="entry.node.kind !== 'folder'"
+          class="vault-tree-pin"
+          type="button"
+          tabindex="-1"
+          :aria-pressed="isPinned(entry.node.id) ? 'true' : 'false'"
+          :aria-label="`${isPinned(entry.node.id) ? 'Désépingler' : 'Épingler'} ${entry.node.label}`"
+          @click="onPinClick($event, renderedStart + renderedIndex)"
+          @mousedown.prevent
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              v-if="isPinned(entry.node.id)"
+              fill="currentColor"
+              d="M9 3h6v2l-1 1v3.2l3.5 3.5V15H13v6l-1 1-1-1v-6H6.5v-2.2L10 9.2V6L9 5V3z"
+            />
+            <path
+              v-else
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M9 3h6v2l-1 1v3.2l3.5 3.5V15H13v6l-1 1-1-1v-6H6.5v-2.2L10 9.2V6L9 5V3z"
+            />
+          </svg>
+        </button>
         <button
           v-if="entry.node.kind !== 'folder'"
           class="vault-tree-delete"
@@ -473,27 +535,47 @@ async function selectNext(index: number) {
   height: 3.5rem;
 }
 
+/* La ligne est un item de grille implicite : sans min-width: 0 sa
+   contribution min-content (libellé non sécable) élargirait la piste au-delà
+   du <li> et chasserait les boutons hors de la zone visible. */
 .vault-tree-row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
+  min-width: 0;
+  overflow: hidden;
   min-height: 2.35rem;
   padding: 0.55rem 0.45rem;
   padding-inline-start: calc(0.45rem + min(6rem, var(--tree-depth, 0) * 1rem));
   border-radius: var(--synapse-radius-sm);
   transition:
-    background 140ms ease,
+    background-color 140ms ease,
     color 140ms ease;
+}
+
+/* La hiérarchie se lit dans l'indentation : un guide vertical discret par
+   niveau ancêtre. La largeur du guide s'arrête au niveau courant pour ne pas
+   empiéter sur le libellé. */
+.vault-tree-item[data-nested="true"] > .vault-tree-row {
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--synapse-color-border) 0 1px,
+    transparent 1px 1rem
+  );
+  background-repeat: no-repeat;
+  background-position: 0.45rem 0;
+  background-size: calc(min(6rem, var(--tree-depth, 0) * 1rem) - 1rem + 1px)
+    100%;
 }
 
 .vault-tree-item:hover > .vault-tree-row {
   color: var(--synapse-color-text);
-  background: var(--synapse-color-surface-muted);
+  background-color: var(--synapse-color-surface-muted);
 }
 
 .vault-tree-item[aria-selected="true"] > .vault-tree-row {
   color: var(--synapse-color-accent-strong);
-  background: var(--synapse-color-surface-accent);
+  background-color: var(--synapse-color-surface-accent);
   font-weight: 650;
 }
 
@@ -501,77 +583,44 @@ async function selectNext(index: number) {
   box-shadow: inset 3px 0 0 var(--synapse-color-accent);
 }
 
-/* Les dossiers sont des conteneurs : pastille pleine teintée, rail d'accent et
-   icône de dossier. Les notes restent des feuilles plates et discrètes avec une
-   icône de document. La forme et le fond suffisent à distinguer les deux au
-   premier regard, y compris en thème clair comme en thème sombre. */
+/* Aucune icône ni pastille : seuls le chevron et la graisse distinguent un
+   dossier d'une note, l'indentation porte le reste de la structure. */
 .vault-tree-item[data-kind="folder"] > .vault-tree-row {
-  padding-inline-start: calc(
-    0.45rem - 3px + min(6rem, var(--tree-depth, 0) * 1rem)
-  );
   color: var(--synapse-color-text);
-  background: color-mix(
-    in srgb,
-    var(--synapse-color-accent) 9%,
-    var(--synapse-color-surface-muted)
-  );
-  border: 1px solid var(--synapse-color-border);
-  border-inline-start: 3px solid var(--synapse-color-accent);
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.vault-tree-item[data-kind="folder"]:hover:not([aria-selected="true"])
-  > .vault-tree-row {
-  background: color-mix(
-    in srgb,
-    var(--synapse-color-accent) 16%,
-    var(--synapse-color-surface-muted)
-  );
-}
-
-.vault-tree-item[data-kind="folder"][aria-selected="true"] > .vault-tree-row {
-  color: var(--synapse-color-accent-strong);
-  background: var(--synapse-color-surface-accent);
-  border-color: var(--synapse-color-accent);
-}
-
-.vault-tree-item[data-kind="folder"][aria-selected="true"]:hover
-  > .vault-tree-row {
-  background: color-mix(
-    in srgb,
-    var(--synapse-color-accent) 22%,
-    var(--synapse-color-surface-accent)
-  );
-}
-
-.vault-tree-kind {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 1.1rem;
-  height: 1.1rem;
-  color: var(--synapse-color-text-muted);
-}
-
-.vault-tree-kind svg {
-  width: 100%;
-  height: 100%;
-}
-
-.vault-tree-item[data-kind="folder"] > .vault-tree-row > .vault-tree-kind {
-  color: var(--synapse-color-accent);
+  font-weight: 650;
 }
 
 .vault-tree-disclosure {
-  flex-shrink: 0;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
   color: var(--synapse-color-accent);
-  font-size: 0.75rem;
+}
+
+.vault-tree-disclosure svg {
+  width: 100%;
+  height: 100%;
+  transition: transform 140ms ease;
+}
+
+.vault-tree-item[aria-expanded="true"]
+  > .vault-tree-row
+  > .vault-tree-disclosure
+  svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vault-tree-disclosure svg {
+    transition: none;
+  }
 }
 
 .vault-tree-label {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -580,7 +629,7 @@ async function selectNext(index: number) {
 
 .vault-tree-delete {
   display: inline-flex;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 1.85rem;
@@ -616,6 +665,54 @@ async function selectNext(index: number) {
 .vault-tree-item:focus-within .vault-tree-delete,
 .vault-tree-delete:focus-visible {
   opacity: 1;
+}
+
+/* Épingle : même logique de révélation que la suppression, mais une note
+   épinglée reste visible en permanence pour rappeler son état. */
+.vault-tree-pin {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 1px solid
+    color-mix(in srgb, var(--synapse-color-accent) 35%, transparent);
+  border-radius: 0.5rem;
+  color: var(--synapse-color-accent);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 12%,
+    var(--synapse-color-surface-raised)
+  );
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity 140ms ease,
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.vault-tree-item:hover .vault-tree-pin,
+.vault-tree-item:focus-within .vault-tree-pin,
+.vault-tree-pin:focus-visible,
+.vault-tree-pin[data-pinned="true"] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .vault-tree-pin {
+    opacity: 1;
+  }
+}
+
+.vault-tree-pin:hover,
+.vault-tree-pin:focus-visible {
+  color: var(--synapse-color-accent-contrast);
+  background: var(--synapse-color-accent);
+  border-color: var(--synapse-color-accent);
 }
 
 @media (hover: none) {

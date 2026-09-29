@@ -37,6 +37,16 @@ function isDisabled(item: MarkdownMenuItem): boolean {
   return item.type === "item" && item.disabled === true;
 }
 
+// The roving index counts only focusable entries, so the active style must be
+// resolved against `activables` rather than the raw `v-for` index that
+// includes separator rows.
+function isActive(item: MarkdownMenuItem): boolean {
+  return (
+    item.type !== "separator" &&
+    activables.value.indexOf(item) === activeIndex.value
+  );
+}
+
 function nextActivable(from: number, delta: number): number {
   const count = activables.value.length;
   if (count === 0) {
@@ -220,7 +230,7 @@ defineExpose({
             item.type === 'item' && item.destructive,
           'synapse-markdown-context-item--disabled':
             item.type === 'item' && item.disabled,
-          'synapse-markdown-context-item--active': index === activeIndex,
+          'synapse-markdown-context-item--active': isActive(item),
         }"
         class="synapse-markdown-context-item"
         role="menuitem"

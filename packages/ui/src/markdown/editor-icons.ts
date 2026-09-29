@@ -39,6 +39,19 @@ const MENU_ICON_PATHS: Readonly<Record<string, string>> = {
   "paste-plain": "M9 5h6M10 3h4v4h-4zM7 5H5v16h14V5h-2M10 11h4M12 11v6",
   "select-all":
     "M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 11v2M20 11v2M11 4h2M11 20h2",
+  // Icônes du menu contextuel de l'arbre du coffre (mêmes tracés que les
+  // boutons épine et corbeille de VaultTree pour rester cohérents).
+  pin: "M9 3h6v2l-1 1v3.2l3.5 3.5V15H13v6l-1 1-1-1v-6H6.5v-2.2L10 9.2V6L9 5V3z",
+  trash:
+    "M5 7h14M10 7V5.8A1.8 1.8 0 0 1 11.8 4h.4A1.8 1.8 0 0 1 14 5.8V7m-7.2 0 .7 12.1A1.8 1.8 0 0 0 9.3 21h5.4a1.8 1.8 0 0 0 1.8-1.9L17.2 7M10 11v6M14 11v6",
+  "export-pdf": "M7 3h7l5 5v13H7zM14 3v5h5M10 12v5m0 0-2-2m2 2 2-2M9 19.5h6",
+  "export-markdown": "M12 4v10m-3.5-3.5L12 14l3.5-3.5M5 16v3h14v-3",
+  "copy-link":
+    "M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1",
+  // Le wikilink est un texte `[[chemin]]` : deux paires de crochets imbriquées.
+  "copy-wikilink": "M7 5 3 12l4 7M11 5 7 12l4 7M13 5l4 7-4 7M17 5l4 7-4 7",
+  duplicate: "M8 8h10v11H8zM6 5h10v3M6 5v11h2",
+  history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7.5V12l3 2",
   default: "M5 5h14v14H5z",
 };
 

@@ -46,41 +46,41 @@ function confirmAction(
       <div>
         <h2>Conflit de synchronisation</h2>
         <p>
-          Trois versions chiffrées ont divergé. Choisissez explicitement une
-          résolution ; l’historique n’est pas écrasé.
+          Synapse a conservé les trois versions. Comparez ce qui a changé sur
+          cet appareil et à distance, puis publiez une nouvelle révision.
         </p>
       </div>
     </div>
 
-    <div class="conflict-panes">
-      <article>
+    <div class="conflict-version-grid">
+      <article class="conflict-card">
         <h3>Base</h3>
         <pre aria-label="Version de base">{{ props.base }}</pre>
       </article>
-      <article>
-        <h3>Locale</h3>
+      <article class="conflict-card">
+        <h3>Sur cet appareil</h3>
         <pre aria-label="Version locale">{{ props.local }}</pre>
       </article>
-      <article>
-        <h3>Distante</h3>
+      <article class="conflict-card">
+        <h3>À distance</h3>
         <pre aria-label="Version distante">{{ props.remote }}</pre>
       </article>
     </div>
-    <div class="conflict-diffs" aria-label="Diffs lisibles">
-      <article>
-        <h3>Changements locaux</h3>
+    <div class="conflict-diff-grid" aria-label="Diffs lisibles">
+      <article class="conflict-card">
+        <h3>Ce qui a changé sur cet appareil</h3>
         <pre><span v-for="(line, index) in localDiff" :key="`local-${index}`" :data-kind="line.kind">{{ line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " " }} {{ line.text }}
 </span></pre>
       </article>
-      <article>
-        <h3>Changements distants</h3>
+      <article class="conflict-card">
+        <h3>Ce qui a changé à distance</h3>
         <pre><span v-for="(line, index) in remoteDiff" :key="`remote-${index}`" :data-kind="line.kind">{{ line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " " }} {{ line.text }}
 </span></pre>
       </article>
     </div>
 
-    <label class="manual-edit">
-      Édition manuelle
+    <label class="manual-edit conflict-card conflict-manual-card">
+      <span>Édition manuelle</span>
       <textarea
         :value="props.manualDraft ?? props.local"
         aria-label="Brouillon de résolution"
@@ -93,7 +93,11 @@ function confirmAction(
       />
     </label>
 
-    <div class="conflict-actions">
+    <div class="conflict-actions conflict-card">
+      <p class="conflict-action-hint">
+        Chaque choix crée une nouvelle révision chiffrée ; les variantes restent
+        disponibles dans l’historique local.
+      </p>
       <button
         class="action-primary"
         type="button"
@@ -139,24 +143,29 @@ function confirmAction(
 
 <style scoped>
 .conflict-resolver {
+  align-self: start;
+  justify-self: center;
   min-height: 0;
+  max-height: calc(100dvh - 8rem);
+  width: min(68rem, calc(100% - clamp(2rem, 6vw, 4rem)));
+  margin: clamp(1.25rem, 4vh, 2.25rem) 0;
   overflow: auto;
   display: grid;
-  gap: 1.25rem;
-  padding: clamp(1rem, 3vw, 1.75rem);
+  gap: 1rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
   border: 1px solid
     color-mix(
       in srgb,
-      var(--synapse-color-warning) 35%,
+      var(--synapse-color-warning) 32%,
       var(--synapse-color-border)
     );
-  border-radius: var(--synapse-radius-md);
+  border-radius: var(--synapse-radius-lg);
   background: color-mix(
     in srgb,
-    var(--synapse-color-warning) 7%,
+    var(--synapse-color-warning) 5%,
     var(--synapse-color-surface-raised)
   );
-  box-shadow: var(--synapse-shadow-sm);
+  box-shadow: var(--synapse-shadow-md);
 }
 
 .conflict-heading {
@@ -188,69 +197,99 @@ function confirmAction(
   line-height: 1.55;
 }
 
-.conflict-panes {
+.conflict-version-grid,
+.conflict-diff-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
 
-.conflict-diffs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+.conflict-version-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.conflict-diffs h3 {
-  margin: 0 0 0.35rem;
+
+.conflict-diff-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.conflict-card {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-md);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 82%,
+    var(--synapse-color-surface)
+  );
+}
+
+.conflict-card h3 {
+  margin: 0;
   font-size: 0.9rem;
 }
-.conflict-diffs pre {
+
+.conflict-card pre {
   margin: 0;
-  max-height: 14rem;
+  min-height: 7rem;
+  max-height: 12rem;
+  padding: 0.65rem;
   overflow: auto;
   white-space: pre-wrap;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  background: var(--synapse-color-surface);
+  font-family: var(--synapse-font-mono);
+  font-size: 0.84rem;
+  line-height: 1.55;
 }
-.conflict-diffs [data-kind="added"] {
+
+.conflict-diff-grid pre {
+  min-height: 5rem;
+}
+
+.conflict-diff-grid [data-kind="added"] {
   color: #18794e;
   background: color-mix(in srgb, #22c55e 15%, transparent);
 }
-.conflict-diffs [data-kind="removed"] {
+.conflict-diff-grid [data-kind="removed"] {
   color: #b42318;
   background: color-mix(in srgb, #ef4444 15%, transparent);
 }
 
-.conflict-panes pre {
-  margin: 0;
-  padding: 0.5rem;
-  min-height: 8rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  background: var(--synapse-color-surface-raised);
-  border: 1px solid var(--synapse-color-border);
-  border-radius: var(--synapse-radius-sm);
-  font-family: var(--synapse-font-mono);
-  font-size: 0.85rem;
-}
-
 .manual-edit {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.55rem;
+  font-weight: 650;
 }
 
 .manual-edit textarea {
-  min-height: 6rem;
+  min-height: 6.5rem;
   padding: 0.75rem;
   border: 1px solid var(--synapse-color-border);
   border-radius: var(--synapse-radius-sm);
   color: var(--synapse-color-text);
-  background: var(--synapse-color-surface-raised);
+  background: var(--synapse-color-surface);
   font: inherit;
+  font-weight: 400;
+  line-height: 1.55;
   resize: vertical;
 }
 
 .conflict-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.conflict-action-hint {
+  flex: 1 1 100%;
+  margin: 0 0 0.25rem;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .conflict-actions button {
@@ -274,11 +313,23 @@ function confirmAction(
 }
 
 @media (max-width: 900px) {
-  .conflict-panes {
+  .conflict-resolver {
+    width: calc(100% - 1.5rem);
+    margin-block: 0.75rem;
+    max-height: none;
+  }
+
+  .conflict-version-grid,
+  .conflict-diff-grid {
     grid-template-columns: 1fr;
   }
-  .conflict-diffs {
-    grid-template-columns: 1fr;
+
+  .conflict-actions {
+    justify-content: stretch;
+  }
+
+  .conflict-actions button {
+    flex: 1 1 11rem;
   }
 }
 </style>

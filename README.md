@@ -292,13 +292,13 @@ a backup: missing local history cannot be recovered by this interface. See
 
 The web editor durably saves after two seconds of inactivity; encrypted local
 recovery snapshots are sparse (at least five minutes apart) and retained for
-seven days. This is not a save-by-save history or an independent backup. Expired
-snapshots for the active note are hidden immediately, while physical cleanup of
-a dormant note happens on a later save. Ciphertext preceding deletion and
-existing named restore points remain available; no manual point creation is
-offered in recovery. A sudden close within the idle delay may lose the unsaved
-draft. Navigation waits for durable persistence and stays on the editor if it
-fails. See [ADR 0020](docs/adr/0020-local-recovery-snapshots.md).
+seven days. This is not a save-by-save history or an independent backup. The UI
+hides expired snapshots for the active note, but physical cleanup of a dormant
+note happens only on a later save. Ciphertext is captured before deletion;
+existing named restore points remain available and are not silently removed.
+A sudden close within the two-second idle window may lose the unsaved draft.
+Navigation waits for a durable save and stays on the editor if that save fails.
+See [ADR 0020](docs/adr/0020-local-recovery-snapshots.md).
 
 ### Performance
 

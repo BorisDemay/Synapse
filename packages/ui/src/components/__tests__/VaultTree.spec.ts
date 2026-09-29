@@ -22,9 +22,16 @@ describe("VaultTree", () => {
         ],
       },
     });
+    const disclosure = wrapper.get(
+      '[data-kind="folder"] .vault-tree-disclosure',
+    );
+    expect(disclosure.get("svg path").attributes("d")).toBe("m9 6 6 6-6 6");
     expect(
-      wrapper.get('[data-kind="folder"] .vault-tree-disclosure').text(),
-    ).toBe("▾");
+      wrapper.get('[data-kind="folder"]').attributes("aria-expanded"),
+    ).toBe("true");
+    const leaf = wrapper.get('[data-kind="note"]');
+    expect(leaf.find(".vault-tree-disclosure svg").exists()).toBe(false);
+    expect(leaf.attributes("data-nested")).toBe("true");
     expect(wrapper.get('[data-kind="note"]').attributes("style")).toContain(
       "--tree-depth: 1",
     );
@@ -217,7 +224,7 @@ describe("VaultTree", () => {
     expect(wrapper.emitted("delete")?.[0]).toEqual(["projets/roadmap.md"]);
   });
 
-  it("marque chaque ligne par une icône distincte : dossier pour les dossiers, document pour les notes", () => {
+  it("n'affiche aucune icône de type et garde une gouttière alignée pour chaque ligne", () => {
     const wrapper = mount(VaultTree, {
       props: {
         nodes: [
@@ -234,25 +241,55 @@ describe("VaultTree", () => {
         ],
       },
     });
-    const folderIcon = wrapper.get('[data-kind="folder"] .vault-tree-kind');
-    const noteIcon = wrapper.get('[data-tree-index="1"] .vault-tree-kind');
-    const attachmentIcon = wrapper.get(
-      '[data-tree-index="2"] .vault-tree-kind',
-    );
-    const implicitNoteIcon = wrapper.get(
-      '[data-tree-index="3"] .vault-tree-kind',
-    );
 
-    expect(folderIcon.attributes("data-kind")).toBe("folder");
-    expect(noteIcon.attributes("data-kind")).toBe("note");
-    expect(attachmentIcon.attributes("data-kind")).toBe("attachment");
-    expect(implicitNoteIcon.attributes("data-kind")).toBe("note");
-    expect(folderIcon.get("svg path").attributes("d")).not.toBe(
-      noteIcon.get("svg path").attributes("d"),
+    expect(wrapper.find(".vault-tree-kind").exists()).toBe(false);
+
+    const disclosures = wrapper.findAll(".vault-tree-disclosure");
+    expect(disclosures).toHaveLength(4);
+    expect(disclosures[0]?.get("svg path").attributes("d")).toBe(
+      "m9 6 6 6-6 6",
     );
-    expect(attachmentIcon.get("svg path").attributes("d")).not.toBe(
-      noteIcon.get("svg path").attributes("d"),
-    );
+    expect(
+      disclosures.slice(1).every((leaf) => !leaf.find("svg").exists()),
+    ).toBe(true);
+    expect(wrapper.findAll('[data-nested="true"]')).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it("épingle une note depuis l'arbre sans la sélectionner ni la supprimer", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [
+              { id: "projets/roadmap.md", kind: "note", label: "Roadmap" },
+            ],
+            id: "folder:projets",
+            kind: "folder",
+            label: "projets",
+          },
+          { id: "racine", kind: "note", label: "Racine" },
+        ],
+        pinnedIds: ["projets/roadmap.md"],
+      },
+    });
+
+    expect(
+      wrapper.get('[data-kind="folder"]').find(".vault-tree-pin").exists(),
+    ).toBe(false);
+
+    const pinned = wrapper.get('[data-tree-index="1"] .vault-tree-pin');
+    expect(pinned.attributes("aria-pressed")).toBe("true");
+    expect(pinned.attributes("aria-label")).toBe("Désépingler Roadmap");
+
+    await wrapper.get('[data-tree-index="2"] .vault-tree-pin').trigger("click");
+    expect(wrapper.emitted("pin")?.[0]).toEqual(["racine"]);
+    expect(wrapper.emitted("select")).toBeUndefined();
+    expect(wrapper.emitted("delete")).toBeUndefined();
+
+    const unpinned = wrapper.get('[data-tree-index="2"] .vault-tree-pin');
+    expect(unpinned.attributes("aria-pressed")).toBe("false");
+    expect(unpinned.attributes("aria-label")).toBe("Épingler Racine");
     wrapper.unmount();
   });
 
@@ -515,5 +552,70 @@ describe("VaultTree", () => {
 
     await wrapper.get('[data-kind="folder"]').trigger("click");
     expect(wrapper.find('[data-kind="note"]').exists()).toBe(false);
+  });
+
+  it("émet menu avec les coordonnées du pointeur lors d'un clic droit sur une note", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          { id: "note-1", kind: "note", label: "Première note" },
+          {
+            children: [{ id: "n/interne.md", kind: "note", label: "Interne" }],
+            id: "folder:d",
+            kind: "folder",
+            label: "Dossier",
+          },
+        ],
+      },
+    });
+
+    await wrapper
+      .get('[data-kind="note"]')
+      .trigger("contextmenu", { clientX: 120, clientY: 240 });
+
+    expect(wrapper.emitted("menu")?.[0]).toEqual([
+      { id: "note-1", x: 120, y: 240 },
+    ]);
+  });
+
+  it("n'émet rien lors d'un clic droit sur un dossier", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [
+          {
+            children: [{ id: "n/interne.md", kind: "note", label: "Interne" }],
+            id: "folder:d",
+            kind: "folder",
+            label: "Dossier",
+          },
+        ],
+      },
+    });
+
+    await wrapper
+      .get('[data-kind="folder"]')
+      .trigger("contextmenu", { clientX: 12, clientY: 34 });
+
+    expect(wrapper.emitted("menu")).toBeUndefined();
+  });
+
+  it("émet menu au clavier avec Maj+F10 ou la touche Menu sur la ligne focusée", async () => {
+    const wrapper = mount(VaultTree, {
+      props: {
+        nodes: [{ id: "note-1", kind: "note", label: "Première note" }],
+      },
+    });
+    const row = wrapper.get('[data-kind="note"]');
+
+    await row.trigger("keydown", { key: "F10", shiftKey: true });
+    await row.trigger("keydown", { key: "ContextMenu" });
+
+    expect(wrapper.emitted("menu")?.length).toBe(2);
+    for (const payload of wrapper.emitted("menu") ?? []) {
+      const coordinates = payload[0] as { id: string; x: number; y: number };
+      expect(coordinates.id).toBe("note-1");
+      expect(Number.isFinite(coordinates.x)).toBe(true);
+      expect(Number.isFinite(coordinates.y)).toBe(true);
+    }
   });
 });

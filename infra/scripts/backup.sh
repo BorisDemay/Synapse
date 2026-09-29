@@ -15,7 +15,7 @@ cleanup() {
     "${COMPOSE[@]}" start server >&2 || code=1
     "${COMPOSE[@]}" up -d --no-deps --wait server >&2 || code=1
   fi
-  if [[ "$code" != 0 ]]; then
+  if [[ "$code" != 0 && -d "$WORK" ]]; then
     echo "backup failed; incomplete directory: $WORK" >&2
   fi
   exit "$code"
@@ -48,4 +48,14 @@ FINAL="$DEST/synapse-backup-$(date -u +%Y%m%dT%H%M%SZ)-${WORK##*-}"
 mv -- "$WORK" "$FINAL"
 ln -s "${FINAL##*/}" "$DEST/.latest-${FINAL##*-}"
 mv -Tf -- "$DEST/.latest-${FINAL##*-}" "$DEST/latest"
+# The backup may run before a release migration has added this table. Create
+# only this operational marker, idempotently, after the backup is published.
+# A database error fails the command but never claims a backup succeeded.
+if ! "${COMPOSE[@]}" exec -T postgres sh -eu -c '
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+    -c "CREATE TABLE IF NOT EXISTS backup_status (id SMALLINT PRIMARY KEY CHECK (id = 1), verified_at TIMESTAMPTZ NOT NULL); INSERT INTO backup_status (id, verified_at) VALUES (1, CURRENT_TIMESTAMP) ON CONFLICT (id) DO UPDATE SET verified_at = EXCLUDED.verified_at" >/dev/null
+'; then
+  echo "backup published but its verification timestamp could not be recorded" >&2
+  exit 1
+fi
 echo "$FINAL"

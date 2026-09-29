@@ -160,6 +160,13 @@ describe("MarkdownEditor", () => {
     );
   });
 
+  it("keeps image Markdown markers hidden when Vditor expands a focused image", () => {
+    const source = readFileSync("src/components/MarkdownEditor.vue", "utf8");
+    expect(source).toMatch(
+      /\.vditor-ir__node\[data-type="img"\] > \.vditor-ir__marker\)\s*\{\s*display: none !important;/u,
+    );
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     window.localStorage.clear();
@@ -403,6 +410,36 @@ describe("MarkdownEditor", () => {
     expect(wrapper.emitted("attach-files")?.[0]).toEqual([[file]]);
   });
 
+  it("turns a pasted data image URL into a vault attachment instead of editor text", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "" },
+    });
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const data = {
+      files: [],
+      getData(type: string) {
+        return type === "text/plain"
+          ? "data:image/png;base64,iVBORw0KGgo="
+          : "";
+      },
+    } as unknown as DataTransfer;
+
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: data });
+    event.preventDefault = preventDefault;
+    event.stopPropagation = stopPropagation;
+    wrapper.get(".markdown-editor").element.dispatchEvent(event);
+    await wrapper.vm.$nextTick();
+
+    const emitted = wrapper.emitted("attach-files")?.[0]?.[0] as File[];
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].name).toBe("pasted-image.png");
+    expect(emitted[0].type).toBe("image/png");
+  });
+
   it("rewrites attachment paths to blob URLs", async () => {
     const wrapper = mount(MarkdownEditor, {
       props: {
@@ -418,6 +455,183 @@ describe("MarkdownEditor", () => {
     });
 
     expect(image.getAttribute("src")).toBe("blob:http://local/photo");
+    expect(image.dataset.synapseMarkdownSrc).toBe("attachments/photo.png");
+  });
+
+  it("restores blob URLs after Vditor rerenders an image during typing", () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: {
+        attachmentUrls: { "attachments/photo.png": "blob:http://local/photo" },
+        hideFirstHeading: true,
+        modelValue: "# Note\n\n![photo](attachments/photo.png)",
+      },
+    });
+    const image = document.createElement("img");
+    image.setAttribute("src", "attachments/photo.png");
+    wrapper.get('.vditor-ir [contenteditable="true"]').element.append(image);
+
+    vditorMock.options()?.input?.("![photo](attachments/photo.png)\n\nSuite");
+
+    expect(image.getAttribute("src")).toBe("blob:http://local/photo");
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([
+      "# Note\n\n![photo](attachments/photo.png)\n\nSuite",
+    ]);
+  });
+
+  it("shows a top-right delete control for rendered images and removes their Markdown", async () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: {
+        attachmentUrls: { "attachments/photo.png": "blob:http://local/photo" },
+        modelValue: "Avant\n\n![photo](attachments/photo.png)\n\nAprès",
+      },
+    });
+    const image = document.createElement("img");
+    image.setAttribute("alt", "photo");
+    image.setAttribute("src", "attachments/photo.png");
+    vditorMock.root()?.append(image);
+    await wrapper.setProps({
+      attachmentUrls: { "attachments/photo.png": "blob:http://local/photo" },
+    });
+
+    image.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    const deleteButton = wrapper.get('button[aria-label="Supprimer l’image"]');
+    expect(deleteButton.classes()).toContain("markdown-editor-image-delete");
+    expect(deleteButton.find('svg[aria-hidden="true"] path').exists()).toBe(
+      true,
+    );
+    expect(deleteButton.text()).toBe("");
+    const source = readFileSync("src/components/MarkdownEditor.vue", "utf8");
+    expect(source).toMatch(
+      /\.markdown-editor-image-delete\s*\{[^}]*color:\s*#fff;[^}]*background:\s*var\(--synapse-color-danger\);/su,
+    );
+
+    await deleteButton.trigger("click");
+
+    expect(vditorMock.instance.setValue).toHaveBeenCalledWith(
+      "Avant\n\nAprès",
+      true,
+    );
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([
+      "Avant\n\nAprès",
+    ]);
+  });
+
+  it("deletes only the image immediately left of the caret with Delete", async () => {
+    const first = "![première](attachments/photo.png)";
+    const second = "![seconde](attachments/photo.png)";
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: `${first}\n\n${second}\n\nSuite` },
+    });
+    const editable = wrapper.get('.vditor-ir [contenteditable="true"]').element;
+    editable.innerHTML = `
+      <p><span class="vditor-ir__node" data-type="img"><img src="attachments/photo.png"></span></p>
+      <p><span class="vditor-ir__node" data-type="img"><img src="attachments/photo.png"></span></p>
+      <p>Suite</p>`;
+    const paragraph = editable.children[1];
+    const range = document.createRange();
+    range.setStart(paragraph, 1);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    const event = new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    editable.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(vditorMock.instance.setValue).toHaveBeenCalledWith(
+      `${first}\n\nSuite`,
+      true,
+    );
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([
+      `${first}\n\nSuite`,
+    ]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.emitted("save")?.at(-1)).toEqual([`${first}\n\nSuite`]);
+  });
+
+  it("deletes an image from the start of adjacent text without deleting that text", () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "![photo](attachments/photo.png) suite" },
+    });
+    const editable = wrapper.get('.vditor-ir [contenteditable="true"]').element;
+    editable.innerHTML = `<p><span class="vditor-ir__node" data-type="img"><img src="attachments/photo.png"></span> suite</p>`;
+    const text = editable.querySelector("p")?.lastChild;
+    if (!text) throw new Error("missing text after image");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    const event = new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    editable.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([" suite"]);
+  });
+
+  it("leaves Delete alone when there is text between the caret and the image", () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "![photo](attachments/photo.png) suite" },
+    });
+    const editable = wrapper.get('.vditor-ir [contenteditable="true"]').element;
+    editable.innerHTML = `<p><span class="vditor-ir__node" data-type="img"><img src="attachments/photo.png"></span> suite</p>`;
+    const text = editable.querySelector("p")?.lastChild;
+    if (!text) throw new Error("missing text after image");
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    const event = new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    editable.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(vditorMock.instance.setValue).not.toHaveBeenCalled();
+  });
+
+  it("does not delete an image when Delete is pressed on an editor control", () => {
+    const wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue: "![photo](attachments/photo.png)" },
+    });
+    const editable = wrapper.get('.vditor-ir [contenteditable="true"]').element;
+    editable.innerHTML = `<p><span class="vditor-ir__node" data-type="img"><img src="attachments/photo.png"></span></p>`;
+    const paragraph = editable.querySelector("p");
+    if (!paragraph) throw new Error("missing image paragraph");
+    const range = document.createRange();
+    range.setStart(paragraph, 1);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    const event = new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    wrapper.get(".markdown-editor-mode button").element.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(vditorMock.instance.setValue).not.toHaveBeenCalled();
   });
 
   it("cancels the old debounce when a different note replaces the editor value", async () => {
@@ -691,6 +905,51 @@ describe("MarkdownEditor", () => {
     expect(click).toHaveBeenCalledOnce();
     expect(window.localStorage.getItem("synapse-ui-editor-mode")).toBe("sv");
     expect(group.get("button[aria-pressed='true']").text()).toBe("Texte brut");
+  });
+
+  it("hides the canonical note heading in both editing modes without dropping it from saved Markdown", async () => {
+    const markdown = "# Mon titre\n\nTexte.";
+    const wrapper = mount(MarkdownEditor, {
+      props: { hideFirstHeading: true, modelValue: markdown },
+    });
+    expect(vditorMock.options()?.value).toBe("Texte.");
+
+    await wrapper
+      .get('[aria-label="Mode d\'édition"] button:last-child')
+      .trigger("click");
+    expect(vditorMock.instance.setValue).not.toHaveBeenCalledWith(
+      markdown,
+      true,
+    );
+    vditorMock.options()?.input?.("Texte modifié.");
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([
+      "# Mon titre\n\nTexte modifié.",
+    ]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.emitted("save")?.at(-1)).toEqual([
+      "# Mon titre\n\nTexte modifié.",
+    ]);
+
+    await wrapper.setProps({ modelValue: "# Nouveau titre\n\nTexte modifié." });
+    expect(vditorMock.instance.setValue).toHaveBeenCalledWith(
+      "Texte modifié.",
+      true,
+    );
+    vditorMock.options()?.input?.("Encore modifié.");
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([
+      "# Nouveau titre\n\nEncore modifié.",
+    ]);
+  });
+
+  it("leaves the heading editable when no external title field is present", () => {
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: "# Titre desktop\n\nCorps" },
+    });
+    expect(vditorMock.options()?.value).toBe("# Titre desktop\n\nCorps");
+    vditorMock.options()?.input?.("# Autre titre\n\nCorps");
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([
+      "# Autre titre\n\nCorps",
+    ]);
   });
 
   it("starts Vditor in source mode when that preference is saved", () => {

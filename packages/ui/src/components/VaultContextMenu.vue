@@ -2,12 +2,16 @@
 import type { MarkdownMenuItem } from "../markdown/editor-tools";
 import PointerContextMenu from "./PointerContextMenu.vue";
 
-defineProps<{
-  items: readonly MarkdownMenuItem[];
-  open: boolean;
-  x: number;
-  y: number;
-}>();
+withDefaults(
+  defineProps<{
+    items: readonly MarkdownMenuItem[];
+    label?: string;
+    open: boolean;
+    x: number;
+    y: number;
+  }>(),
+  { label: "Actions de la note" },
+);
 
 const emit = defineEmits<{
   close: [];
@@ -16,11 +20,11 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <!-- Simple emballage de l'orchestrateur générique : le libellé du menu de
-       l'éditeur est figé pour préserver son identité accessible. -->
+  <!-- Menu contextuel de l'arbre du coffre : emballage de
+       PointerContextMenu avec le libellé spécifique aux notes. -->
   <PointerContextMenu
     :items="items"
-    label="Outils Markdown"
+    :label="label"
     :open="open"
     :x="x"
     :y="y"

@@ -21,9 +21,11 @@
 
 - Appliquer TDD : écrire un test qui échoue pour la bonne raison, l’exécuter, écrire le minimum pour le faire passer, exécuter le test ciblé puis la suite concernée, refactoriser seulement quand tout est vert.
 - Travailler par petites tranches verticales. Une tâche du plan peut être subdivisée, mais ne pas être fusionnée avec des fonctionnalités non demandées.
-- Pour réduire l’usage des modèles coûteux, déléguer les recherches bornées, la génération de tests et les revues mécaniques à un sous-agent éphémère `zai/glm-5.3-flash` via `pi --provider zai --model glm-5.3-flash --no-session -p`. Le modèle principal conserve les décisions de sécurité, cryptographie, protocole et architecture, ne transmet aucun secret au sous-agent, puis relit et valide toujours son résultat.
-- Ne jamais déclarer une fonctionnalité terminée sans sortie réelle des commandes de validation.
-- Un commit Conventional Commit atomique termine chaque tâche verte, suivi immédiatement d’un `git push` : chaque session d’agent doit committer et pousser dès qu’un travail est terminé et validé, jamais laisser des changements verts locaux non poussés. Ne pas committer secrets, données de test sensibles, binaires ou fichiers générés non reproductibles.
+- Ne déléguer à un sous-agent que lorsque l’utilisateur le demande explicitement. Sans cette demande, travailler directement dans la session principale, y compris pour les recherches bornées, la génération de tests et les revues mécaniques.
+- Pour une petite modification d’interface isolée, exécuter uniquement les tests ciblés et, si pertinent, le typecheck ou le lint du package touché. Réserver la suite complète, les tests navigateur, le build global et les validations multi-plateformes aux préparations de merge ou de release, sauf demande explicite de l’utilisateur.
+- Ne jamais déclarer une fonctionnalité terminée sans sortie réelle des commandes de validation proportionnées à la portée de la modification.
+- Ne créer un commit, pousser, fusionner, redémarrer les serveurs ou réconcilier un worktree que lorsque l’utilisateur le demande explicitement. Ne jamais committer secrets, données de test sensibles, binaires ou fichiers générés non reproductibles.
+- Avant d’élargir la portée demandée, de corriger un problème adjacent ou d’ajouter une validation non prévue, arrêter le travail et demander l’accord de l’utilisateur. Les corrections indispensables aux invariants de sécurité ou de synchronisation doivent être signalées comme bloqueurs, sans élargissement silencieux.
 - Préférer les dépendances open source compatibles AGPLv3. Ajouter une dépendance seulement si l’alternative standard est insuffisante et documenter son rôle et sa licence.
 
 ## Invariants de sécurité

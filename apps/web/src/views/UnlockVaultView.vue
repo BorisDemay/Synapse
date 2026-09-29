@@ -7,7 +7,7 @@ import {
   bindLocalVaultFolder,
   ensureLocalVaultFolder,
 } from "../platform/local-folder";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import Button from "primevue/button";
 import Message from "primevue/message";
@@ -17,12 +17,14 @@ import { ThemeToggle } from "@synapse/ui";
 
 import { isTrustedDeviceSupported } from "../crypto/trusted-device";
 import { parseWrappedVaultKey, unlockVaultKey } from "../crypto/vault-key";
+import { safeInternalRedirect } from "../navigation/safe-redirect";
 import { useVaultStore } from "../stores/vault";
 import { useAuthStore } from "../stores/auth";
 
 const vault = useVaultStore();
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 const passphrase = ref("");
 const confirmPassphrase = ref("");
 const mode = ref<"loading" | "create" | "unlock" | "error">("loading");
@@ -34,6 +36,14 @@ const hasTrustedDevice = ref(false);
 const trustedDeviceSupported = ref(false);
 const trustDevice = ref(false);
 const folderChoice = ref<"default" | "choose">("default");
+
+/**
+ * Destination demandée par le lien d'origine (`?redirect=`), quand c'est un
+ * chemin interne sûr : le déverrouillage ramène alors à la note visée.
+ */
+function redirectTarget(): string {
+  return safeInternalRedirect(route.query.redirect) ?? "/vault";
+}
 
 async function discover(): Promise<void> {
   error.value = "";
@@ -56,7 +66,7 @@ async function discover(): Promise<void> {
     ) {
       try {
         await vault.unlockWithTrustedDevice(vaultId.value);
-        await router.push("/vault");
+        await router.push(redirectTarget());
         return;
       } catch {
         error.value =
@@ -140,13 +150,13 @@ async function submit() {
       try {
         await vault.rememberCurrentDevice();
         hasTrustedDevice.value = true;
-        await router.push("/vault");
+        await router.push(redirectTarget());
       } catch {
         unlockedNotice.value =
           "Coffre déverrouillé. L’appareil n’a pas pu être enregistré ; la phrase sera demandée à nouveau.";
       }
     } else {
-      await router.push("/vault");
+      await router.push(redirectTarget());
     }
   } catch {
     passphrase.value = "";
@@ -161,7 +171,7 @@ async function submit() {
 }
 
 async function continueToVault(): Promise<void> {
-  await router.push("/vault");
+  await router.push(redirectTarget());
 }
 </script>
 
@@ -251,16 +261,23 @@ async function continueToVault(): Promise<void> {
                 <option value="choose">Choisir un dossier</option>
               </select>
             </label>
-            <p v-if="mode === 'create'" class="subtitle">
-              Cette phrase est
-              <strong>distincte de votre mot de passe de compte</strong> : elle
-              chiffre vos notes localement et ne quitte jamais cet appareil.
-              <strong
-                >Synapse ne pourra ni la réinitialiser ni déchiffrer vos notes
-                si vous la perdez.</strong
-              >
-              Conservez-la en lieu sûr.
-            </p>
+            <div v-if="mode === 'create'" class="onboarding-security-note">
+              <p>
+                Choisissez une phrase longue : elle déverrouille uniquement ce
+                coffre sur cet appareil.
+              </p>
+              <details>
+                <summary>Pourquoi est-elle importante ?</summary>
+                <p>
+                  Elle est distincte de votre mot de passe de compte, ne quitte
+                  jamais cet appareil et chiffre vos notes localement.
+                  <strong
+                    >Synapse ne pourra ni la réinitialiser ni déchiffrer vos
+                    notes si vous la perdez.</strong
+                  >
+                </p>
+              </details>
+            </div>
             <div class="form-field">
               <label for="unlock-passphrase">Phrase de déchiffrement</label>
               <Password
@@ -307,7 +324,14 @@ async function continueToVault(): Promise<void> {
               :disabled="busy"
             />
           </form>
-          <p v-if="error" role="alert">
+          <p
+            v-if="
+              error &&
+              (mode !== 'create' ||
+                !error.startsWith('Créez un coffre et une phrase'))
+            "
+            role="alert"
+          >
             <Message severity="warn" :closable="false">{{ error }}</Message>
           </p>
         </template>

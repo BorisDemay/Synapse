@@ -17,7 +17,19 @@ Un répertoire versionné contient `postgres.dump` (format custom PostgreSQL),
 `blobs/`, `backup.json` (version/date) et `manifest.sha256`. Les empreintes utilisent
 des chemins relatifs : le répertoire peut être déplacé. Le manifeste couvre
 exactement les fichiers sauvegardés. Le lien `latest` n’est remplacé qu’après
-réussite ; une erreur laisse un répertoire `.incomplete-*` pour diagnostic.
+réussite ; une erreur avant publication laisse un répertoire `.incomplete-*`
+pour diagnostic. Après la vérification du manifeste, le retour éventuel de
+l’API et la publication de `latest`, le script enregistre l’heure de
+vérification dans PostgreSQL. `/health/storage` la rapporte aux utilisateurs
+connectés via `last_successful_backup` (UTC), ou `null` si aucune sauvegarde
+n’a été enregistrée. Une erreur d’enregistrement fait échouer le script même
+si le répertoire publié reste utilisable ; vérifiez alors la sauvegarde et
+relancez-la. La date est celle de la dernière sauvegarde **vérifiée lors de sa
+création**, pas une garantie que ses fichiers existent encore ou sont
+restaurables aujourd’hui. Surveillez son âge selon votre fréquence de
+sauvegarde et testez périodiquement la restauration. Un dump ancien restauré
+rapporte au plus la date antérieure qu’il contient. Les sauvegardes faites hors
+de ce script ne mettent pas à jour cette date.
 
 Le serveur conserve des ciphertexts, mais le dump contient aussi les comptes,
 permissions et sessions. Stockez les sauvegardes sur un support protégé et chiffré

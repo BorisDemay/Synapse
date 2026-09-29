@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { RouterLink, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
@@ -9,12 +9,14 @@ import Password from "primevue/password";
 
 import { ThemeToggle } from "@synapse/ui";
 
+import { safeInternalRedirect } from "../navigation/safe-redirect";
 import { useAuthStore, AuthError } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 
 const auth = useAuthStore();
 const vault = useVaultStore();
 const router = useRouter();
+const route = useRoute();
 const email = ref("");
 const password = ref("");
 const rememberDevice = ref(false);
@@ -35,11 +37,14 @@ async function submit() {
       rememberDevice: rememberDevice.value,
     });
     password.value = "";
+    // Le lien d'origine (?redirect=) reste prioritaire : une connexion qui
+    // débouche sur une note visée y retourne directement.
+    const redirect = safeInternalRedirect(route.query.redirect);
     if (await vault.tryUnlockFromTrustedDevice()) {
-      await router.push("/vault");
+      await router.push(redirect ?? "/vault");
       return;
     }
-    await router.push(auth.isAdmin ? "/admin" : "/unlock");
+    await router.push(redirect ?? (auth.isAdmin ? "/admin" : "/unlock"));
   } catch (cause) {
     password.value = "";
     if (cause instanceof AuthError) {

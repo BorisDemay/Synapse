@@ -46,11 +46,15 @@ pub async fn status(
     .await
     .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let available_bytes = ACCOUNT_STORAGE_QUOTA_BYTES.saturating_sub(used_bytes.max(0));
-    let last_successful_backup = std::env::var("SYNAPSE_LAST_BACKUP_AT")
-        .ok()
-        .filter(|value| {
-            !value.is_empty() && value.len() <= 64 && !value.bytes().any(|byte| byte < 0x20)
-        });
+    // The backup job records this only after checking the manifest, restarting
+    // the API (when it was running), and publishing the completed backup.
+    let last_successful_backup = sqlx::query_scalar::<_, String>(
+        "SELECT to_char(verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') \
+         FROM backup_status WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     Ok(Json(StorageStatus {
         available_bytes,
         pending_operation_count,

@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import PrimeVue from "primevue/config";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 
 import {
@@ -10,11 +10,20 @@ import {
   resetSidebarLayoutState,
   synapseTooltip,
 } from "@synapse/ui";
-import { useAuthStore } from "../stores/auth";
+import QuickAssistantPrompt from "../components/QuickAssistantPrompt.vue";
 import { useAssistantStore } from "../stores/assistant";
+import { useAuthStore } from "../stores/auth";
 import { useVaultStore } from "../stores/vault";
 import VaultView from "./VaultView.vue";
 import { clearToasts, toasts } from "../notifications/toasts";
+
+// L'export PDF produit un fichier en mémoire puis le télécharge : jsdom ne
+// construit pas de blob, on espionne donc la fonction pour vérifier qu'aucune
+// boîte d'impression n'est ouverte.
+vi.mock("@synapse/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@synapse/ui")>();
+  return { ...actual, downloadNotePdf: vi.fn() };
+});
 
 const savedSearch = { id: "search-1", label: "À relire", query: "tag:review" };
 const noteId = "note-1";
@@ -50,6 +59,12 @@ async function mountVault(options?: {
   emptyVault?: boolean;
   recentNoteIds?: string[];
   attachToBody?: boolean;
+  noteQuery?: string;
+  notes?: Record<string, { content: string; path: string }>;
+  attachments?: Record<
+    string,
+    { bytes: Uint8Array; contentType: string; path: string }
+  >;
 }): Promise<{
   router: Router;
   vault: ReturnType<typeof useVaultStore>;
@@ -71,6 +86,12 @@ async function mountVault(options?: {
       path: "note-epinglee.md",
       revision: 1,
     });
+  }
+  for (const [id, note] of Object.entries(options?.notes ?? {})) {
+    vault.notes.set(id, { ...note, revision: 1 });
+  }
+  for (const [id, file] of Object.entries(options?.attachments ?? {})) {
+    vault.attachments.set(id, { ...file, revision: 1 });
   }
   vault.preferences = {
     pinnedNoteIds: options?.emptyVault ? [] : [noteId],
@@ -94,7 +115,12 @@ async function mountVault(options?: {
       { component: { template: "<div />" }, path: "/unlock" },
     ],
   });
-  await router.push("/vault");
+  await router.push(
+    options?.noteQuery
+      ? { path: "/vault", query: { note: options.noteQuery } }
+      : "/vault",
+  );
+  router.addRoute({ path: "/leave", component: { template: "<div />" } });
   await router.isReady();
 
   const wrapper = mount(VaultView, {
@@ -105,7 +131,6 @@ async function mountVault(options?: {
       stubs: {
         AiChat: true,
         ConflictResolver: true,
-        GraphPanel: true,
         AppShell: {
           props: ["sidebarCollapsed"],
           template: `<div class="app-shell" :class="{ 'app-shell--sidebar-collapsed': sidebarCollapsed }">
@@ -122,7 +147,8 @@ async function mountVault(options?: {
           },
         },
         MarkdownEditor: {
-          props: ["modelValue"],
+          name: "MarkdownEditor",
+          props: ["modelValue", "hideFirstHeading", "attachmentUrls"],
           template: '<div data-test="markdown-editor">{{ modelValue }}</div>',
           setup(
             _props: unknown,
@@ -131,7 +157,7 @@ async function mountVault(options?: {
             expose({ focus: () => editorFocusCalls.push(1) });
           },
         },
-        NoteRelationsPanel: true,
+        HistoryPanel: true,
         SettingsPanel: true,
         ThemeToggle: true,
         ...(stubVaultTree ? { VaultTree: true } : {}),
@@ -142,7 +168,138 @@ async function mountVault(options?: {
   return { router, vault, auth, wrapper };
 }
 
+describe("VaultView embedded attachments", () => {
+  it("loads saved image blobs on opening and refreshes replacements at the same path", async () => {
+    const create = vi
+      .fn()
+      .mockReturnValueOnce("blob:saved-photo")
+      .mockReturnValueOnce("blob:updated-photo");
+    const revoke = vi.fn();
+    const previousCreate = URL.createObjectURL;
+    const previousRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = create;
+    URL.revokeObjectURL = revoke;
+    try {
+      const { wrapper, vault } = await mountVault({
+        attachments: {
+          "att-1": {
+            bytes: new Uint8Array([1, 2, 3]),
+            contentType: "image/png",
+            path: "attachments/photo.png",
+          },
+        },
+        notes: {
+          [noteId]: {
+            content: "# Note épinglée\n\n![photo](attachments/photo.png)",
+            path: "note-epinglee.md",
+          },
+        },
+      });
+      const editor = wrapper.findComponent({ name: "MarkdownEditor" });
+      expect(editor.props("modelValue")).toContain(
+        "![photo](attachments/photo.png)",
+      );
+      expect(editor.props("attachmentUrls")).toEqual({
+        "attachments/photo.png": "blob:saved-photo",
+      });
+      vault.attachments.set("att-1", {
+        bytes: new Uint8Array([4, 5, 6]),
+        contentType: "image/png",
+        path: "attachments/photo.png",
+        revision: 2,
+      });
+      await flushPromises();
+      expect(editor.props("attachmentUrls")).toEqual({
+        "attachments/photo.png": "blob:updated-photo",
+      });
+      expect(revoke).toHaveBeenCalledWith("blob:saved-photo");
+      wrapper.unmount();
+    } finally {
+      URL.createObjectURL = previousCreate;
+      URL.revokeObjectURL = previousRevoke;
+    }
+  });
+
+  it("keeps attachments stored but out of the Notes tree", async () => {
+    const { wrapper, vault } = await mountVault({ stubVaultTree: false });
+    vault.attachments.set("att-1", {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+      path: "attachments/photo.png",
+      revision: 1,
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-kind="attachment"]').exists()).toBe(false);
+    expect(
+      wrapper.findAll(".vault-tree-label").map((item) => item.text()),
+    ).not.toContain("attachments");
+    expect(vault.attachments.has("att-1")).toBe(true);
+  });
+});
+
+describe("VaultView note title", () => {
+  it("uses the header as the sole title control while keeping full Markdown canonical", async () => {
+    const { wrapper } = await mountVault();
+    const header = wrapper.get<HTMLInputElement>(
+      '[aria-label="Titre de la note"]',
+    );
+    const editor = wrapper.findComponent({ name: "MarkdownEditor" });
+    expect(header.element.value).toBe("Note épinglée");
+    expect(editor.props("hideFirstHeading")).toBe(true);
+    expect(editor.props("modelValue")).toBe(
+      "---\nstatus: actif\n---\n# Note épinglée",
+    );
+  });
+});
+
 describe("VaultView saved navigation", () => {
+  it("checks the model catalog on focus while the vault is open", async () => {
+    const { wrapper } = await mountVault();
+    const assistant = useAssistantStore();
+    const refresh = vi
+      .spyOn(assistant, "refreshModelsIfStale")
+      .mockResolvedValue();
+
+    window.dispatchEvent(new Event("focus"));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+    window.dispatchEvent(new Event("focus"));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("durably saves a dirty draft before allowing route navigation", async () => {
+    const { wrapper, router, vault } = await mountVault();
+    const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+    wrapper
+      .findComponent({ name: "MarkdownEditor" })
+      .vm.$emit("update:modelValue", "# Draft");
+
+    await router.push("/leave");
+    await flushPromises();
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: noteId, content: "# Draft" }),
+    );
+    expect(router.currentRoute.value.path).toBe("/leave");
+    wrapper.unmount();
+  });
+
+  it("blocks route navigation when the dirty draft cannot be durably saved", async () => {
+    const { wrapper, router, vault } = await mountVault();
+    vi.spyOn(vault, "saveNote").mockRejectedValue(new Error("storage full"));
+    wrapper
+      .findComponent({ name: "MarkdownEditor" })
+      .vm.$emit("update:modelValue", "# Draft");
+
+    await router.push("/leave");
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/vault");
+    expect(wrapper.text()).toContain("Échec de l’enregistrement local");
+    wrapper.unmount();
+  });
+
   it("opens the local search palette with a saved search query", async () => {
     const { wrapper } = await mountVault();
 
@@ -194,9 +351,7 @@ describe("VaultView saved navigation", () => {
   it("ignores recent ids without an existing note", async () => {
     const { wrapper } = await mountVault({ recentNoteIds: ["ghost"] });
 
-    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
-      "# Nouvelle note",
-    );
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe("");
   });
 
   it("hides the recent notes section while keeping other navigation", async () => {
@@ -256,6 +411,47 @@ describe("VaultView folder import action", () => {
 
     expect(click).toHaveBeenCalledOnce();
     click.mockRestore();
+  });
+
+  it("renders the import preview as a contained readable card", async () => {
+    const { wrapper } = await mountVault();
+    const file = new File(["# Import\n\nContenu synthétique."], "Import.md", {
+      type: "text/markdown",
+    });
+    Object.defineProperties(file, {
+      arrayBuffer: {
+        configurable: true,
+        value: async () =>
+          new TextEncoder().encode("# Import\n\nContenu synthétique.").buffer,
+      },
+      webkitRelativePath: {
+        configurable: true,
+        value: "Imported/Import.md",
+      },
+    });
+    const picker = wrapper.get("input[webkitdirectory]")
+      .element as HTMLInputElement;
+    Object.defineProperty(picker, "files", {
+      configurable: true,
+      value: [file],
+    });
+
+    await wrapper.get("input[webkitdirectory]").trigger("change");
+    await flushPromises();
+
+    const preview = wrapper.get(".import-preview");
+    expect(preview.classes()).toContain("import-preview-card");
+    const noteSummary = preview
+      .get(".import-preview-summary")
+      .findAll("article")[0]!;
+    expect(noteSummary.text()).toContain("1");
+    expect(noteSummary.text()).toContain("note");
+    expect(preview.get(".import-preview-details").text()).toContain(
+      "Imported/Import.md",
+    );
+    expect(
+      preview.get(".import-preview-actions").findAll("button"),
+    ).toHaveLength(2);
   });
 });
 
@@ -391,9 +587,7 @@ describe("VaultView notes section", () => {
       .get(".vault-notes-section-header [aria-label='Nouvelle note']")
       .trigger("click");
 
-    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
-      "# Nouvelle note",
-    );
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe("");
   });
 });
 
@@ -537,22 +731,6 @@ it("does not claim an offline unsaved draft is already durable", async () => {
   wrapper.unmount();
 });
 
-it("blocks route navigation when the durable draft save fails", async () => {
-  const { wrapper, router, vault } = await mountVault();
-  vi.spyOn(vault, "saveNote").mockRejectedValue(new Error("quota"));
-  (
-    wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
-  ).vm.$emit("update:modelValue", "# unsaved route draft");
-  await flushPromises();
-  await router.push("/login");
-  await flushPromises();
-  expect(router.currentRoute.value.path).toBe("/vault");
-  expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe(
-    "# unsaved route draft",
-  );
-  wrapper.unmount();
-});
-
 it("saves the latest draft before deleting and offers an explicit undo", async () => {
   const { wrapper, vault } = await mountVault();
   const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
@@ -679,9 +857,7 @@ describe("VaultView writing-first workspace", () => {
       .trigger("click");
     await flushPromises();
 
-    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
-      "# Nouvelle note",
-    );
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toBe("");
     expect(editorFocusCalls).toHaveLength(1);
   });
 
@@ -698,8 +874,28 @@ describe("VaultView writing-first workspace", () => {
     const breadcrumb = wrapper.get(".note-breadcrumb");
     expect(breadcrumb.text()).toContain("projets");
     expect(breadcrumb.text()).toContain("sous-dossier");
-    expect(breadcrumb.text()).toContain("imbriquee.md");
-    expect(wrapper.get(".workspace-titleblock h2").text()).toBe("Imbriquée");
+    expect(breadcrumb.text()).not.toContain("imbriquee.md");
+    const title = wrapper.get('input[aria-label="Titre de la note"]');
+    expect((title.element as HTMLInputElement).value).toBe("Imbriquée");
+  });
+
+  it("n'affiche aucun fil d'Ariane pour une note à la racine du coffre", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("racine", {
+      content: "# Racine",
+      path: "01a0d483-e5b2-7ebd-88e4-a98e29eca135.md",
+      revision: 1,
+    });
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "racine");
+    await flushPromises();
+
+    expect(wrapper.find(".note-breadcrumb").exists()).toBe(false);
+    expect(
+      (
+        wrapper.get('input[aria-label="Titre de la note"]')
+          .element as HTMLInputElement
+      ).value,
+    ).toBe("Racine");
   });
 
   it("keeps full note paths so folders survive in the tree", async () => {
@@ -875,33 +1071,41 @@ describe("VaultView save feedback", () => {
 });
 
 describe("VaultView note tools", () => {
-  it("opens backlinks and history without any assistant", async () => {
+  it("ouvre l'historique local depuis l'assistant et le referme", async () => {
     const { wrapper } = await mountVault();
 
-    const relations = wrapper
+    const assistant = wrapper
       .findAll(".workspace-tool")
-      .find((button) => button.text() === "Relations");
-    expect(relations).toBeDefined();
-    await relations!.trigger("click");
+      .find((button) => button.text() === "Assistant")!;
+    await assistant.trigger("click");
+    wrapper.findComponent({ name: "AiChat" }).vm.$emit("toggle-history");
+    await flushPromises();
 
-    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
-      true,
-    );
+    expect(wrapper.findComponent({ name: "HistoryPanel" }).exists()).toBe(true);
     expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      false,
+    );
+
+    await wrapper
+      .get('button[aria-label="Fermer l\'historique local"]')
+      .trigger("click");
+    expect(wrapper.findComponent({ name: "HistoryPanel" }).exists()).toBe(
       false,
     );
   });
 
-  it("closes relations when a tree attachment opens the assistant", async () => {
+  it("referme l'historique quand une pièce jointe ouvre l'assistant", async () => {
     const { wrapper } = await mountVault();
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Relations")!
-      .trigger("click");
+    const assistant = wrapper
+      .findAll(".workspace-tool")
+      .find((button) => button.text() === "Assistant")!;
+    await assistant.trigger("click");
+    wrapper.findComponent({ name: "AiChat" }).vm.$emit("toggle-history");
+    await flushPromises();
     wrapper.findComponent({ name: "VaultTree" }).vm.$emit("attach", noteId);
     await flushPromises();
     expect(wrapper.findComponent({ name: "AiChat" }).exists()).toBe(true);
-    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
+    expect(wrapper.findComponent({ name: "HistoryPanel" }).exists()).toBe(
       false,
     );
     wrapper.unmount();
@@ -915,68 +1119,79 @@ describe("VaultView note tools", () => {
         .findAll(".workspace-tool")
         .find((button) => button.text() === label)!;
 
-    await tool("Relations").trigger("click");
-    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
-      true,
-    );
-
-    await tool("Graphe").trigger("click");
-    expect(wrapper.findComponent({ name: "GraphPanel" }).exists()).toBe(true);
-    expect(wrapper.findComponent({ name: "NoteRelationsPanel" }).exists()).toBe(
-      false,
-    );
-
     await tool("Assistant").trigger("click");
     expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
       true,
     );
-    expect(wrapper.findComponent({ name: "GraphPanel" }).exists()).toBe(false);
+
+    wrapper.findComponent({ name: "AiChat" }).vm.$emit("toggle-history");
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "HistoryPanel" }).exists()).toBe(true);
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      false,
+    );
   });
 
-  it("renders the conversation list inside the assistant slot with a back-to-chat action", async () => {
-    const { wrapper } = await mountVault();
+  it("épingle une note depuis l'arbre via le store", async () => {
+    const { wrapper, vault } = await mountVault({ stubVaultTree: false });
+    const spy = vi.spyOn(vault, "togglePinnedNote").mockResolvedValue();
 
-    const assistant = wrapper
-      .findAll(".workspace-tool")
-      .find((button) => button.text() === "Assistant")!;
-    await assistant.trigger("click");
-    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
-      true,
-    );
-    expect(
-      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
-    ).toBe(false);
-
-    wrapper.findComponent({ name: "AiChat" }).vm.$emit("toggle-conversations");
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("pin", noteId);
     await flushPromises();
 
-    expect(
-      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
-    ).toBe(true);
-    expect(wrapper.find(".assistant-back-to-chat").text()).toContain(
-      "Retour à la conversation",
-    );
-
-    await wrapper.get(".assistant-back-to-chat").trigger("click");
-    expect(
-      wrapper.find('[aria-label="Conversations de l’assistant"]').exists(),
-    ).toBe(false);
-    expect(wrapper.findComponent({ name: "AiChat" }).exists()).toBe(true);
+    expect(spy).toHaveBeenCalledWith(noteId);
+    wrapper.unmount();
   });
 
-  it("keeps quieter secondary workspace controls instead of prominent buttons", async () => {
+  it("écrit le titre saisi dans le bandeau comme titre de la note", async () => {
+    const { wrapper, vault } = await mountVault({ stubVaultTree: false });
+    vault.notes.set("nested", {
+      content: "# Imbriquée\n\nCorps.",
+      path: "projets/sous-dossier/imbriquee.md",
+      revision: 1,
+    });
+    const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "nested");
+    await flushPromises();
+
+    const title = wrapper.get('input[aria-label="Titre de la note"]');
+    await title.setValue("Nouveau titre");
+    await title.trigger("change");
+    await flushPromises();
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "# Nouveau titre\n\nCorps.",
+        id: "nested",
+        path: "projets/sous-dossier/imbriquee.md",
+      }),
+    );
+    expect((title.element as HTMLInputElement).value).toBe("Nouveau titre");
+
+    await title.setValue("   ");
+    await title.trigger("change");
+    await flushPromises();
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect((title.element as HTMLInputElement).value).toBe("Nouveau titre");
+    wrapper.unmount();
+  });
+
+  it("ne garde que l'assistant dans les outils du bandeau", async () => {
     const { wrapper } = await mountVault();
 
-    for (const label of ["Relations", "Graphe", "Désépingler", "Assistant"]) {
+    for (const label of ["Relations", "Graphe", "Épingler", "Désépingler"]) {
       expect(
         wrapper
           .findAll(".workspace-tool")
           .some((button) => button.text() === label),
-      ).toBe(true);
+      ).toBe(false);
     }
     expect(
-      wrapper.find(".workspace-meta button[class*='p-button']").exists(),
-    ).toBe(false);
+      wrapper
+        .findAll(".workspace-tool")
+        .some((button) => button.text() === "Assistant"),
+    ).toBe(true);
   });
 });
 
@@ -1037,482 +1252,707 @@ describe("VaultView attachment preview accessibility", () => {
   });
 });
 
-describe("VaultView quick assistant prompt", () => {
-  const models = [
-    { id: "model-a", label: "Model A", reasoningLevels: [], serviceTiers: [] },
-    { id: "model-b", label: "Model B", reasoningLevels: [], serviceTiers: [] },
-  ];
-  it("closes and clears the prompt when the vault locks or changes", async () => {
-    const { vault, wrapper } = await mountVault();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
+describe("VaultView storage health banner", () => {
+  it("n’affiche plus le bandeau storage-health dans l’en-tête du coffre", async () => {
+    const { wrapper, auth } = await mountVault();
+    auth.storageHealth = {
+      availableBytes: 1024 * 1024 * 1024,
+      lastSuccessfulBackup: null,
+      pendingOperationCount: 0,
+      persistent: true,
+      quotaBytes: 2 * 1024 * 1024 * 1024,
+      serverPendingOperationCount: 0,
+      serverUsedBytes: 0,
+      usageBytes: 1024 * 1024 * 1024,
+    };
     await flushPromises();
-    await prompt.get("input").setValue("synthetic private prompt");
 
-    vault.lock();
-    await flushPromises();
-    expect(prompt.props("open")).toBe(false);
-    vault.unlock(new Uint8Array(32), "vault-2");
-    await flushPromises();
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    expect(prompt.props("open")).toBe(true);
-    expect((prompt.get("input").element as HTMLInputElement).value).toBe("");
+    expect(wrapper.find(".storage-health").exists()).toBe(false);
+    expect(wrapper.text()).not.toMatch(/MiB|disponibles|opérations en attente/);
+    wrapper.unmount();
+  });
+});
 
-    await prompt.get("input").setValue("another synthetic prompt");
-    vault.lock();
-    vault.unlock(new Uint8Array(32), "vault-3");
-    await flushPromises();
-    expect(prompt.props("open")).toBe(false);
+function noteMenuItem(label: string) {
+  return [
+    ...document.body.querySelectorAll<HTMLButtonElement>(
+      '[role="menu"][aria-label="Actions de la note"] [role="menuitem"]',
+    ),
+  ].find(
+    (item) =>
+      item
+        .querySelector(".synapse-markdown-context-item-label")
+        ?.textContent?.trim() === label,
+  );
+}
+
+function noteMenuItemLabels() {
+  return [
+    ...document.body.querySelectorAll(
+      '[role="menu"][aria-label="Actions de la note"] [role="menuitem"]',
+    ),
+  ].map((item) =>
+    item
+      .querySelector(".synapse-markdown-context-item-label")
+      ?.textContent?.trim(),
+  );
+}
+
+/** Le menu est rendu sur place dans la vue : monter la vue dans le document
+ * permet de l'interroger comme les autres overlays. */
+/** Remplace le presse-papiers du navigateur et rend la fonction qui restitue
+ * l'état initial (jsdom n'en fournit pas). */
+function stubClipboard(writeText: (text: string) => Promise<void>) {
+  const hadOwnClipboard = Object.prototype.hasOwnProperty.call(
+    window.navigator,
+    "clipboard",
+  );
+  const originalClipboard = Object.getOwnPropertyDescriptor(
+    window.navigator,
+    "clipboard",
+  );
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  return () => {
+    if (hadOwnClipboard && originalClipboard) {
+      Object.defineProperty(window.navigator, "clipboard", originalClipboard);
+    } else {
+      delete (window.navigator as { clipboard?: unknown }).clipboard;
+    }
+  };
+}
+
+/** jsdom ne donne pas d'origine stable : on fixe celle de la page pour vérifier
+ * l'adresse copiée. */
+function stubLocationOrigin(origin: string) {
+  const original = Object.getOwnPropertyDescriptor(window, "location");
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { origin },
+  });
+  return () => {
+    if (original) Object.defineProperty(window, "location", original);
+    else delete (window as { location?: unknown }).location;
+  };
+}
+
+async function mountVaultWithNoteMenu() {
+  return mountVault({ attachToBody: true, stubVaultTree: false });
+}
+
+async function openNoteMenu(wrapper: VueWrapper) {
+  await wrapper
+    .get('[data-kind="note"]')
+    .trigger("contextmenu", { clientX: 40, clientY: 60 });
+  await flushPromises();
+}
+
+describe("VaultView menu contextuel de note", () => {
+  afterEach(() => {
+    // Le menu vit dans la vue montée dans le document : nettoyage même en cas
+    // d'échec pour ne pas polluer les tests suivants.
+    document.body.innerHTML = "";
+  });
+
+  it("ouvre le menu d'une note au clic droit sans changer la sélection", async () => {
+    const { wrapper } = await mountVaultWithNoteMenu();
+    const editor = wrapper.get('[data-test="markdown-editor"]');
+    const draft = editor.text();
+    await openNoteMenu(wrapper);
+
+    const menu = document.body.querySelector(
+      '[role="menu"][aria-label="Actions de la note"]',
+    );
+    expect(menu).not.toBeNull();
+    expect(noteMenuItemLabels()).toEqual([
+      "Désépingler",
+      "Exporter en PDF",
+      "Exporter en Markdown",
+      "Copier le lien de la note",
+      "Copier le wikilink",
+      "Dupliquer la note",
+      "Historique local",
+      "Supprimer",
+    ]);
+    // Le clic droit ne touche pas au brouillon de la note courante.
+    expect(editor.text()).toBe(draft);
     wrapper.unmount();
   });
 
-  it("accepts physical KeyK on modified layouts but ignores AltGraph", async () => {
-    const { wrapper } = await mountVault();
+  it("vise la note cliquée sans déplacer la note courante", async () => {
+    const { wrapper, vault } = await mountVaultWithNoteMenu();
+    vault.notes.set("note-2", {
+      content: "# Autre note",
+      path: "autre-note.md",
+      revision: 1,
+    });
+    await flushPromises();
+
+    const otherNote = wrapper
+      .findAll('[data-kind="note"]')
+      .find((row) => row.text().includes("Autre note"))!;
+    await otherNote.trigger("contextmenu", { clientX: 40, clientY: 60 });
+    await flushPromises();
+
+    // Note-2 n'est pas épinglée : le menu cible bien la note cliquée…
+    expect(noteMenuItemLabels()[0]).toBe("Épingler");
+    // …sans changer la note courante, restée la note restaurée au montage.
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "Note épinglée",
+    );
+    wrapper.unmount();
+  });
+
+  it("n'ouvre rien pour un dossier et ne montre pas les pièces jointes dans Notes", async () => {
+    const { wrapper, vault } = await mountVaultWithNoteMenu();
+    vault.notes.set("nested", {
+      content: "# Imbriquée",
+      path: "projets/imbriquee.md",
+      revision: 1,
+    });
+    vault.attachments.set("att-1", {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+      path: "attachments/photo.png",
+      revision: 1,
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-kind="folder"]').trigger("contextmenu");
+    await flushPromises();
+
+    expect(wrapper.find('[data-kind="attachment"]').exists()).toBe(false);
+    expect(vault.attachments.has("att-1")).toBe(true);
+    expect(
+      document.body.querySelector(
+        '[role="menu"][aria-label="Actions de la note"]',
+      ),
+    ).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("bascule l'épingle depuis le menu", async () => {
+    const { wrapper, vault } = await mountVaultWithNoteMenu();
+    const spy = vi.spyOn(vault, "togglePinnedNote").mockResolvedValue();
+    await openNoteMenu(wrapper);
+
+    noteMenuItem("Désépingler")!.click();
+    await flushPromises();
+
+    expect(spy).toHaveBeenCalledWith(noteId);
+    wrapper.unmount();
+  });
+
+  it("supprime via le flux existant depuis le menu", async () => {
+    const { wrapper, vault } = await mountVaultWithNoteMenu();
+    const remove = vi.spyOn(vault, "deleteNote").mockResolvedValue({} as never);
+    await openNoteMenu(wrapper);
+
+    noteMenuItem("Supprimer")!.click();
+    await flushPromises();
+
+    expect(remove).toHaveBeenCalledWith(noteId);
+    wrapper.unmount();
+  });
+
+  it("copie le wikilink interne exactement au format résolu par l'application", async () => {
+    const { wrapper } = await mountVaultWithNoteMenu();
+    const writeText = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValue();
+    const restoreClipboard = stubClipboard(writeText);
+    try {
+      await openNoteMenu(wrapper);
+
+      noteMenuItem("Copier le wikilink")!.click();
+      await flushPromises();
+
+      expect(writeText).toHaveBeenCalledWith("[[note-epinglee]]");
+    } finally {
+      restoreClipboard();
+    }
+    wrapper.unmount();
+  });
+
+  it("copie l'adresse de l'application qui ouvre la note", async () => {
+    const { wrapper } = await mountVaultWithNoteMenu();
+    const writeText = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValue();
+    const restoreClipboard = stubClipboard(writeText);
+    const restoreLocation = stubLocationOrigin("https://synapse.local");
+    try {
+      await openNoteMenu(wrapper);
+
+      noteMenuItem("Copier le lien de la note")!.click();
+      await flushPromises();
+
+      // Seul l'identifiant opaque de la note est copié : ni titre ni contenu.
+      expect(writeText).toHaveBeenCalledWith(
+        "https://synapse.local/vault?note=note-1",
+      );
+    } finally {
+      restoreClipboard();
+      restoreLocation();
+    }
+    wrapper.unmount();
+  });
+
+  it("signale un presse-papiers indisponible sans perdre la note", async () => {
+    const { wrapper } = await mountVaultWithNoteMenu();
+    const writeText = vi.fn().mockRejectedValue(new Error("refusé"));
+    const restoreClipboard = stubClipboard(
+      writeText as unknown as (text: string) => Promise<void>,
+    );
+    try {
+      await openNoteMenu(wrapper);
+
+      noteMenuItem("Copier le lien de la note")!.click();
+      await flushPromises();
+
+      expect(
+        toasts.value.some((toast) => toast.message.includes("presse-papiers")),
+      ).toBe(true);
+      expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+        "Note épinglée",
+      );
+    } finally {
+      restoreClipboard();
+    }
+    wrapper.unmount();
+  });
+
+  it("exporte en Markdown par un téléchargement local", async () => {
+    const { wrapper } = await mountVaultWithNoteMenu();
+    // jsdom n'implémente pas les blob URLs : on les simule localement.
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:note-export");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const createElement = vi.spyOn(document, "createElement");
+    try {
+      await openNoteMenu(wrapper);
+
+      noteMenuItem("Exporter en Markdown")!.click();
+      await flushPromises();
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const blob = createObjectURL.mock.calls[0][0];
+      expect(blob.type).toContain("text/markdown");
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+      const anchor = createElement.mock.results
+        .map((result) => result.value)
+        .find(
+          (element): element is HTMLAnchorElement =>
+            element instanceof HTMLAnchorElement,
+        );
+      expect(anchor?.download).toBe("Note épinglée.md");
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:note-export");
+    } finally {
+      delete (URL as unknown as Record<string, unknown>).createObjectURL;
+      delete (URL as unknown as Record<string, unknown>).revokeObjectURL;
+      anchorClick.mockRestore();
+      createElement.mockRestore();
+    }
+    wrapper.unmount();
+  });
+
+  it("déclenche un téléchargement de PDF (aucune boîte d'impression)", async () => {
+    const { downloadNotePdf } = await import("@synapse/ui");
+    const { wrapper } = await mountVaultWithNoteMenu();
+    await openNoteMenu(wrapper);
+
+    noteMenuItem("Exporter en PDF")!.click();
+    await flushPromises();
+
+    expect(downloadNotePdf).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(downloadNotePdf).mock.calls[0][0]).toEqual({
+      filename: "Note épinglée.pdf",
+      markdown: "---\nstatus: actif\n---\n# Note épinglée",
+      title: "Note épinglée",
+    });
+    wrapper.unmount();
+  });
+
+  it("ouvre l'historique local existant depuis le menu", async () => {
+    const { wrapper } = await mountVaultWithNoteMenu();
+    await openNoteMenu(wrapper);
+
+    noteMenuItem("Historique local")!.click();
+    await flushPromises();
+
+    expect(wrapper.find('[aria-label="Relations de la note"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.findComponent({ name: "HistoryPanel" }).exists()).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+describe("VaultView ouverture d'une note par lien (?note=)", () => {
+  const autreNote = { content: "# Autre note", path: "projets/imbriquee.md" };
+
+  it("ouvre la note visée par son identifiant plutôt que la note la plus récente", async () => {
+    const { wrapper } = await mountVault({
+      noteQuery: "note-2",
+      notes: { "note-2": autreNote },
+    });
+
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Autre note",
+    );
+  });
+
+  it("résout la valeur par le chemin de note, avec ou sans .md et sans tenir compte de la casse", async () => {
+    for (const value of [
+      "projets/imbriquee",
+      "projets/imbriquee.md",
+      "Projets/Imbriquee.MD",
+    ]) {
+      const { wrapper } = await mountVault({
+        noteQuery: value,
+        notes: { "note-2": autreNote },
+      });
+
+      expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+        "# Autre note",
+      );
+      wrapper.unmount();
+    }
+  });
+
+  it("attend l'arrivée des notes avant de résoudre l'identifiant", async () => {
+    const { vault, wrapper } = await mountVault({
+      emptyVault: true,
+      noteQuery: "note-2",
+    });
+    await flushPromises();
+
+    // Coffre encore vide : ni alerte, ni note ouverte.
+    expect(
+      toasts.value.filter((toast) => toast.message.includes("introuvable")),
+    ).toHaveLength(0);
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).not.toContain(
+      "# Autre note",
+    );
+
+    vault.notes.set("note-2", { ...autreNote, revision: 1 });
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Autre note",
+    );
+  });
+
+  it("avertit sans changer de note quand le lien ne correspond à rien", async () => {
+    const { wrapper } = await mountVault({ noteQuery: "note-inconnue" });
+    await flushPromises();
+
+    expect(
+      toasts.value.filter((toast) => toast.message.includes("introuvable")),
+    ).toHaveLength(1);
+    // La note courante (ici la plus récente restaurée) reste ouverte.
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Note épinglée",
+    );
+  });
+
+  it("traite chaque valeur une seule fois, même quand les notes arrivent ensuite", async () => {
+    const { vault, wrapper } = await mountVault({
+      noteQuery: "note-2",
+      notes: { "note-2": autreNote },
+    });
+    await flushPromises();
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Autre note",
+    );
+    const opensAfterMount = appShellCloseCalls.length;
+
+    vault.notes.set("note-3", {
+      content: "# Troisième note",
+      path: "troisieme.md",
+      revision: 1,
+    });
+    await flushPromises();
+
+    // Aucune réouverture : le brouillon affiché n'est pas rechargé.
+    expect(appShellCloseCalls.length).toBe(opensAfterMount);
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Autre note",
+    );
+  });
+});
+
+describe("VaultView prompt rapide à l’assistant", () => {
+  const assistantModels = [
+    {
+      id: "gpt-5.6-sol",
+      label: "GPT-5.6 Sol",
+      reasoningLevels: [],
+      serviceTiers: [],
+    },
+    {
+      id: "gpt-5.6-luna",
+      label: "GPT-5.6 Luna",
+      reasoningLevels: [],
+      serviceTiers: [],
+    },
+  ];
+
+  function pressQuickAssistantShortcut(options: KeyboardEventInit = {}) {
     window.dispatchEvent(
       new KeyboardEvent("keydown", {
-        ctrlKey: true,
         altKey: true,
-        key: "å",
-        code: "KeyK",
+        ctrlKey: true,
+        key: "k",
+        ...options,
       }),
     );
+  }
+
+  function connectAssistant(
+    assistant: ReturnType<typeof useAssistantStore>,
+  ): void {
+    assistant.connected = true;
+    assistant.model = "gpt-5.6-sol";
+    assistant.models = assistantModels;
+  }
+
+  it("ouvre le prompt rapide au clavier sans ouvrir le panneau Assistant", async () => {
+    const { wrapper } = await mountVault();
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    expect(prompt.props("open")).toBe(false);
+
+    pressQuickAssistantShortcut();
     await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
+
     expect(prompt.props("open")).toBe(true);
-    const altGraphEvent = new KeyboardEvent("keydown", {
-      ctrlKey: true,
-      altKey: true,
-      key: "k",
-      code: "KeyK",
-    });
-    Object.defineProperty(altGraphEvent, "getModifierState", {
-      value: (modifier: string) => modifier === "AltGraph",
-    });
-    window.dispatchEvent(altGraphEvent);
+    expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
+      false,
+    );
+
+    pressQuickAssistantShortcut();
     await flushPromises();
-    expect(prompt.props("open")).toBe(true);
-    wrapper.unmount();
+
+    expect(prompt.props("open")).toBe(false);
   });
 
-  it("starts a background conversation with the selected model without opening the panel", async () => {
+  it("reconnaît KeyK même quand le caractère produit n’est pas k", async () => {
+    const { wrapper } = await mountVault();
+
+    pressQuickAssistantShortcut({ key: "µ", code: "KeyK" });
+    await flushPromises();
+
+    expect(wrapper.getComponent(QuickAssistantPrompt).props("open")).toBe(true);
+  });
+
+  it("ignore AltGraph même si les modificateurs Ctrl et Alt sont exposés", async () => {
+    const { wrapper } = await mountVault();
+    pressQuickAssistantShortcut();
+    await flushPromises();
+    expect(wrapper.getComponent(QuickAssistantPrompt).props("open")).toBe(true);
+
+    const event = new KeyboardEvent("keydown", {
+      altKey: true,
+      ctrlKey: true,
+      key: "k",
+    });
+    vi.spyOn(event, "getModifierState").mockReturnValue(true);
+    window.dispatchEvent(event);
+    await flushPromises();
+
+    expect(wrapper.getComponent(QuickAssistantPrompt).props("open")).toBe(true);
+  });
+
+  it("ferme et efface le prompt quand le coffre se verrouille", async () => {
+    const { wrapper, vault } = await mountVault();
+    pressQuickAssistantShortcut();
+    await flushPromises();
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    await prompt.get("input").setValue("brouillon privé");
+
+    vault.lock();
+    await flushPromises();
+
+    expect(prompt.props("open")).toBe(false);
+    expect(prompt.find("input").exists()).toBe(false);
+  });
+
+  it("n’ouvre pas le prompt rapide au-dessus d’un autre dialogue modal", async () => {
+    const unrelated = document.createElement("section");
+    unrelated.setAttribute("role", "dialog");
+    unrelated.setAttribute("aria-modal", "true");
+    document.body.append(unrelated);
+
+    const { wrapper } = await mountVault();
+    pressQuickAssistantShortcut();
+    await flushPromises();
+
+    expect(wrapper.getComponent(QuickAssistantPrompt).props("open")).toBe(
+      false,
+    );
+    unrelated.remove();
+  });
+
+  it("expose la commande de prompt rapide dans la palette", async () => {
+    const { wrapper } = await mountVault();
+    const palette = wrapper.findComponent({ name: "SearchPalette" });
+    const commands = palette.props("commands") as {
+      category?: string;
+      hint?: string;
+      id: string;
+      label: string;
+    }[];
+
+    expect(commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "Créer",
+          hint: "Ctrl+Alt+K",
+          id: "quick-assistant",
+          label: "Prompt rapide à l’assistant",
+        }),
+      ]),
+    );
+
+    palette.vm.$emit("run", "quick-assistant");
+    await flushPromises();
+
+    expect(wrapper.getComponent(QuickAssistantPrompt).props("open")).toBe(true);
+  });
+
+  it("envoie le prompt avec le modèle choisi dans une nouvelle conversation", async () => {
     const { vault, wrapper } = await mountVault();
     const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
+    connectAssistant(assistant);
     vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    const saveNote = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
     const setModel = vi.spyOn(assistant, "setModel");
     const newConversation = vi.spyOn(assistant, "newConversation");
     const send = vi.spyOn(assistant, "send").mockResolvedValue("");
 
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
+    pressQuickAssistantShortcut();
     await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    expect(prompt.props("open")).toBe(true);
-    await prompt.get("input").setValue("  Write a plan  ");
-    await prompt.get("select").setValue("model-b");
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    expect(prompt.props("activeNote")).toBe(true);
+    expect(prompt.get('[role="note"]').text()).toContain(
+      "texte en clair de la note actuellement ouverte",
+    );
+    wrapper
+      .findComponent({ name: "MarkdownEditor" })
+      .vm.$emit("update:modelValue", "# Note épinglée\n\nBrouillon durable");
+    await prompt.get("input").setValue("Rédige un plan de journée");
+    await prompt.get("select").setValue("gpt-5.6-luna");
     await prompt.get("form").trigger("submit");
     await flushPromises();
 
-    expect(setModel).toHaveBeenCalledWith("model-b");
-    expect(newConversation).toHaveBeenCalledTimes(1);
+    expect(setModel).toHaveBeenCalledWith("gpt-5.6-luna");
+    expect(saveNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: noteId,
+        content: "# Note épinglée\n\nBrouillon durable",
+      }),
+    );
     expect(newConversation).toHaveBeenCalledWith(noteId);
-    expect(send).toHaveBeenCalledWith("Write a plan");
+    expect(send).toHaveBeenCalledWith("Rédige un plan de journée");
     expect(prompt.props("open")).toBe(false);
     expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
       false,
     );
+    // Le fil neuf ne reprend que la note active, après son enregistrement.
+    expect(assistant.conversations).toHaveLength(1);
+    expect(assistant.activeConversationId).toBe(assistant.conversations[0]?.id);
+    expect(assistant.conversations[0]?.attachedNoteIds).toEqual([noteId]);
+    expect(toasts.value.at(-1)).toMatchObject({ kind: "info" });
   });
 
-  it("shows persistent external progress through a deferred response and replaces it with informational success", async () => {
-    const { wrapper, vault } = await mountVault();
+  it("bloque l’envoi et garde le brouillon si sa sauvegarde durable échoue", async () => {
+    const { vault, wrapper } = await mountVault();
     const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    let release!: (value: string) => void;
-    vi.spyOn(assistant, "send").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
+    connectAssistant(assistant);
+    vi.spyOn(vault, "saveNote").mockRejectedValue(
+      new Error("private storage detail"),
     );
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
+    const send = vi.spyOn(assistant, "send");
+
+    wrapper
+      .findComponent({ name: "MarkdownEditor" })
+      .vm.$emit("update:modelValue", "# SYNTHETIC PRIVATE DRAFT");
+    pressQuickAssistantShortcut();
     await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Question sans écriture");
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    await prompt.get("input").setValue("SYNTHETIC PRIVATE PROMPT");
     await prompt.get("form").trigger("submit");
     await flushPromises();
-    expect(
-      toasts.value.some(
-        (toast) =>
-          toast.pending &&
-          toast.message === "L’assistant travaille sur votre demande.",
-      ),
-    ).toBe(true);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(prompt.props("open")).toBe(true);
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "SYNTHETIC PRIVATE DRAFT",
+    );
+    expect(JSON.stringify(toasts.value)).not.toContain(
+      "SYNTHETIC PRIVATE PROMPT",
+    );
+    expect(JSON.stringify(toasts.value)).not.toContain(
+      "SYNTHETIC PRIVATE DRAFT",
+    );
+    expect(JSON.stringify(toasts.value)).not.toContain(
+      "private storage detail",
+    );
+    wrapper.unmount();
+  });
+
+  it("affiche la note produite par l’assistant en gardant le panneau fermé", async () => {
+    const { vault, wrapper } = await mountVault({
+      notes: { "note-2": { content: "# Note produite", path: "produite.md" } },
+    });
+    const assistant = useAssistantStore();
+    connectAssistant(assistant);
+    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
+    vi.spyOn(assistant, "send").mockResolvedValue("note-2");
+
+    pressQuickAssistantShortcut();
+    await flushPromises();
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    await prompt.get("input").setValue("Crée une note de réunion");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="markdown-editor"]').text()).toContain(
+      "# Note produite",
+    );
     expect(wrapper.find('[aria-label="Assistant d\'écriture"]').exists()).toBe(
       false,
     );
-    release("");
-    await flushPromises();
-    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
-    expect(toasts.value.at(-1)).toMatchObject({
-      kind: "info",
-      message: "La réponse de l’assistant est disponible.",
-    });
-    expect(toasts.value.at(-1)?.message).not.toContain(
-      "Question sans écriture",
-    );
-    wrapper.unmount();
   });
 
-  it("allows create-note requests without an active note or vault context", async () => {
-    const { wrapper, vault } = await mountVault({ emptyVault: true });
+  it("n’envoie rien quand l’assistant est déconnecté", async () => {
+    const { wrapper } = await mountVault();
     const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    const newConversation = vi.spyOn(assistant, "newConversation");
-    const send = vi.spyOn(assistant, "send").mockResolvedValue("");
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    expect(prompt.get('[role="note"]').text()).toContain("Aucune note active");
-    await prompt.get("input").setValue("Create a new note");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    expect(newConversation).toHaveBeenCalledWith(undefined);
-    expect(send).toHaveBeenCalledWith("Create a new note");
-    wrapper.unmount();
-  });
-
-  it("suppresses deferred completion and clears progress after the vault locks", async () => {
-    const { wrapper, vault } = await mountVault();
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    let release!: (value: string) => void;
-    vi.spyOn(assistant, "send").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Private request");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    expect(toasts.value.some((toast) => toast.pending)).toBe(true);
-    vault.lock();
-    await flushPromises();
-    expect(toasts.value).toHaveLength(0);
-    release("");
-    await flushPromises();
-    expect(toasts.value).toHaveLength(0);
-    wrapper.unmount();
-  });
-
-  it.each(["account", "vault"] as const)(
-    "suppresses deferred completion after a %s switch",
-    async (scope) => {
-      const { wrapper, vault, auth } = await mountVault();
-      const assistant = useAssistantStore();
-      assistant.connected = true;
-      assistant.model = "model-a";
-      assistant.models = models;
-      vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-      let release!: (value: string) => void;
-      vi.spyOn(assistant, "send").mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            release = resolve;
-          }),
-      );
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-      );
-      await flushPromises();
-      const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-      await prompt.get("input").setValue("Private request");
-      await prompt.get("form").trigger("submit");
-      await flushPromises();
-      expect(toasts.value.some((toast) => toast.pending)).toBe(true);
-      if (scope === "account") auth.userId = "user-2";
-      else vault.currentVaultId = "vault-2";
-      await flushPromises();
-      expect(toasts.value).toHaveLength(0);
-      release("");
-      await flushPromises();
-      expect(toasts.value).toHaveLength(0);
-      wrapper.unmount();
-    },
-  );
-
-  it("replaces provider failures with a persistent generic notification", async () => {
-    const { wrapper, vault } = await mountVault();
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    vi.spyOn(assistant, "send").mockRejectedValue(
-      new Error("private request detail"),
-    );
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Private request");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    expect(toasts.value.at(-1)).toMatchObject({
-      kind: "error",
-      message:
-        "L’assistant n’a pas pu terminer la demande. Votre contenu local est conservé.",
-    });
-    expect(JSON.stringify(toasts.value)).not.toContain(
-      "private request detail",
-    );
-    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
-    wrapper.unmount();
-  });
-
-  it("links only the opened note by default and saves its dirty draft before sending", async () => {
-    const { wrapper, vault } = await mountVault();
-    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
-    const order: string[] = [];
-    save.mockImplementation(async () => {
-      order.push("save");
-      return {} as never;
-    });
-    const newConversation = vi
-      .spyOn(assistant, "newConversation")
-      .mockImplementation(async (id) => {
-        order.push(`conversation:${id}`);
-        return "conversation";
-      });
-    vi.spyOn(assistant, "send").mockImplementation(async () => {
-      order.push("send");
-      return "";
-    });
-    (
-      wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
-    ).vm.$emit("update:modelValue", "# Updated active draft");
-    await flushPromises();
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Rewrite");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    expect(newConversation).toHaveBeenCalledWith(noteId);
-    expect(order).toEqual(["save", `conversation:${noteId}`, "send"]);
-    wrapper.unmount();
-  });
-
-  it("saves a meaningful new-note draft, links its exact id, and announces it as active context", async () => {
-    const { wrapper, vault } = await mountVault({ emptyVault: true });
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    const saved = vi
-      .spyOn(vault, "saveNote")
-      .mockImplementation(async (input) => {
-        vault.notes.set(input.id, {
-          content: input.content,
-          path: "draft.md",
-          revision: 1,
-        });
-        return {} as never;
-      });
-    const newConversation = vi.spyOn(assistant, "newConversation");
-    vi.spyOn(assistant, "send").mockResolvedValue("");
-    const editor = wrapper.findComponent(
-      '[data-test="markdown-editor"]',
-    ) as VueWrapper;
-    editor.vm.$emit("update:modelValue", "# Draft note\n\nMeaningful draft.");
-    await flushPromises();
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    expect(prompt.get('[role="note"]').text()).toContain(
-      "note actuellement ouverte",
-    );
-    await prompt.get("input").setValue("Improve this draft");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    expect(saved).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: "# Draft note\n\nMeaningful draft.",
-      }),
-    );
-    const savedId = saved.mock.calls[0]?.[0].id;
-    expect(savedId).toBeTruthy();
-    expect(newConversation, JSON.stringify(toasts.value)).toHaveBeenCalledWith(
-      savedId,
-    );
-    wrapper.unmount();
-  });
-
-  it("replaces pending progress with a generic failure if the linked note is deleted during the response", async () => {
-    const { wrapper, vault } = await mountVault();
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    let release!: (value: string) => void;
-    vi.spyOn(assistant, "send").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Request");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    vault.notes.delete(noteId);
-    release("");
-    await flushPromises();
-    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
-    expect(toasts.value.at(-1)).toMatchObject({
-      kind: "error",
-      message: expect.stringContaining("La note liée n’est plus disponible"),
-    });
-    wrapper.unmount();
-  });
-
-  it("keeps completion available after navigating to another note during a deferred response", async () => {
-    const { wrapper, vault } = await mountVault();
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    let release!: (value: string) => void;
-    vi.spyOn(assistant, "send").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Question sans écriture");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
-    release("");
-    await flushPromises();
-    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
-    expect(toasts.value.at(-1)).toMatchObject({
-      kind: "info",
-      message: "La réponse de l’assistant est disponible.",
-    });
-    wrapper.unmount();
-  });
-
-  it("dismisses pending progress when the linked note disappears during conversation creation", async () => {
-    const { wrapper, vault } = await mountVault();
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    let release!: () => void;
-    vi.spyOn(assistant, "newConversation").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = () => resolve("new-thread");
-        }),
-    );
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Request");
-    await prompt.get("form").trigger("submit");
-    await flushPromises();
-    vault.notes.delete(noteId);
-    release();
-    await flushPromises();
-    expect(toasts.value.some((toast) => toast.pending)).toBe(false);
-    expect(toasts.value.at(-1)).toMatchObject({
-      kind: "error",
-      message: expect.stringContaining("La note liée n’est plus disponible"),
-    });
-    wrapper.unmount();
-  });
-
-  it("keeps the popup and draft when flushing the active note fails without sending", async () => {
-    const { wrapper, vault } = await mountVault();
-    await wrapper.get('[aria-label="Notes épinglées"] button').trigger("click");
-    const assistant = useAssistantStore();
-    assistant.connected = true;
-    assistant.model = "model-a";
-    assistant.models = models;
-    vi.spyOn(vault, "persistAssistantConversations").mockResolvedValue();
-    vi.spyOn(vault, "saveNote").mockRejectedValue(
-      new Error("private save failure"),
-    );
     const send = vi.spyOn(assistant, "send");
-    (
-      wrapper.findComponent('[data-test="markdown-editor"]') as VueWrapper
-    ).vm.$emit("update:modelValue", "# Private draft");
+
+    pressQuickAssistantShortcut();
     await flushPromises();
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { ctrlKey: true, altKey: true, key: "k" }),
-    );
-    await flushPromises();
-    const prompt = wrapper.findComponent({ name: "QuickAssistantPrompt" });
-    await prompt.get("input").setValue("Do something");
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    await prompt.get("input").setValue("Bonjour");
     await prompt.get("form").trigger("submit");
     await flushPromises();
-    expect(prompt.props("open")).toBe(true);
+
     expect(send).not.toHaveBeenCalled();
-    expect(JSON.stringify(toasts.value)).not.toContain("Private draft");
-    expect(JSON.stringify(toasts.value)).not.toContain("private save failure");
-    wrapper.unmount();
+    expect(prompt.props("open")).toBe(true);
+    expect(prompt.get('[role="status"]').text()).toContain(
+      "Connectez l’assistant dans les paramètres",
+    );
   });
 });

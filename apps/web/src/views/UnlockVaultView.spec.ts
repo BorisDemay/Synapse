@@ -34,6 +34,7 @@ async function mountUnlock(options?: {
   listVaultIdsRejects?: boolean;
   rememberFails?: boolean;
   localMode?: boolean;
+  redirect?: string;
 }): Promise<{
   wrapper: VueWrapper;
   router: Router;
@@ -79,7 +80,11 @@ async function mountUnlock(options?: {
       { component: { template: "<div />" }, path: "/vault" },
     ],
   });
-  await router.push("/unlock");
+  await router.push(
+    options?.redirect
+      ? { path: "/unlock", query: { redirect: options.redirect } }
+      : "/unlock",
+  );
   await router.isReady();
   const wrapper = mount(UnlockVaultView, {
     global: {
@@ -427,5 +432,73 @@ describe("UnlockVaultView folder choice cancellation", () => {
       (wrapper.get("#unlock-passphrase").element as HTMLInputElement).value,
     ).toBe("phrase longue et unique");
     expect(wrapper.text()).toContain("Le coffre n’a pas été créé");
+  });
+});
+
+describe("UnlockVaultView retour vers la note demandée", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetLocalFolderAdapterForTests();
+  });
+
+  it("retourne à la note demandée après un déverrouillage par phrase", async () => {
+    const { router, wrapper } = await mountUnlock({
+      redirect: "/vault?note=note-1",
+    });
+
+    await wrapper.get("#unlock-passphrase").setValue("local unlock passphrase");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
+  });
+
+  it("retourne à la note demandée quand l'appareil de confiance déverrouille", async () => {
+    const { router } = await mountUnlock({
+      hasTrustedDevice: true,
+      redirect: "/vault?note=note-1",
+    });
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
+  });
+
+  it("retourne à la note demandée depuis l'écran de secours de l'appareil de confiance", async () => {
+    const { router, wrapper } = await mountUnlock({
+      rememberFails: true,
+      redirect: "/vault?note=note-1",
+    });
+
+    await wrapper.get("#unlock-passphrase").setValue("local unlock passphrase");
+    await wrapper.get('input[type="checkbox"]').setValue(true);
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Continuer")!
+      .trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
+  });
+
+  it("ignore une destination externe et ouvre le coffre", async () => {
+    const { router, wrapper } = await mountUnlock({
+      redirect: "//evil.example",
+    });
+
+    await wrapper.get("#unlock-passphrase").setValue("local unlock passphrase");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault");
+  });
+
+  it("ignore une destination vers l'écran de déverrouillage lui-même", async () => {
+    const { router } = await mountUnlock({
+      hasTrustedDevice: true,
+      redirect: "/unlock?redirect=%2Fvault",
+    });
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault");
   });
 });

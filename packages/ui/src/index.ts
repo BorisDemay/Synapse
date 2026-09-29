@@ -1,7 +1,7 @@
 export { default as AiChat } from "./components/AiChat.vue";
 export { default as AiConversationPanel } from "./components/AiConversationPanel.vue";
 export { default as AppShell } from "./components/AppShell.vue";
-export { DialogFocusController } from "./dialog-focus";
+export { DialogFocusController, isDialogElementVisible } from "./dialog-focus";
 export {
   overlayStackDepth,
   overlayStackLabels,
@@ -23,6 +23,8 @@ export { default as HistoryPanel } from "./components/HistoryPanel.vue";
 export { default as GraphPanel } from "./components/GraphPanel.vue";
 export { default as MarkdownEditor } from "./components/MarkdownEditor.vue";
 export { default as MarkdownContextMenu } from "./components/MarkdownContextMenu.vue";
+export { default as PointerContextMenu } from "./components/PointerContextMenu.vue";
+export { default as VaultContextMenu } from "./components/VaultContextMenu.vue";
 export { default as MarkdownPreview } from "./components/MarkdownPreview.vue";
 export { default as NoteRelationsPanel } from "./components/NoteRelationsPanel.vue";
 export { default as SearchPalette } from "./components/SearchPalette.vue";
@@ -75,11 +77,13 @@ export {
 } from "./vault/query";
 export type { LocalGraph, OutlineEntry, QueryNote } from "./vault/query";
 export { noteUpdatedAt, uuidV7Timestamp } from "./vault/note-date";
+export { buildNotePdf, downloadNotePdf } from "./export/note-pdf";
 export { buildVaultTree } from "./vault/tree";
 export { isNewNoteDraft, NEW_NOTE_DRAFT } from "./vault/draft";
 export type { TreeSource } from "./vault/tree";
 export { renderTemplate } from "./vault/templates";
 export type { TemplateContext } from "./vault/templates";
+export type { MarkdownMenuItem } from "./markdown/editor-tools";
 export type {
   SettingsSession,
   SettingsUser,

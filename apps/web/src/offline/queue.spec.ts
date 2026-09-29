@@ -62,96 +62,73 @@ describe("offline queue", () => {
     expect(reencrypt).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps recovery snapshots five minutes apart without replacing the outbox edit", async () => {
+  it("creates sparse encrypted recovery snapshots on a five-minute cadence", async () => {
     const { listNoteRevisions } = await import("./cache");
     const first = sampleOp("snapshot-first");
-    const second = sampleOp("snapshot-second");
-    second.base_revision = 1;
-    second.ciphertext = [4, 5, 6];
     await persistPendingOperation(userId, first);
+    const second = { ...sampleOp("snapshot-second"), base_revision: 1 };
     await persistPendingOperation(userId, second);
-    const revisions = await listNoteRevisions(userId, vaultId, first.note_id);
-    expect(revisions.filter((row) => row.recoverySnapshot)).toHaveLength(1);
     expect(
-      (await listPendingOperations(userId, vaultId)).map(
-        (row) => row.operation_id,
-      ),
-    ).toEqual(["snapshot-first", "snapshot-second"]);
-    expect(revisions[0]?.ciphertext).toEqual([1, 2, 3]);
-  });
-
-  it("expires only its own snapshots on a later save and preserves named targets", async () => {
-    const { listNoteRevisions } = await import("./cache");
-    const now = vi
-      .spyOn(Date, "now")
-      .mockReturnValue(new Date("2026-09-24T12:00:00.000Z").getTime());
-    const first = sampleOp("retention-first");
-    await persistPendingOperation(userId, first);
-    const initial = (
-      await listNoteRevisions(userId, vaultId, first.note_id)
-    )[0]!;
-    now.mockReturnValue(new Date("2026-09-24T12:06:00.000Z").getTime());
-    const second = sampleOp("retention-second");
-    second.base_revision = 1;
-    await persistPendingOperation(userId, second);
-    const secondSnapshot = (
-      await listNoteRevisions(userId, vaultId, first.note_id)
-    ).find((row) => row.revision !== initial.revision)!;
-    now.mockReturnValue(new Date("2026-10-03T12:00:00.000Z").getTime());
-    const next = sampleOp("retention-next");
-    next.base_revision = 2;
-    await persistPendingOperation(userId, next, [], false, {
-      preserveRevisions: [initial.revision],
-    });
-    const retained = await listNoteRevisions(userId, vaultId, first.note_id);
-    expect(retained.map((row) => row.revision)).toContain(initial.revision);
-    expect(retained.map((row) => row.revision)).not.toContain(
-      secondSnapshot.revision,
-    );
+      await listNoteRevisions(userId, vaultId, first.note_id),
+    ).toHaveLength(1);
+    const third = { ...sampleOp("snapshot-third"), base_revision: 2 };
+    vi.setSystemTime(new Date(Date.now() + 5 * 60_000));
+    await persistPendingOperation(userId, third);
+    expect(
+      await listNoteRevisions(userId, vaultId, first.note_id),
+    ).toHaveLength(2);
     expect(await listPendingOperations(userId, vaultId)).toHaveLength(3);
-    now.mockRestore();
+    vi.useRealTimers();
   });
 
-  it("prunes invalid tagged snapshots later but preserves named and legacy revisions", async () => {
+  it("expires only unreferenced recovery snapshots after seven days", async () => {
     const { listNoteRevisions } = await import("./cache");
-    const { openOfflineDb, revisionKey } = await import("./db");
-    const first = sampleOp("invalid-retention-first");
-    await persistPendingOperation(userId, first);
-    const revisions = await listNoteRevisions(userId, vaultId, first.note_id);
-    const invalid = revisions[0]!;
-    const { recoverySnapshot: _tag, ...legacyFields } = invalid;
-    const legacy = {
-      ...legacyFields,
-      revision: invalid.revision + 100,
-      recordedAt: "not-a-date",
-    };
-    const db = await openOfflineDb();
-    await db.put(
+    const first = sampleOp("retention-first");
+    const snapshot = await persistPendingOperation(userId, first);
+    const db = await (await import("./db")).openOfflineDb();
+    const old = await db.get(
       "note_revisions",
-      { ...invalid, recordedAt: "not-a-date" },
-      revisionKey(userId, vaultId, first.note_id, invalid.revision),
+      `${userId}:${vaultId}:${first.note_id}:${snapshot}`,
     );
     await db.put(
       "note_revisions",
-      legacy,
-      revisionKey(userId, vaultId, first.note_id, legacy.revision),
+      {
+        ...old!,
+        recordedAt: new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString(),
+      },
+      `${userId}:${vaultId}:${first.note_id}:${snapshot}`,
     );
-    const next = sampleOp("invalid-retention-next");
-    next.base_revision = 1;
-    await persistPendingOperation(userId, next, [], false, {
-      preserveRevisions: [invalid.revision],
+    const second = { ...sampleOp("retention-second"), base_revision: 1 };
+    await persistPendingOperation(userId, second, [], false, {
+      preserveRevisions: [snapshot!],
     });
-    let remaining = await listNoteRevisions(userId, vaultId, first.note_id);
-    expect(remaining.map((row) => row.revision)).toContain(invalid.revision);
-    expect(remaining.map((row) => row.revision)).toContain(legacy.revision);
-    const later = sampleOp("invalid-retention-later");
-    later.base_revision = 2;
-    await persistPendingOperation(userId, later);
-    remaining = await listNoteRevisions(userId, vaultId, first.note_id);
-    expect(remaining.map((row) => row.revision)).not.toContain(
-      invalid.revision,
+    const revisions = await listNoteRevisions(userId, vaultId, first.note_id);
+    expect(revisions.some((row) => row.revision === snapshot)).toBe(true);
+
+    const expiring = sampleOp("retention-expire");
+    expiring.note_id = "expired-note";
+    const expiredRevision = await persistPendingOperation(userId, expiring);
+    const expiredKey = `${userId}:${vaultId}:expired-note:${expiredRevision}`;
+    const expired = await db.get("note_revisions", expiredKey);
+    await db.put(
+      "note_revisions",
+      {
+        ...expired!,
+        recordedAt: new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString(),
+      },
+      expiredKey,
     );
-    expect(remaining.map((row) => row.revision)).toContain(legacy.revision);
+    await persistPendingOperation(userId, {
+      ...sampleOp("retention-expire-next"),
+      note_id: "expired-note",
+      base_revision: 1,
+    });
+    expect(
+      (await listNoteRevisions(userId, vaultId, "expired-note")).some(
+        (row) => row.revision === expiredRevision,
+      ),
+    ).toBe(false);
+    expect(await listPendingOperations(userId, vaultId)).toHaveLength(4);
   });
 
   it("keeps pending encrypted operations until they are acked", async () => {

@@ -82,6 +82,12 @@ case "$*" in
   *'pg_dump '*) printf archive ;;
   cp*) [[ "$FAIL" != copy ]] || exit 8 ;;
   *'pg_restore --exit-on-error'*) [[ "$FAIL" != restore ]] || exit 9 ;;
+  *'up -d --no-deps --wait server'*) [[ "$FAIL" != restart ]] || exit 11 ;;
+  *'psql '*)
+    if [[ -n "${TEST_BACKUP_LATEST:-}" ]]; then
+      [[ -f "$TEST_BACKUP_LATEST/manifest.sha256" ]] || exit 19
+    fi
+    [[ "$FAIL" != status ]] || exit 10 ;;
 esac
 exit 0
 """)
@@ -99,6 +105,31 @@ exit 0
         self.assertIn('stop server', commands)
         self.assertIn('start server', commands)
         self.assertEqual(os.readlink(destination / 'latest'), 'previous')
+        self.assertNotIn('psql ', commands)
+
+    def test_success_records_status_only_after_publishing_verified_backup(self):
+        self.fake_docker()
+        destination = self.path / 'output'
+        self.env['TEST_BACKUP_LATEST'] = str(destination / 'latest')
+        result = subprocess.run(['bash', str(ROOT / 'infra/scripts/backup.sh'), str(destination)], env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertTrue((destination / 'latest' / 'manifest.sha256').is_file())
+        self.assertEqual(self.log.read_text().count('psql '), 1)
+
+    def test_status_write_failure_is_reported_after_verified_backup(self):
+        self.fake_docker(fail='status')
+        destination = self.path / 'output'
+        result = subprocess.run(['bash', str(ROOT / 'infra/scripts/backup.sh'), str(destination)], env=self.env, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((destination / 'latest' / 'manifest.sha256').is_file())
+        self.assertIn(b'verification timestamp could not be recorded', result.stderr)
+        self.assertEqual(self.log.read_text().count('psql '), 1)
+
+    def test_failed_restart_does_not_record_success(self):
+        self.fake_docker(fail='restart')
+        result = subprocess.run(['bash', str(ROOT / 'infra/scripts/backup.sh'), str(self.path / 'output')], env=self.env, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('psql ', self.log.read_text())
 
     def test_previously_stopped_api_stays_stopped(self):
         self.fake_docker(running='false')

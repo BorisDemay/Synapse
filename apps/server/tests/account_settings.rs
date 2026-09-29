@@ -346,7 +346,11 @@ async fn account_deletion_requires_password_csrf_and_removes_owned_vaults() {
 #[tokio::test]
 async fn storage_health_is_cookie_bound_and_reports_opaque_quota_state() {
     let _guard = settings_test_lock().await;
-    let (app, _pool, _email, cookie) = signed_in_account().await;
+    let (app, pool, _email, cookie) = signed_in_account().await;
+    sqlx::query("DELETE FROM backup_status")
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let response = app
         .clone()
@@ -367,6 +371,27 @@ async fn storage_health_is_cookie_bound_and_reports_opaque_quota_state() {
     assert_eq!(payload["used_bytes"], 0);
     assert_eq!(payload["pending_operation_count"], 0);
     assert!(payload["last_successful_backup"].is_null());
+
+    sqlx::query("INSERT INTO backup_status (id, verified_at) VALUES (1, '2026-09-29T12:34:56Z')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let after_backup = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/health/storage")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(after_backup.status(), StatusCode::OK);
+    let updated: serde_json::Value =
+        serde_json::from_slice(&after_backup.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    assert_eq!(updated["last_successful_backup"], "2026-09-29T12:34:56Z");
 
     let unauthorized = app
         .oneshot(

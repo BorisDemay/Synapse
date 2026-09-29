@@ -5,7 +5,9 @@ export const CODEX_CHATGPT_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
 export const CODEX_CHATGPT_MODELS_URL =
   "https://chatgpt.com/backend-api/codex/models";
-export const CODEX_CLIENT_VERSION = "0.147.0";
+// Match the newest Codex catalog features verified by this client. Newer
+// catalog versions must be tested before advertising support for them.
+export const CODEX_CLIENT_VERSION = "0.155.0";
 
 export function chatgptModelsUrl(): string {
   return `${CODEX_CHATGPT_MODELS_URL}?client_version=${encodeURIComponent(CODEX_CLIENT_VERSION)}`;

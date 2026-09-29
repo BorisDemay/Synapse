@@ -6,6 +6,7 @@ import {
   pushOverlay,
   type OverlayHandle,
 } from "@synapse/ui";
+
 import type { CodexModelOption } from "../ai/codex-client";
 
 const props = withDefaults(
@@ -30,9 +31,11 @@ const selectedModel = ref("");
 const dialogElement = ref<HTMLElement>();
 const promptInput = ref<HTMLInputElement>();
 const overlay = ref<OverlayHandle>();
+
 const dialogFocus = new DialogFocusController({
   getContainer: () => dialogElement.value ?? null,
 });
+
 const canSubmit = computed(
   () =>
     props.connected &&
@@ -41,20 +44,28 @@ const canSubmit = computed(
     Boolean(prompt.value.trim()) &&
     Boolean(selectedModel.value.trim()),
 );
-const unavailableHint = computed(() =>
-  !props.connected
-    ? "Connectez l’assistant dans les paramètres pour envoyer un prompt."
-    : !props.models.length
-      ? "Aucun modèle disponible."
-      : "",
-);
 
+const unavailableHint = computed(() => {
+  if (!props.connected) {
+    return "Connectez l’assistant dans les paramètres pour envoyer un prompt.";
+  }
+  if (!props.models.length) {
+    return "Aucun modèle disponible.";
+  }
+  return "";
+});
+
+/** Le modèle du store reste la sélection par défaut ; le popup ne choisit un
+ * autre modèle que sur action explicite de l’utilisateur. */
 function syncSelectedModel() {
   selectedModel.value =
     props.models.find((option) => option.id === props.model)?.id ??
     props.models[0]?.id ??
     "";
 }
+
+// Échap appartient à la pile d'overlays : l'écouteur de document en phase de
+// capture ne l'envoie qu'à l'overlay du dessus, donc au popup visible.
 function openOverlay() {
   overlay.value ??= pushOverlay({
     label: "quick-assistant-prompt",
@@ -62,22 +73,27 @@ function openOverlay() {
     onEscape: () => emit("close"),
   });
 }
+
 function closeOverlay() {
   overlay.value?.release();
   overlay.value = undefined;
 }
+
 function submitPrompt() {
-  if (canSubmit.value)
-    emit("submit", {
-      model: selectedModel.value.trim(),
-      prompt: prompt.value.trim(),
-    });
+  if (!canSubmit.value) {
+    return;
+  }
+  emit("submit", {
+    model: selectedModel.value.trim(),
+    prompt: prompt.value.trim(),
+  });
 }
 
 onBeforeUnmount(() => {
   closeOverlay();
   dialogFocus.detach();
 });
+
 watch(
   () => [props.open, props.model, props.models] as const,
   async ([open]) => {
@@ -92,6 +108,7 @@ watch(
       return;
     }
     closeOverlay();
+    // Le prompt est du contenu de coffre : il ne survit pas à la fermeture.
     prompt.value = "";
     await nextTick();
     dialogFocus.detach();
@@ -135,9 +152,9 @@ watch(
           type="text"
           placeholder="Que doit faire l’assistant ?"
         />
-        <label class="quick-assistant-model"
-          ><span>Modèle</span
-          ><select v-model="selectedModel" aria-label="Modèle de l’assistant">
+        <label class="quick-assistant-model">
+          <span>Modèle</span>
+          <select v-model="selectedModel" aria-label="Modèle de l’assistant">
             <option
               v-for="option in props.models"
               :key="option.id"
@@ -145,8 +162,8 @@ watch(
             >
               {{ option.label }}
             </option>
-          </select></label
-        >
+          </select>
+        </label>
         <p class="quick-assistant-consent" role="note">
           {{
             props.activeNote
@@ -179,6 +196,7 @@ watch(
   padding-top: 12vh;
   background: rgb(15 23 42 / 35%);
 }
+
 .quick-assistant-prompt {
   display: grid;
   gap: 0.85rem;
@@ -189,16 +207,19 @@ watch(
   background: var(--synapse-color-surface-raised);
   box-shadow: var(--synapse-shadow-md);
 }
+
 .quick-assistant-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
 }
+
 .quick-assistant-header h2 {
   margin: 0;
   font-size: 0.95rem;
 }
+
 .quick-assistant-close {
   display: grid;
   place-items: center;
@@ -214,15 +235,18 @@ watch(
   line-height: 1;
   cursor: pointer;
 }
+
 .quick-assistant-close:hover,
 .quick-assistant-close:focus-visible {
   border-color: var(--synapse-color-accent);
   color: var(--synapse-color-text);
 }
+
 .quick-assistant-form {
   display: grid;
   gap: 0.65rem;
 }
+
 .quick-assistant-input,
 .quick-assistant-model select {
   width: 100%;
@@ -233,11 +257,13 @@ watch(
   color: var(--synapse-color-text);
   font: inherit;
 }
+
 .quick-assistant-input:focus-visible,
 .quick-assistant-model select:focus-visible {
   border-color: var(--synapse-color-accent);
   outline: none;
 }
+
 .quick-assistant-model {
   display: grid;
   gap: 0.3rem;
@@ -245,6 +271,7 @@ watch(
   font-size: 0.78rem;
   font-weight: 600;
 }
+
 .quick-assistant-consent {
   margin: 0;
   padding: 0.65rem;
@@ -253,12 +280,14 @@ watch(
   font-size: 0.8rem;
   line-height: 1.45;
 }
+
 .quick-assistant-hint {
   margin: 0;
   color: var(--synapse-color-text-muted);
   font-size: 0.78rem;
   line-height: 1.45;
 }
+
 .quick-assistant-submit {
   justify-self: end;
   padding: 0.55rem 0.95rem;
@@ -275,13 +304,16 @@ watch(
   font-weight: 650;
   cursor: pointer;
 }
+
 .quick-assistant-submit:hover:not(:disabled) {
   background: var(--synapse-color-accent-strong);
 }
+
 .quick-assistant-submit:focus-visible {
   outline: 2px solid var(--synapse-color-accent);
   outline-offset: 1px;
 }
+
 .quick-assistant-submit:disabled {
   color: var(--synapse-color-text-muted);
   background: var(--synapse-color-surface-muted);

@@ -122,6 +122,135 @@ describe("assistant store", () => {
     expect(dumped).not.toContain("Secret diary");
   });
 
+  it("refreshes an aged model catalog only once per day and retains the chosen model", async () => {
+    await unlockVault();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000_000);
+    stubOpenAi();
+    const assistant = useAssistantStore();
+    await assistant.connect(token);
+    await assistant.setModel("gpt-5.6-luna");
+    vi.mocked(fetch).mockClear();
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).includes("/models")) {
+        return jsonResponse({
+          data: [{ id: "gpt-6-astra" }, { id: "gpt-5.6-luna" }],
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    await assistant.refreshModelsIfStale();
+    expect(fetch).not.toHaveBeenCalled();
+    clock.mockReturnValue(1_000_000_000 + 24 * 60 * 60 * 1000);
+    await assistant.refreshModelsIfStale();
+    expect(assistant.models.map((item) => item.id)).toContain("gpt-6-astra");
+    expect(assistant.model).toBe("gpt-5.6-luna");
+    await assistant.refreshModelsIfStale();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    clock.mockRestore();
+  });
+
+  it("renews an expired ChatGPT token before a daily model refresh", async () => {
+    await unlockVault();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000_000);
+    vi.spyOn(useVaultStore(), "loadAssistantCredential").mockResolvedValue({
+      authKind: "chatgpt",
+      expiresAt: 1_000_000_000 + 60 * 60 * 1000,
+      model: "gpt-5.6-luna",
+      provider: "codex",
+      refreshToken: "refresh-secret",
+      token: "old-access-secret",
+    });
+    stubOpenAi();
+    const assistant = useAssistantStore();
+    await assistant.restore();
+    clock.mockReturnValue(1_000_000_000 + 24 * 60 * 60 * 1000);
+    vi.mocked(fetch)
+      .mockClear()
+      .mockImplementation(async (url) => {
+        if (String(url).includes("/oauth/token")) {
+          return jsonResponse({
+            access_token: "new-access-secret",
+            expires_in: 3600,
+            refresh_token: "new-refresh-secret",
+          });
+        }
+        if (String(url).includes("/codex/models")) {
+          return jsonResponse({ models: [{ slug: "gpt-6-sol" }] });
+        }
+        return jsonResponse({}, 404);
+      });
+
+    await assistant.refreshModelsIfStale();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/oauth/token"),
+      expect.anything(),
+    );
+    const catalogRequest = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes("/codex/models"));
+    expect(catalogRequest?.[1]?.headers).toEqual(
+      expect.objectContaining({ Authorization: "Bearer new-access-secret" }),
+    );
+    expect(assistant.models.map((item) => item.id)).toContain("gpt-6-sol");
+    const db = await openOfflineDb();
+    const stored = JSON.stringify(await db.getAll("ai_credentials"));
+    expect(stored).not.toContain("new-access-secret");
+    expect(stored).not.toContain("new-refresh-secret");
+    clock.mockRestore();
+  });
+
+  it("retains the last catalog and backs off when a daily refresh fails", async () => {
+    await unlockVault();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000_000);
+    stubOpenAi();
+    const assistant = useAssistantStore();
+    await assistant.connect(token);
+    const previousModels = assistant.models.map((item) => item.id);
+    const nextDay = 1_000_000_000 + 24 * 60 * 60 * 1000;
+    clock.mockReturnValue(nextDay);
+    vi.mocked(fetch).mockReset().mockRejectedValue(new TypeError("offline"));
+
+    await assistant.refreshModelsIfStale();
+    await assistant.refreshModelsIfStale();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(assistant.models.map((item) => item.id)).toEqual(previousModels);
+    clock.mockReturnValue(nextDay + 15 * 60 * 1000);
+    await assistant.refreshModelsIfStale();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    clock.mockRestore();
+  });
+
+  it("does not apply a delayed catalog after locking the vault", async () => {
+    await unlockVault();
+    stubOpenAi();
+    const assistant = useAssistantStore();
+    await assistant.connect(token);
+    const persist = vi.spyOn(useVaultStore(), "persistAssistantCredential");
+    persist.mockClear();
+    let release!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((url) => {
+      if (String(url).includes("/models")) {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + 24 * 60 * 60 * 1000);
+    const refreshing = assistant.refreshModelsIfStale();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    assistant.lockSession();
+    release(jsonResponse({ data: [{ id: "gpt-6-astra" }] }));
+    await refreshing;
+    expect(assistant.models).toEqual([]);
+    expect(assistant.connected).toBe(false);
+    expect(persist).not.toHaveBeenCalled();
+    clock.mockRestore();
+  });
+
   it("lets Codex replace an attached note through a local tool and syncs it encrypted", async () => {
     await unlockVault();
     const replacement = "# Secret diary\n\nReformulé.";

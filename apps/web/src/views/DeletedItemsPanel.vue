@@ -44,8 +44,11 @@ onBeforeUnmount(() => dialog.value?.close());
     @click.self="emit('close')"
   >
     <template v-if="open">
-      <header>
-        <h2 id="deleted-items-title">Éléments supprimés</h2>
+      <header class="deleted-items-header">
+        <div>
+          <span>Récupération locale</span>
+          <h2 id="deleted-items-title">Éléments supprimés</h2>
+        </div>
         <button
           type="button"
           autofocus
@@ -55,10 +58,10 @@ onBeforeUnmount(() => dialog.value?.close());
           ×
         </button>
       </header>
-      <p id="deleted-items-help">
-        Restaurez les versions encore présentes dans l’historique chiffré de cet
-        appareil. Ce n’est pas une sauvegarde : effacer les données locales ou
-        utiliser un autre appareil peut rendre ces versions indisponibles.
+      <p id="deleted-items-help" class="deleted-items-help">
+        Restaurez ce qui existe encore dans l’historique chiffré de cet
+        appareil. Ce n’est pas une sauvegarde synchronisée : si rien n’apparaît,
+        revenez au coffre ou restaurez depuis votre sauvegarde externe.
       </p>
       <p v-if="error" role="alert">{{ error }}</p>
       <p v-if="loading || restoring" role="status">
@@ -68,10 +71,15 @@ onBeforeUnmount(() => dialog.value?.close());
             : "Recherche dans l’historique local…"
         }}
       </p>
-      <p v-else-if="!items.length" role="status">
-        Aucun élément supprimé sur cet appareil.
-      </p>
-      <ul v-if="!loading">
+      <div v-else-if="!items.length" class="deleted-items-empty" role="status">
+        <strong>Aucun élément supprimé sur cet appareil.</strong>
+        <span
+          >Continuez à écrire ; les suppressions restaurables apparaîtront
+          ici.</span
+        >
+        <button type="button" @click="emit('close')">Retour au coffre</button>
+      </div>
+      <ul v-if="!loading && items.length">
         <li v-for="item in items" :key="item.id">
           <div>
             <strong>{{ item.label }}</strong>
@@ -101,31 +109,42 @@ onBeforeUnmount(() => dialog.value?.close());
 
 <style scoped>
 .deleted-items-panel {
-  width: min(42rem, calc(100vw - 2rem));
+  width: min(44rem, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
   margin: auto;
   padding: 1.25rem;
   overflow: auto;
   border: 1px solid var(--synapse-color-border);
-  border-radius: 1rem;
-  background: var(--synapse-color-surface);
+  border-radius: var(--synapse-radius-lg, 1rem);
+  background: var(--synapse-color-surface-raised, var(--synapse-color-surface));
   color: var(--synapse-color-text);
+  box-shadow: var(--synapse-shadow-md, 0 1rem 3rem rgb(15 23 42 / 18%));
 }
 .deleted-items-panel::backdrop {
   background: rgb(0 0 0 / 55%);
 }
-header,
+.deleted-items-header,
 li {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
 }
+.deleted-items-header span {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 h2 {
-  margin: 0;
+  margin: 0.2rem 0 0;
 }
 p {
   line-height: 1.5;
+}
+.deleted-items-help {
+  margin-block: 1rem;
 }
 ul {
   list-style: none;
@@ -149,10 +168,33 @@ small,
 #deleted-items-help {
   color: var(--synapse-color-text-muted);
 }
+.deleted-items-empty {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-md, 0.75rem);
+  background: var(--synapse-color-surface);
+}
+.deleted-items-empty span {
+  color: var(--synapse-color-text-muted);
+}
+.deleted-items-empty button {
+  justify-self: start;
+  margin-top: 0.25rem;
+}
 button {
   flex-shrink: 0;
   padding: 0.5rem 0.75rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm, 0.45rem);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface);
   cursor: pointer;
+}
+button:hover,
+button:focus-visible {
+  border-color: var(--synapse-color-accent);
 }
 button:disabled {
   cursor: wait;

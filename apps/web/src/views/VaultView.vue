@@ -6,23 +6,22 @@ import {
   AiChat,
   AiConversationPanel,
   AppShell,
-  BacklinksPanel,
   ConflictResolver,
   DialogFocusController,
-  GraphPanel,
-  NoteRelationsPanel,
+  HistoryPanel,
+  isDialogElementVisible,
   MarkdownEditor,
   SearchPalette,
   SettingsPanel,
   ThemeToggle,
+  VaultContextMenu,
   VaultExplorerToolbar,
   VaultNotesSectionHeader,
   VaultTree,
   useSidebarLayout,
   useCompactAssistantLayout,
-  backlinksFor,
-  buildLocalGraph,
   buildVaultTree,
+  downloadNotePdf,
   isNewNoteDraft,
   noteUpdatedAt,
   parseNote,
@@ -34,6 +33,7 @@ import {
   useTheme,
   wikilinkPath,
   pushOverlay,
+  type MarkdownMenuItem,
   type OverlayHandle,
   type PaletteCommand,
   type QueryNote,
@@ -50,14 +50,17 @@ import {
   ref,
   watch,
 } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import Button from "primevue/button";
 
 import { isTrustedDeviceSupported } from "../crypto/trusted-device";
 import { uuidV7 } from "../crypto/vault-key";
 import { ASSISTANT_PROVIDERS } from "../ai/providers";
-import { buildMarkdownZip } from "../export/markdown-zip";
+import {
+  buildMarkdownZip,
+  markdownExportFilename,
+} from "../export/markdown-zip";
 import { applyMarkdownImport, type ImportProgress } from "../import/apply";
 import {
   planMarkdownImport,
@@ -77,25 +80,26 @@ const vault = useVaultStore();
 const auth = useAuthStore();
 const assistant = useAssistantStore();
 const router = useRouter();
-const content = ref("# Nouvelle note\n\n");
+const route = useRoute();
+const content = ref("");
 const noteId = ref<string>(uuidV7());
 const selectedNoteId = ref<string | null>(null);
 const formError = ref("");
 const editorSurface = ref<InstanceType<typeof MarkdownEditor> | null>(null);
 const shell = ref<InstanceType<typeof AppShell> | null>(null);
 const assistantOpen = ref(false);
-const quickAssistantOpen = ref(false);
 const assistantHistoryOpen = ref(false);
+const quickAssistantOpen = ref(false);
 const noteHistoryOpen = ref(false);
 const compactAssistant = useCompactAssistantLayout();
 compactAssistant.bindSidePanels({
   historyOpen: assistantHistoryOpen,
   relationsOpen: noteHistoryOpen,
 });
-const graphOpen = ref(false);
 const settingsOpen = ref(false);
 const searchQuery = ref("");
 const searchPalette = ref<InstanceType<typeof SearchPalette>>();
+const searchPaletteOpen = ref(false);
 const tagFilter = ref("");
 const blobUrls = ref<Record<string, string>>({});
 const theme = useTheme();
@@ -136,8 +140,10 @@ watch(
         ? notify({
             kind: "error",
             message: quickAssistantInFlight
-              ? "Une opération locale a échoué. Votre contenu est conservé."
-              : message,
+              ? "Une opération locale a échoué. Votre contenu est conservé. Réessayez après avoir vérifié la connexion ou le stockage local."
+              : /réessayez|conservé|brouillon/iu.test(message)
+                ? message
+                : `${message} Votre brouillon reste affiché ; réessayez ou verrouillez seulement après une sauvegarde réussie.`,
           })
         : null;
   },
@@ -201,20 +207,6 @@ const pendingSaves = reactive(
 const localSaveFailed = ref(false);
 let saveInFlight: Promise<boolean> | undefined;
 
-const storageHealthMessage = computed(() => {
-  const health = auth.storageHealth;
-  if (!health) return "";
-  const available =
-    health.availableBytes === null
-      ? "inconnue"
-      : `${Math.round(health.availableBytes / 1024 / 1024)} MiB disponibles`;
-  const pending = `${health.pendingOperationCount} opération${health.pendingOperationCount === 1 ? "" : "s"} en attente`;
-  const backup = health.lastSuccessfulBackup
-    ? ` · sauvegarde ${health.lastSuccessfulBackup}`
-    : "";
-  return `${available} · ${pending}${backup}`;
-});
-
 function noteTitle(markdown: string, fallback: string): string {
   const heading = markdown
     .split("\n")
@@ -240,7 +232,7 @@ const queryNotes = computed<QueryNote[]>(() =>
   Array.from(vault.notes.entries()).map(([id, note]) => ({
     content: note.content,
     id,
-    label: noteTitle(note.content, id.slice(0, 8)),
+    label: noteTitle(note.content, "Nouvelle note"),
     path: fullNotePath(note.path, id),
   })),
 );
@@ -272,17 +264,9 @@ const treeNodes = computed<VaultTreeNode[]>(() => {
         vault.historyFor(note.id)[0]?.recordedAt,
       ),
     }));
-  const attached = Array.from(vault.attachments.entries()).map(
-    ([id, file]) => ({
-      id,
-      kind: "attachment" as const,
-      label: file.path.split("/").pop() ?? file.path,
-      path: file.path,
-      syncStatus: vault.noteSyncStatus(id),
-      updatedAt: noteUpdatedAt(id, ""),
-    }),
-  );
-  return buildVaultTree([...sources, ...attached]);
+  // Attachments stay in the encrypted vault for inline images, links, import
+  // and export, but the Notes explorer lists only notes.
+  return buildVaultTree(sources);
 });
 
 const searchResults = computed(() =>
@@ -290,22 +274,50 @@ const searchResults = computed(() =>
 );
 
 const paletteCommands = computed<PaletteCommand[]>(() => [
-  { id: "new-note", label: "Nouvelle note" },
+  ...recentNotes.value.slice(0, 5).map((note) => ({
+    category: "Récents",
+    hint: note.path,
+    id: `recent-note:${note.id}`,
+    label: note.label,
+  })),
+  ...vault.preferences.savedSearches.slice(0, 5).map((search) => ({
+    category: "Recherches sauvegardées",
+    hint: search.query,
+    id: `saved-search:${search.id}`,
+    label: search.label,
+  })),
+  { category: "Créer", id: "new-note", label: "Nouvelle note" },
   {
+    category: "Créer",
     id: "quick-assistant",
     label: "Prompt rapide à l’assistant",
     hint: "Ctrl+Alt+K",
   },
-  { id: "new-folder", label: "Nouveau dossier" },
-  { id: "lock", label: "Verrouiller le coffre" },
-  { id: "settings", label: "Paramètres" },
-  { id: "theme", label: "Basculer le thème" },
-  { id: "export", label: "Exporter Markdown" },
-  { id: "from-template", label: "Créer une note depuis un modèle" },
-  { id: "graph", label: "Afficher le graphe local" },
-  { id: "import", label: "Importer un ZIP ou un dossier Markdown" },
-  { id: "toggle-sidebar", label: "Afficher ou masquer la barre latérale" },
-  { id: "toggle-compact", label: "Afficher ou masquer les titres de section" },
+  { category: "Créer", id: "new-folder", label: "Nouveau dossier" },
+  {
+    category: "Créer",
+    id: "from-template",
+    label: "Créer une note depuis un modèle",
+  },
+  {
+    category: "Importer / exporter",
+    id: "import",
+    label: "Importer un ZIP ou un dossier Markdown",
+  },
+  { category: "Importer / exporter", id: "export", label: "Exporter Markdown" },
+  { category: "Affichage", id: "settings", label: "Paramètres" },
+  { category: "Affichage", id: "theme", label: "Basculer le thème" },
+  {
+    category: "Affichage",
+    id: "toggle-sidebar",
+    label: "Afficher ou masquer la barre latérale",
+  },
+  {
+    category: "Affichage",
+    id: "toggle-compact",
+    label: "Afficher ou masquer les titres de section",
+  },
+  { category: "Sécurité", id: "lock", label: "Verrouiller le coffre" },
 ]);
 
 const allTags = computed(() => uniqueTags(queryNotes.value));
@@ -334,6 +346,12 @@ const pinnedNotes = computed(() =>
     .filter((note): note is QueryNote => Boolean(note)),
 );
 
+const recentNotes = computed(() =>
+  vault.preferences.recentNoteIds
+    .map((id) => queryNotes.value.find((note) => note.id === id))
+    .filter((note): note is QueryNote => Boolean(note)),
+);
+
 const treeSelectedId = computed(() =>
   selectedNoteId.value && vault.notes.has(selectedNoteId.value)
     ? selectedNoteId.value
@@ -348,9 +366,46 @@ const currentNoteTitle = computed(() =>
   noteTitle(content.value, currentQueryNote.value?.label ?? "Nouvelle note"),
 );
 
+/** Brouillon de saisie du titre ; null quand le champ reflète le titre réel. */
+const noteTitleDraft = ref<string | null>(null);
+
+watch(noteId, () => {
+  noteTitleDraft.value = null;
+});
+
+function onNoteTitleInput(event: Event) {
+  noteTitleDraft.value = (event.target as HTMLInputElement).value;
+}
+
+/** Le titre du bandeau est la source du H1 : la saisie réécrit le premier titre
+ * du markdown et le persiste, sans jamais changer le chemin de la note. */
+async function commitNoteTitle() {
+  if (noteTitleDraft.value === null) return;
+  const draft = noteTitleDraft.value;
+  noteTitleDraft.value = null;
+  const next = draft.trim();
+  if (!next || next === currentNoteTitle.value) return;
+  const lines = content.value.split("\n");
+  const headingIndex = lines.findIndex((line) => line.trim().startsWith("# "));
+  if (headingIndex >= 0) {
+    lines[headingIndex] = `# ${next}`;
+  } else {
+    lines.unshift(`# ${next}`, "");
+  }
+  await save(lines.join("\n"));
+}
+
+function cancelNoteTitleEdit() {
+  noteTitleDraft.value = null;
+}
+
+/** Le fil d'Ariane ne garde que les dossiers : le dernier segment du chemin est
+ * le nom de fichier, un identifiant interne déjà remplacé par le titre affiché
+ * juste en dessous. Une note à la racine n'a donc aucun fil d'Ariane. */
 const breadcrumbSegments = computed(() => {
   const path = vault.notes.get(noteId.value)?.path;
-  return path ? path.split("/").filter(Boolean) : [];
+  if (!path) return [];
+  return path.split("/").filter(Boolean).slice(0, -1);
 });
 
 /**
@@ -435,13 +490,6 @@ function dismissAutosaveHint() {
   }
 }
 
-const currentBacklinks = computed(() => {
-  const current = currentQueryNote.value;
-  return current ? backlinksFor(queryNotes.value, current) : [];
-});
-
-const localGraph = computed(() => buildLocalGraph(queryNotes.value));
-
 const templateNotes = computed(() => {
   const prefix = `${vault.preferences.templatesPath.replace(/\/$/u, "")}/`;
   return queryNotes.value.filter((note) => note.path.startsWith(prefix));
@@ -492,29 +540,21 @@ async function closeMobileNavigation() {
 
 function closeNoteTools() {
   assistantOpen.value = false;
-  graphOpen.value = false;
   noteHistoryOpen.value = false;
 }
 
-/** Only one side tool (relations OR graph OR assistant) may be open. */
-function toggleNoteTools(tool: "relations" | "graph" | "assistant") {
+/** Only one side tool (note history OR assistant) may be open. */
+function toggleNoteTools(tool: "relations" | "assistant") {
   if (tool === "relations") {
     noteHistoryOpen.value = !noteHistoryOpen.value;
     if (noteHistoryOpen.value) {
-      graphOpen.value = false;
-      assistantOpen.value = false;
-    }
-  } else if (tool === "graph") {
-    graphOpen.value = !graphOpen.value;
-    if (graphOpen.value) {
-      noteHistoryOpen.value = false;
       assistantOpen.value = false;
     }
   } else {
     assistantOpen.value = !assistantOpen.value;
     if (assistantOpen.value) {
-      graphOpen.value = false;
       noteHistoryOpen.value = false;
+      void assistant.refreshModelsIfStale();
     }
   }
 }
@@ -573,7 +613,6 @@ function isSafePreviewType(contentType: string): boolean {
 
 function attachNote(id: string) {
   assistant.attachNote(id);
-  graphOpen.value = false;
   noteHistoryOpen.value = false;
   assistantOpen.value = true;
   void closeMobileNavigation();
@@ -624,7 +663,10 @@ async function sendAssistant(prompt: string) {
 }
 
 function openQuickAssistant() {
-  if (vault.isUnlocked) quickAssistantOpen.value = true;
+  if (vault.isUnlocked) {
+    quickAssistantOpen.value = true;
+    void assistant.refreshModelsIfStale();
+  }
 }
 
 function closeQuickAssistant() {
@@ -636,11 +678,7 @@ function isAnotherModalOpen(): boolean {
     document.querySelectorAll<HTMLElement>(
       '[role="dialog"][aria-modal="true"], dialog[open]',
     ),
-  ).some(
-    (element) =>
-      element.getClientRects().length > 0 &&
-      getComputedStyle(element).visibility !== "hidden",
-  );
+  ).some((element) => isDialogElementVisible(element));
 }
 
 function toggleQuickAssistantFromShortcut(event: KeyboardEvent) {
@@ -913,7 +951,7 @@ async function startNewNote(folder?: string) {
   draftBaseRevision.value = null;
   noteId.value = uuidV7();
   selectedNoteId.value = null;
-  content.value = "# Nouvelle note\n\n";
+  content.value = "";
   formError.value = "";
   await closeMobileNavigation();
   if (folder) {
@@ -1072,6 +1110,19 @@ function updateDraft(nextContent: string) {
   content.value = nextContent;
 }
 
+const removeDraftNavigationGuard = router.beforeEach(async (_to, from) => {
+  if (
+    from.path !== "/vault" ||
+    (draftBaseRevision.value === null &&
+      pendingSaves.size === 0 &&
+      !saveInFlight)
+  )
+    return true;
+  // Navigation waits for the existing durable encrypted save; a storage error
+  // keeps the editor mounted and the draft available for retry.
+  return await save(content.value);
+});
+
 watch(
   () => vault.notes.get(noteId.value)?.content,
   (next, previous) => {
@@ -1085,18 +1136,9 @@ watch(
   },
 );
 
-const removeDraftNavigationGuard = router.beforeEach(async (_to, from) => {
-  if (
-    from.path !== "/vault" ||
-    (draftBaseRevision.value === null &&
-      pendingSaves.size === 0 &&
-      !saveInFlight)
-  )
-    return true;
-  return await save(content.value);
-});
-
 async function save(nextContent = content.value) {
+  // Explicit transition saves supersede the editor's idle timer; it must not
+  // enqueue the same draft again after the transition has begun.
   editorSurface.value?.cancelSave?.();
   if (!vault.notes.has(noteId.value) && isNewNoteDraft(nextContent)) {
     return true;
@@ -1154,6 +1196,7 @@ async function save(nextContent = content.value) {
 }
 
 async function onOnline() {
+  void assistant.refreshModelsIfStale();
   await vault.synchronize();
 }
 
@@ -1458,7 +1501,15 @@ async function deleteAccount(password: string) {
 }
 
 function runCommand(id: string) {
-  if (id === "new-note") {
+  if (id.startsWith("recent-note:")) {
+    const selected = id.slice("recent-note:".length);
+    if (vault.notes.has(selected)) void selectNote(selected);
+  } else if (id.startsWith("saved-search:")) {
+    const selected = vault.preferences.savedSearches.find(
+      (search) => search.id === id.slice("saved-search:".length),
+    );
+    if (selected) void openLocalSearch(selected.query);
+  } else if (id === "new-note") {
     startNewNote();
   } else if (id === "quick-assistant") {
     openQuickAssistant();
@@ -1477,10 +1528,6 @@ function runCommand(id: string) {
     void exportNotes();
   } else if (id === "from-template") {
     void startFromTemplate();
-  } else if (id === "graph") {
-    assistantOpen.value = false;
-    noteHistoryOpen.value = false;
-    graphOpen.value = true;
   } else if (id === "import") {
     requestImport();
   } else if (id === "toggle-sidebar") {
@@ -1493,6 +1540,7 @@ function runCommand(id: string) {
 async function openLocalSearch(query = "") {
   await closeMobileNavigation();
   await searchPalette.value?.openPalette(query);
+  searchPaletteOpen.value = true;
 }
 
 async function saveSearch() {
@@ -1511,9 +1559,170 @@ async function saveSearch() {
   });
 }
 
-async function toggleCurrentPin() {
-  if (vault.notes.has(noteId.value)) {
-    await vault.togglePinnedNote(noteId.value);
+/** L'épingle se pilote depuis l'arbre : seules les vraies notes (pas les
+ * pièces jointes) peuvent l'être. */
+async function toggleTreePin(id: string) {
+  if (vault.notes.has(id)) {
+    await vault.togglePinnedNote(id);
+  }
+}
+
+const noteMenuOpen = ref(false);
+const noteMenuX = ref(0);
+const noteMenuY = ref(0);
+const noteMenuNoteId = ref<string>();
+
+/** Le clic droit n'ouvre le menu que pour une vraie note (pas un dossier ni
+ * une pièce jointe) et ne déplace JAMAIS la sélection. */
+function openNoteMenu(payload: { id: string; x: number; y: number }) {
+  if (!vault.notes.has(payload.id)) {
+    return;
+  }
+  noteMenuNoteId.value = payload.id;
+  noteMenuX.value = payload.x;
+  noteMenuY.value = payload.y;
+  noteMenuOpen.value = true;
+}
+
+function closeNoteMenu() {
+  noteMenuOpen.value = false;
+}
+
+const noteMenuItems = computed<MarkdownMenuItem[]>(() => {
+  const id = noteMenuNoteId.value;
+  if (!id || !vault.notes.has(id)) {
+    return [];
+  }
+  const pinned = vault.preferences.pinnedNoteIds.includes(id);
+  return [
+    {
+      type: "item",
+      id: "pin",
+      label: pinned ? "Désépingler" : "Épingler",
+      checked: pinned,
+    },
+    { type: "separator" },
+    { type: "item", id: "export-pdf", label: "Exporter en PDF" },
+    { type: "item", id: "export-markdown", label: "Exporter en Markdown" },
+    { type: "item", id: "copy-link", label: "Copier le lien de la note" },
+    { type: "item", id: "copy-wikilink", label: "Copier le wikilink" },
+    { type: "item", id: "duplicate", label: "Dupliquer la note" },
+    { type: "item", id: "history", label: "Historique local" },
+    { type: "separator" },
+    { type: "item", id: "delete", label: "Supprimer", destructive: true },
+  ];
+});
+
+function noteLabel(id: string): string {
+  return queryNotes.value.find((note) => note.id === id)?.label ?? "Note";
+}
+
+/** Téléchargement local d'un PDF produit en mémoire : le contenu ne quitte
+ * jamais le client (condition E2EE) et aucune boîte d'impression ne s'ouvre. */
+function exportNotePdf(id: string) {
+  const note = vault.notes.get(id);
+  if (!note) return;
+  const label = noteLabel(id);
+  downloadNotePdf({
+    filename: markdownExportFilename(label, []).replace(/\.md$/iu, ".pdf"),
+    markdown: note.content,
+    title: label,
+  });
+}
+
+/** Téléchargement Markdown : Blob local + lien de téléchargement, sans réseau. */
+function downloadNoteMarkdown(id: string) {
+  const note = vault.notes.get(id);
+  if (!note) return;
+  const blob = new Blob([note.content], {
+    type: "text/markdown;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  // L'assainisseur existant du ZIP garantit un nom de fichier sûr.
+  link.download = markdownExportFilename(noteLabel(id), []);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Adresse d'application qui ouvre cette note : le routeur construit le
+ * chemin et seul l'identifiant opaque de la note (uuidV7) est copié — jamais
+ * le titre ni le contenu. Le presse-papiers reste local au navigateur : aucune
+ * donnée de coffre ne part vers le serveur (invariant E2EE). */
+async function copyNoteUrl(id: string) {
+  if (!vault.notes.has(id)) return;
+  const href = router.resolve({ path: "/vault", query: { note: id } }).href;
+  try {
+    await navigator.clipboard.writeText(`${window.location.origin}${href}`);
+  } catch {
+    formError.value = "Copie impossible : le presse-papiers est indisponible.";
+  }
+}
+
+/** Wikilink tel que l'éditeur l'insère lui-même : [[chemin-sans-.md]]
+ * (wikilinkTarget de MarkdownEditor) et resolveWikilink retrouve la note
+ * depuis ce même chemin, pour écrire un lien à l'intérieur d'une note. */
+async function copyNoteWikilink(id: string) {
+  const note = vault.notes.get(id);
+  if (!note) return;
+  const path = fullNotePath(note.path, id);
+  const target = path.replace(/\.md$/iu, "");
+  try {
+    await navigator.clipboard.writeText(`[[${target}]]`);
+  } catch {
+    formError.value = "Copie impossible : le presse-papiers est indisponible.";
+  }
+}
+
+async function duplicateNote(id: string) {
+  const note = vault.notes.get(id);
+  if (!note) return;
+  const path = fullNotePath(note.path, id);
+  const slash = path.lastIndexOf("/");
+  const folder = slash >= 0 ? path.slice(0, slash + 1) : "";
+  const stem = path.slice(slash + 1).replace(/\.md$/iu, "") || "note";
+  await vault.saveNote({
+    content: note.content,
+    id: uuidV7(),
+    path: `${folder}${stem} (copie).md`,
+  });
+}
+
+/** Réutilise le mécanisme existant de l'historique local (noteHistoryOpen /
+ * assistantOpen / toggleNoteTools) ; la note visée devient la note courante
+ * car l'historique affiché est celui du volet relations. */
+async function openNoteHistory(id: string) {
+  if (id !== noteId.value) {
+    await showNote(id);
+  }
+  if (!noteHistoryOpen.value) {
+    toggleNoteTools("relations");
+  }
+}
+
+async function onNoteMenuSelect(action: string) {
+  const id = noteMenuNoteId.value;
+  closeNoteMenu();
+  if (!id || !vault.notes.has(id)) return;
+  if (action === "pin") {
+    await toggleTreePin(id);
+  } else if (action === "export-pdf") {
+    exportNotePdf(id);
+  } else if (action === "export-markdown") {
+    downloadNoteMarkdown(id);
+  } else if (action === "copy-link") {
+    await copyNoteUrl(id);
+  } else if (action === "copy-wikilink") {
+    await copyNoteWikilink(id);
+  } else if (action === "duplicate") {
+    await duplicateNote(id);
+  } else if (action === "history") {
+    await openNoteHistory(id);
+  } else if (action === "delete") {
+    await deleteNote(id);
   }
 }
 
@@ -1567,17 +1776,6 @@ async function restoreHistory(revision: number) {
   }
 }
 
-async function createRestorePoint() {
-  const label = window.prompt("Nom du restore point");
-  if (!label?.trim()) return;
-  try {
-    await vault.createRestorePoint(noteId.value, label);
-  } catch (error) {
-    formError.value =
-      error instanceof Error ? error.message : "Restore point impossible.";
-  }
-}
-
 function refreshBlobUrls() {
   for (const url of Object.values(blobUrls.value)) {
     URL.revokeObjectURL(url);
@@ -1591,9 +1789,19 @@ function refreshBlobUrls() {
   blobUrls.value = next;
 }
 
+function checkAssistantCatalog() {
+  void assistant.refreshModelsIfStale();
+}
+let catalogRefreshTimer: number | undefined;
+
 onMounted(() => {
   window.addEventListener("online", onOnline);
-  window.addEventListener("keydown", toggleQuickAssistantFromShortcut);
+  window.addEventListener("focus", checkAssistantCatalog);
+  catalogRefreshTimer = window.setInterval(
+    checkAssistantCatalog,
+    60 * 60 * 1000,
+  );
+  window.addEventListener("keydown", toggleQuickAssistantFromShortcut, true);
   if (navigator.onLine) {
     void vault.synchronize();
   }
@@ -1605,10 +1813,62 @@ onMounted(() => {
   void reopenMostRecentNote();
 });
 
+/** Valeur de ?note= (lien copié par « Copier le lien de la note »). */
+function deepLinkValue(): string {
+  const value = route.query.note;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Note visée par le lien : identifiant exact, sinon chemin de note (avec ou
+ * sans .md, sans tenir compte de la casse). */
+function deepLinkedNoteId(value: string): string | undefined {
+  if (vault.notes.has(value)) return value;
+  const target = value.toLowerCase().replace(/\.md$/u, "");
+  return queryNotes.value.find(
+    (note) => note.path.toLowerCase().replace(/\.md$/u, "") === target,
+  )?.id;
+}
+
+/** Valeur distincte déjà traitée : chaque lien n'ouvre la note qu'une fois,
+ * sans boucler quand les notes arrivent ensuite. */
+const handledDeepLink = ref("");
+/** Note ouverte par le lien profond : elle prime sur la note la plus récente. */
+let deepLinkTarget: string | undefined;
+
+async function openDeepLinkedNote() {
+  const requested = deepLinkValue();
+  if (!requested || !vault.isUnlocked) return;
+  if (handledDeepLink.value === requested) return;
+  const id = deepLinkedNoteId(requested);
+  if (id) {
+    handledDeepLink.value = requested;
+    deepLinkTarget = id;
+    await showNote(id);
+    return;
+  }
+  // Les notes arrivent après le déverrouillage : tant que le coffre n'en
+  // contient aucune, le lien n'est pas jugé introuvable et reste en attente.
+  if (vault.notes.size === 0) return;
+  handledDeepLink.value = requested;
+  notify({
+    kind: "warning",
+    message:
+      "Note introuvable : le lien ne correspond à aucune note du coffre.",
+  });
+}
+
+watch(
+  [() => route.query.note, () => vault.isUnlocked, () => vault.notes.size],
+  () => void openDeepLinkedNote(),
+  { immediate: true },
+);
+
 /** Reopens the most recent note that still exists, from the encrypted vault
  * preferences (recentNoteIds), never from plaintext localStorage. */
 async function reopenMostRecentNote() {
   if (!vault.isUnlocked || vault.notes.has(noteId.value)) return;
+  // Un lien profond résolu (?note=) a déjà choisi la note affichée.
+  if (deepLinkTarget) return;
   if (vault.preferences.recentNoteIds.length === 0) return;
   const mostRecent = vault.preferences.recentNoteIds.find((id) =>
     vault.notes.has(id),
@@ -1617,7 +1877,6 @@ async function reopenMostRecentNote() {
 }
 
 onUnmounted(() => {
-  removeDraftNavigationGuard();
   clearToasts();
   attachmentOverlay.value?.release();
   attachmentOverlay.value = undefined;
@@ -1625,7 +1884,10 @@ onUnmounted(() => {
   vaultViewEpoch++;
   closeDeletedItems();
   window.removeEventListener("online", onOnline);
-  window.removeEventListener("keydown", toggleQuickAssistantFromShortcut);
+  window.removeEventListener("focus", checkAssistantCatalog);
+  window.clearInterval(catalogRefreshTimer);
+  window.removeEventListener("keydown", toggleQuickAssistantFromShortcut, true);
+  removeDraftNavigationGuard();
   for (const url of Object.values(blobUrls.value)) {
     URL.revokeObjectURL(url);
   }
@@ -1668,8 +1930,9 @@ watch(
 );
 
 watch(
-  () => [...vault.attachments.values()].map((file) => file.path).join("|"),
+  () => [...vault.attachments.values()],
   () => refreshBlobUrls(),
+  { immediate: true },
 );
 
 watch(settingsOpen, (open) => {
@@ -1689,7 +1952,7 @@ watch(settingsOpen, (open) => {
     class="vault-page"
     :class="{ 'vault-page--compact': sidebar.compact.value }"
     :sidebar-collapsed="sidebar.collapsed.value"
-    :tool-open="assistantOpen || graphOpen || noteHistoryOpen"
+    :tool-open="assistantOpen || noteHistoryOpen"
     @close-tool="closeNoteTools"
   >
     <template #navigation>
@@ -1714,13 +1977,6 @@ watch(settingsOpen, (open) => {
             {{ syncStatusLabel }}
           </span>
         </div>
-        <p
-          v-if="!sidebar.collapsed.value && storageHealthMessage"
-          class="storage-health"
-          role="status"
-        >
-          {{ storageHealthMessage }}
-        </p>
         <VaultExplorerToolbar
           show-import
           show-import-folder
@@ -1844,9 +2100,12 @@ watch(settingsOpen, (open) => {
         v-if="!sidebar.collapsed.value"
         :attached-ids="assistant.attachedNoteIds"
         :nodes="treeNodes"
+        :pinned-ids="vault.preferences.pinnedNoteIds"
         :selected-id="treeSelectedId"
         @attach="attachNote"
         @delete="deleteNote"
+        @menu="openNoteMenu"
+        @pin="toggleTreePin"
         @select="selectNote"
       />
       <div class="sidebar-footer">
@@ -1857,8 +2116,17 @@ watch(settingsOpen, (open) => {
           v-synapse-tooltip="'Éléments supprimés'"
           @click="openDeletedItems"
         >
-          <span aria-hidden="true">↶</span>
-          <span v-if="!sidebar.collapsed.value">Éléments supprimés</span>
+          <span class="footer-item-icon" aria-hidden="true"
+            ><svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"
+              /></svg></span
+          ><span class="footer-item-label">Éléments supprimés</span>
         </button>
         <button
           class="settings-button"
@@ -1869,7 +2137,7 @@ watch(settingsOpen, (open) => {
           v-synapse-tooltip="'Ouvrir les paramètres'"
           @click="settingsOpen = true"
         >
-          <span class="settings-icon" aria-hidden="true">
+          <span class="footer-item-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
                 fill="currentColor"
@@ -1877,7 +2145,7 @@ watch(settingsOpen, (open) => {
               />
             </svg>
           </span>
-          <span class="settings-label">Paramètres</span>
+          <span class="settings-label footer-item-label">Paramètres</span>
         </button>
         <button
           class="logout-button"
@@ -1886,8 +2154,17 @@ watch(settingsOpen, (open) => {
           v-synapse-tooltip="'Se déconnecter'"
           @click="logout"
         >
-          <span aria-hidden="true">↪</span>
-          <span class="logout-label">Se déconnecter</span>
+          <span class="footer-item-icon" aria-hidden="true"
+            ><svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"
+              /></svg></span
+          ><span class="logout-label footer-item-label">Se déconnecter</span>
         </button>
       </div>
     </template>
@@ -1910,7 +2187,17 @@ watch(settingsOpen, (open) => {
               <span class="breadcrumb-segment">{{ segment }}</span>
             </template>
           </nav>
-          <h2>{{ currentNoteTitle }}</h2>
+          <input
+            class="note-title-input"
+            type="text"
+            :value="noteTitleDraft ?? currentNoteTitle"
+            aria-label="Titre de la note"
+            @input="onNoteTitleInput"
+            @change="commitNoteTitle"
+            @blur="commitNoteTitle"
+            @keydown.enter.prevent="commitNoteTitle"
+            @keydown.esc.prevent="cancelNoteTitleEdit"
+          />
         </div>
         <div class="workspace-meta">
           <span
@@ -1927,38 +2214,10 @@ watch(settingsOpen, (open) => {
           <button
             class="workspace-tool"
             type="button"
-            :aria-pressed="noteHistoryOpen"
-            @click="toggleNoteTools('relations')"
-          >
-            Relations
-          </button>
-          <button
-            class="workspace-tool"
-            type="button"
-            :aria-pressed="graphOpen"
-            @click="toggleNoteTools('graph')"
-          >
-            Graphe
-          </button>
-          <button
-            class="workspace-tool"
-            type="button"
             :aria-pressed="assistantOpen"
             @click="toggleNoteTools('assistant')"
           >
             Assistant
-          </button>
-          <button
-            class="workspace-tool"
-            type="button"
-            :aria-pressed="vault.preferences.pinnedNoteIds.includes(noteId)"
-            @click="toggleCurrentPin"
-          >
-            {{
-              vault.preferences.pinnedNoteIds.includes(noteId)
-                ? "Désépingler"
-                : "Épingler"
-            }}
           </button>
         </div>
       </header>
@@ -1975,46 +2234,67 @@ watch(settingsOpen, (open) => {
       />
       <section
         v-else-if="importPlan"
-        class="import-preview"
+        class="import-preview import-preview-card"
         aria-labelledby="import-preview-title"
       >
-        <h2 id="import-preview-title">Prévisualisation de l’import</h2>
-        <p>
-          {{ importPlan.notes.length }} notes et
-          {{ importPlan.attachments.length }} pièces jointes seront chiffrées
-          localement.
+        <header class="import-preview-header">
+          <div>
+            <span class="import-preview-eyebrow">Import Markdown</span>
+            <h2 id="import-preview-title">Prévisualisation de l’import</h2>
+          </div>
+          <p v-if="importProgress" role="status" class="import-progress">
+            {{ importProgress.completed }} / {{ importProgress.total }} chiffrés
+          </p>
+        </header>
+        <div class="import-preview-summary" aria-label="Résumé de l’import">
+          <article>
+            <strong>{{ importPlan.notes.length }}</strong>
+            <span>{{ importPlan.notes.length > 1 ? "notes" : "note" }}</span>
+          </article>
+          <article>
+            <strong>{{ importPlan.attachments.length }}</strong>
+            <span>{{
+              importPlan.attachments.length > 1
+                ? "pièces jointes"
+                : "pièce jointe"
+            }}</span>
+          </article>
+          <article v-if="importPlan.ignored.length">
+            <strong>{{ importPlan.ignored.length }}</strong>
+            <span>ignoré{{ importPlan.ignored.length > 1 ? "s" : "" }}</span>
+          </article>
+          <article v-if="importCollisions.length" class="import-warning">
+            <strong>{{ importCollisions.length }}</strong>
+            <span
+              >remplacement{{ importCollisions.length > 1 ? "s" : "" }}</span
+            >
+          </article>
+        </div>
+        <p class="import-preview-copy">
+          Les éléments retenus seront chiffrés localement avant d’entrer dans le
+          coffre. Les chemins ignorés restent listés pour vérification.
         </p>
-        <p v-if="importPlan.ignored.length">
-          {{ importPlan.ignored.length }} éléments ignorés pour sécurité ou
-          compatibilité.
-        </p>
-        <p v-if="importCollisions.length" class="import-warning" role="status">
-          {{ importCollisions.length }} éléments existants seront remplacés.
-        </p>
-        <p v-if="importProgress" role="status">
-          Importation : {{ importProgress.completed }} /
-          {{ importProgress.total }} éléments chiffrés localement.
-        </p>
-        <details>
+        <details class="import-preview-details">
           <summary>Détails de l’import</summary>
           <ul>
             <li
               v-for="note in importPlan.notes.slice(0, 20)"
               :key="`note-${note.path}`"
             >
-              Note : {{ note.path }}
+              <span>Note</span><code>{{ note.path }}</code>
             </li>
             <li
               v-for="attachment in importPlan.attachments.slice(0, 20)"
               :key="`attachment-${attachment.path}`"
             >
-              Pièce jointe : {{ attachment.path }}
+              <span>Pièce jointe</span><code>{{ attachment.path }}</code>
             </li>
             <li
               v-for="ignored in importPlan.ignored.slice(0, 20)"
               :key="`ignored-${ignored.path}`"
             >
-              Ignoré : {{ ignored.path }} — {{ ignored.reason }}
+              <span>Ignoré</span><code>{{ ignored.path }}</code>
+              <small>{{ ignored.reason }}</small>
             </li>
           </ul>
         </details>
@@ -2078,6 +2358,7 @@ watch(settingsOpen, (open) => {
           <MarkdownEditor
             ref="editorSurface"
             :model-value="content"
+            :hide-first-heading="true"
             @update:model-value="updateDraft"
             :attachment-urls="blobUrls"
             :wikilink-suggestions="wikilinkSuggestions"
@@ -2087,7 +2368,7 @@ watch(settingsOpen, (open) => {
           />
         </div>
       </template>
-      <div v-if="searchQuery" class="saved-search-action">
+      <div v-if="searchQuery && !searchPaletteOpen" class="saved-search-action">
         <Button
           label="Enregistrer la recherche"
           outlined
@@ -2096,25 +2377,26 @@ watch(settingsOpen, (open) => {
         />
       </div>
     </section>
-    <template #relations v-if="graphOpen || noteHistoryOpen">
-      <GraphPanel
-        v-if="graphOpen"
-        :graph="localGraph"
-        :selected-id="noteId"
-        @close="graphOpen = false"
-        @select="selectNote"
-      />
-      <NoteRelationsPanel
-        v-else
-        recovery-view
-        :backlinks="currentBacklinks"
-        :history="historyEntries"
-        :restore-points="restorePoints"
-        @close="noteHistoryOpen = false"
-        @create-restore-point="createRestorePoint"
-        @restore="restoreHistory"
-        @select="selectNote"
-      />
+    <template #relations v-if="noteHistoryOpen">
+      <div class="note-history-slot">
+        <header class="note-history-header">
+          <span>Historique local</span>
+          <button
+            aria-label="Fermer l'historique local"
+            name="close-note-history"
+            type="button"
+            @click="noteHistoryOpen = false"
+          >
+            ×
+          </button>
+        </header>
+        <HistoryPanel
+          recovery-view
+          :entries="historyEntries"
+          :restore-points="restorePoints"
+          @restore="restoreHistory"
+        />
+      </div>
     </template>
     <template #assistant v-if="assistantOpen">
       <div v-if="assistantHistoryOpen" class="assistant-slot">
@@ -2210,6 +2492,8 @@ watch(settingsOpen, (open) => {
     :commands="paletteCommands"
     :query="searchQuery"
     :results="searchResults"
+    @close="searchPaletteOpen = false"
+    @open="searchPaletteOpen = true"
     @run="runCommand"
     @select="selectNote"
     @update:query="searchQuery = $event"
@@ -2228,6 +2512,14 @@ watch(settingsOpen, (open) => {
     :open="quickAssistantOpen"
     @close="closeQuickAssistant"
     @submit="submitQuickAssistantPrompt"
+  />
+  <VaultContextMenu
+    :items="noteMenuItems"
+    :open="noteMenuOpen"
+    :x="noteMenuX"
+    :y="noteMenuY"
+    @close="closeNoteMenu"
+    @select="onNoteMenuSelect"
   />
   <div
     v-if="attachmentPreview"
@@ -2298,21 +2590,22 @@ watch(settingsOpen, (open) => {
     padding: 0.2rem 0.4rem;
   }
 }
-.deleted-items-trigger {
-  width: 100%;
-  flex: 0 0 auto;
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.5rem;
-  color: var(--synapse-color-text-muted);
-  background: none;
-  border: 0;
-  cursor: pointer;
-  text-align: start;
-}
 .vault-page {
   min-height: 100vh;
+}
+
+/* Bureau : la page ne défile jamais. Chaque zone défile en interne (la note
+   dans .editor-surface, la liste des notes dans la barre latérale) et la
+   grille .app-shell est bornée à la hauteur de la fenêtre. En dessous, la
+   vue redevient fluide (le tiroir mobile et la mise en page ≤860px
+   reposent sur le défilement de la page). */
+@media (min-width: 861px) {
+  .vault-page {
+    height: 100vh;
+    height: 100dvh;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
 }
 
 .attachment-preview-backdrop {
@@ -2365,6 +2658,7 @@ watch(settingsOpen, (open) => {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  min-height: 0;
   padding: 1.35rem 1rem;
   background: color-mix(
     in srgb,
@@ -2372,6 +2666,16 @@ watch(settingsOpen, (open) => {
     var(--synapse-color-surface)
   );
   backdrop-filter: blur(6px);
+}
+
+/* Seule la liste des notes défile dans la barre latérale : l'en-tête, les
+   filtres et le pied (paramètres, déconnexion) restent visibles. La liste est
+   un enfant direct de l'aside (pas du conteneur de grille) : le sélecteur doit
+   donc descendre dans la barre latérale. */
+.vault-page :deep(.app-shell-sidebar > .vault-tree) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .vault-page.app-shell--sidebar-collapsed > :deep(.app-shell-sidebar) {
@@ -2492,6 +2796,7 @@ watch(settingsOpen, (open) => {
 
 .vault-page > :deep(.app-shell-content) {
   padding: 0;
+  min-height: 0;
 }
 
 .vault-page > :deep(.app-shell-assistant) {
@@ -2579,6 +2884,75 @@ watch(settingsOpen, (open) => {
   font-size: clamp(1.4rem, 2.5vw, 2rem);
 }
 
+/* Le titre du bandeau est éditable : il hérite de l'apparence du h2 qu'il
+   remplace et ne révèle sa bordure qu'au survol et à la focalisation. */
+.note-title-input {
+  margin: 0.2rem 0 0;
+  min-width: 0;
+  padding: 0 0.2rem;
+  border: 1px solid transparent;
+  border-radius: var(--synapse-radius-sm);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.note-title-input:hover {
+  border-color: var(--synapse-color-border);
+}
+
+.note-title-input:focus {
+  border-color: var(--synapse-color-accent);
+  outline: none;
+}
+
+/* Panneau d'historique local, dans le slot latéral de l'interpréteur. */
+.note-history-slot {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.note-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-history-header button {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text-muted);
+  background: var(--synapse-color-surface-raised);
+  font: inherit;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.note-history-header button:hover {
+  border-color: var(--synapse-color-accent);
+  color: var(--synapse-color-text);
+}
+
+.note-history-header button:focus-visible {
+  outline: 2px solid var(--synapse-color-accent);
+  outline-offset: 1px;
+}
+
 .eyebrow,
 .sidebar-section-label {
   color: var(--synapse-color-text-muted);
@@ -2605,10 +2979,14 @@ watch(settingsOpen, (open) => {
   background: color-mix(in srgb, var(--synapse-color-warning) 12%, transparent);
 }
 
-.sync-pill[data-status="conflict"],
-.sync-pill[data-status="error"] {
+.sync-pill[data-status="conflict"] {
   color: var(--synapse-color-danger);
   background: color-mix(in srgb, var(--synapse-color-danger) 12%, transparent);
+}
+
+.sync-pill[data-status="error"] {
+  color: var(--synapse-color-warning);
+  background: color-mix(in srgb, var(--synapse-color-warning) 10%, transparent);
 }
 
 .sync-dot {
@@ -2617,13 +2995,6 @@ watch(settingsOpen, (open) => {
   border-radius: 50%;
   background: currentColor;
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
-}
-
-.storage-health {
-  margin: -0.35rem 0 0;
-  color: var(--synapse-color-text-muted);
-  font-size: 0.68rem;
-  line-height: 1.35;
 }
 
 .tag-filter {
@@ -2695,12 +3066,14 @@ watch(settingsOpen, (open) => {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.25rem;
+  flex: 0 0 auto;
+  gap: 0.15rem;
   margin-top: auto;
-  padding-top: 1rem;
+  padding-top: 0.9rem;
   border-top: 1px solid var(--synapse-color-border);
 }
 
+.deleted-items-trigger,
 .settings-button,
 .logout-button {
   display: flex;
@@ -2709,12 +3082,15 @@ watch(settingsOpen, (open) => {
   flex: 0 0 auto;
   width: 100%;
   min-width: 0;
-  padding: 0.65rem 0.7rem;
+  padding: 0.6rem 0.7rem;
   white-space: nowrap;
   border: 0;
   border-radius: var(--synapse-radius-sm);
   color: var(--synapse-color-text-muted);
   background: transparent;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
   cursor: pointer;
   text-align: start;
   transition:
@@ -2722,7 +3098,7 @@ watch(settingsOpen, (open) => {
     background 140ms ease;
 }
 
-.settings-icon {
+.footer-item-icon {
   display: grid;
   flex: none;
   place-items: center;
@@ -2730,6 +3106,14 @@ watch(settingsOpen, (open) => {
   height: 1.15rem;
 }
 
+.footer-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deleted-items-trigger:hover,
+.deleted-items-trigger:focus-visible,
 .settings-button:hover,
 .settings-button:focus-visible {
   color: var(--synapse-color-text);
@@ -2738,6 +3122,14 @@ watch(settingsOpen, (open) => {
     var(--synapse-color-border) 40%,
     var(--synapse-color-surface-muted)
   );
+}
+
+.deleted-items-trigger:focus-visible,
+.settings-button:focus-visible,
+.logout-button:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--synapse-color-accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .settings-button[aria-expanded="true"] {
@@ -2771,7 +3163,7 @@ watch(settingsOpen, (open) => {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 0;
   min-width: 0;
-  height: 100vh;
+  height: 100%;
   padding: 0;
 }
 
@@ -2802,6 +3194,157 @@ watch(settingsOpen, (open) => {
 .editor-surface :deep(.vditor) {
   min-width: 0;
   min-height: 60vh;
+}
+
+.import-preview-card {
+  align-self: start;
+  justify-self: center;
+  display: grid;
+  gap: 1.1rem;
+  width: min(58rem, calc(100% - clamp(2rem, 6vw, 4rem)));
+  margin: clamp(1.25rem, 4vh, 2.5rem) 0;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-md);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: var(--synapse-shadow-sm);
+}
+
+.import-preview-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.import-preview-eyebrow {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.import-preview h2 {
+  margin: 0.25rem 0 0;
+  font-size: clamp(1.3rem, 2.2vw, 1.65rem);
+  letter-spacing: -0.03em;
+}
+
+.import-preview-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+
+.import-preview-summary article {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-muted) 45%,
+    transparent
+  );
+}
+
+.import-preview-summary strong {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.import-preview-summary span,
+.import-preview-copy,
+.import-preview-details small,
+.import-progress {
+  color: var(--synapse-color-text-muted);
+}
+
+.import-warning {
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-warning) 35%,
+    var(--synapse-color-border)
+  ) !important;
+  color: var(--synapse-color-warning);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-warning) 10%,
+    transparent
+  ) !important;
+}
+
+.import-preview-copy {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.import-preview-details {
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  background: var(--synapse-color-surface);
+}
+
+.import-preview-details summary {
+  padding: 0.8rem 1rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.import-preview-details ul {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 15rem;
+  margin: 0;
+  padding: 0 1rem 1rem;
+  overflow: auto;
+  list-style: none;
+}
+
+.import-preview-details li {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, auto) minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--synapse-color-border);
+}
+
+.import-preview-details code {
+  overflow-wrap: anywhere;
+  font-family: var(--synapse-font-mono);
+}
+
+.import-preview-details small {
+  grid-column: 2;
+}
+
+.import-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+@media (max-width: 48rem) {
+  .import-preview-card {
+    width: calc(100% - 1.5rem);
+    margin-block: 0.75rem;
+  }
+
+  .import-preview-header {
+    display: grid;
+  }
+
+  .import-preview-actions {
+    justify-content: stretch;
+  }
+
+  .import-preview-actions :deep(button) {
+    flex: 1 1 10rem;
+  }
 }
 
 .workspace-meta {
@@ -2919,15 +3462,21 @@ watch(settingsOpen, (open) => {
 }
 
 .save-status[data-state="error"],
-.save-status[data-state="sync-error"],
 .save-status[data-state="conflict"] {
   color: var(--synapse-color-danger);
 }
 
+.save-status[data-state="sync-error"] {
+  color: var(--synapse-color-warning);
+}
+
 .save-status[data-state="error"]::before,
-.save-status[data-state="sync-error"]::before,
 .save-status[data-state="conflict"]::before {
   background: var(--synapse-color-danger);
+}
+
+.save-status[data-state="sync-error"]::before {
+  background: var(--synapse-color-warning);
 }
 
 .offline-label {

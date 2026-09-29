@@ -37,6 +37,9 @@ Les notes liées constituent le seul contexte de coffre disponible. Pour les mod
 Ne crée pas de note pour une demande qui porte sur une note liée : choisis l'outil qui la modifie.
 Ne révèle jamais de clés, jetons ou secrets.`;
 
+const MODEL_CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
+const MODEL_CATALOG_RETRY_MS = 15 * 60 * 1000;
+
 const ASSISTANT_TOOLS: CodexTool[] = [
   {
     description:
@@ -204,12 +207,15 @@ export const useAssistantStore = defineStore("assistant", () => {
   let conversationPersistence = Promise.resolve();
   let sessionGeneration = 0;
   let activeSendId: symbol | undefined;
+  let lastModelRefreshAt = 0;
+  let lastModelAttemptAt = 0;
+  let modelsRefreshInFlight: Promise<void> | undefined;
 
   const attachments = computed<AssistantAttachment[]>(() => {
     const vault = useVaultStore();
     return attachedNoteIds.value.map((id) => ({
       id,
-      label: noteTitle(vault.notes.get(id)?.content ?? "", id.slice(0, 8)),
+      label: noteTitle(vault.notes.get(id)?.content ?? "", "Nouvelle note"),
     }));
   });
 
@@ -387,6 +393,9 @@ export const useAssistantStore = defineStore("assistant", () => {
     activeConversationId.value = null;
     deviceLogin.value = null;
     models.value = [];
+    modelsRefreshInFlight = undefined;
+    lastModelRefreshAt = 0;
+    lastModelAttemptAt = 0;
     model.value = "";
     reasoningEffort.value = "";
     fast.value = false;
@@ -484,36 +493,85 @@ export const useAssistantStore = defineStore("assistant", () => {
     }
   }
 
-  async function refreshModels() {
+  function refreshModels(): Promise<void> {
     if (!token) {
       models.value = [];
-      return;
+      return Promise.resolve();
     }
-    try {
-      models.value = await listCodexModels({
-        accountId,
-        baseUrl: providerBaseUrl || undefined,
-        defaultModels: findAssistantProvider(provider)?.defaultModels,
-        token,
-        transport: authKind === "chatgpt" ? "chatgpt" : "platform",
-      });
-      if (
-        models.value.length > 0 &&
-        !models.value.some((option) => option.id === model.value)
-      ) {
-        model.value = models.value[0]?.id ?? "";
-      }
-      applyCatalogConstraints();
-      if (token) {
+    if (modelsRefreshInFlight) return modelsRefreshInFlight;
+    let requestToken = token;
+    lastModelAttemptAt = Date.now();
+    const generation = sessionGeneration;
+    let requestAccountId = accountId;
+    const requestProvider = provider;
+    const isCurrent = () =>
+      generation === sessionGeneration &&
+      token === requestToken &&
+      accountId === requestAccountId &&
+      provider === requestProvider &&
+      useVaultStore().isUnlocked;
+    const pending = (async () => {
+      try {
+        if (
+          authKind === "chatgpt" &&
+          refreshToken &&
+          (expiresAt === undefined || expiresAt - 5 * 60 * 1000 <= Date.now())
+        ) {
+          const refreshed = await refreshChatgptTokens(refreshToken);
+          if (!isCurrent()) return;
+          token = refreshed.accessToken;
+          requestToken = token;
+          refreshToken = refreshed.refreshToken;
+          expiresAt = refreshed.expiresAt;
+          accountId = refreshed.accountId ?? accountId;
+          requestAccountId = accountId;
+          await persistCurrentCredential();
+          if (!isCurrent()) return;
+        }
+        const catalog = await listCodexModels({
+          accountId: requestAccountId,
+          baseUrl: providerBaseUrl || undefined,
+          defaultModels: findAssistantProvider(requestProvider)?.defaultModels,
+          token: requestToken,
+          transport: authKind === "chatgpt" ? "chatgpt" : "platform",
+        });
+        if (!isCurrent()) return;
+        models.value = catalog;
+        lastModelRefreshAt = Date.now();
+        if (!catalog.some((option) => option.id === model.value)) {
+          model.value = catalog[0]?.id ?? "";
+        }
+        applyCatalogConstraints();
         await persistCurrentCredential();
+      } catch (caught) {
+        if (!isCurrent()) return;
+        // Keep a usable catalog on transient refresh failures.
+        error.value =
+          caught instanceof Error
+            ? caught.message
+            : "Impossible de lister les modèles.";
       }
-    } catch (caught) {
-      models.value = [];
-      error.value =
-        caught instanceof Error
-          ? caught.message
-          : "Impossible de lister les modèles.";
-    }
+    })();
+    modelsRefreshInFlight = pending;
+    void pending.finally(() => {
+      if (modelsRefreshInFlight === pending) modelsRefreshInFlight = undefined;
+    });
+    return pending;
+  }
+
+  function refreshModelsIfStale(): Promise<void> {
+    if (
+      !connected.value ||
+      !token ||
+      busy.value ||
+      !useVaultStore().isUnlocked ||
+      (lastModelRefreshAt > 0 &&
+        Date.now() - lastModelRefreshAt < MODEL_CATALOG_REFRESH_MS) ||
+      (lastModelAttemptAt > 0 &&
+        Date.now() - lastModelAttemptAt < MODEL_CATALOG_RETRY_MS)
+    )
+      return Promise.resolve();
+    return refreshModels();
   }
 
   async function setModel(nextModel: string) {
@@ -572,6 +630,12 @@ export const useAssistantStore = defineStore("assistant", () => {
     if (!providerBaseUrl && findAssistantProvider(provider)?.needsBaseUrl) {
       throw new Error("URL de l’API manquante pour ce fournisseur.");
     }
+    sessionGeneration++;
+    modelsRefreshInFlight = undefined;
+    lastModelRefreshAt = 0;
+    lastModelAttemptAt = 0;
+    models.value = [];
+    model.value = "";
     token = credentialToken;
     refreshToken = undefined;
     accountId = undefined;
@@ -596,6 +660,14 @@ export const useAssistantStore = defineStore("assistant", () => {
       };
       window.open(session.verificationUrl, "_blank", "noopener,noreferrer");
       const tokens = await completeChatgptDeviceLogin(session, { signal });
+      sessionGeneration++;
+      modelsRefreshInFlight = undefined;
+      lastModelRefreshAt = 0;
+      lastModelAttemptAt = 0;
+      models.value = [];
+      model.value = "";
+      provider = "codex";
+      providerBaseUrl = "";
       token = tokens.accessToken;
       refreshToken = tokens.refreshToken;
       accountId = tokens.accountId;
@@ -874,6 +946,7 @@ Tu exécutes le modèle ${modelId}, fourni par ${providerLabel}. Si on te demand
     openConversation,
     reasoningEffort,
     reasoningLevels,
+    refreshModelsIfStale,
     restore,
     send,
     setFast,

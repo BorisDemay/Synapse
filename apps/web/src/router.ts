@@ -60,14 +60,17 @@ export function createAppRouter(
       return true;
     }
     if (to.path === "/admin") {
-      if (!auth.isAuthenticated && !auth.isLocalMode) return "/login";
+      if (!auth.isAuthenticated && !auth.isLocalMode)
+        return { path: "/login", query: { redirect: to.fullPath } };
       return auth.isAdmin ? true : home;
     }
     if (!auth.isAuthenticated && !auth.isLocalMode) {
-      return "/login";
+      // La destination d'origine (lien profond vers une note) survit à la
+      // connexion et au déverrouillage.
+      return { path: "/login", query: { redirect: to.fullPath } };
     }
     if (to.path !== "/unlock" && !vault.isUnlocked) {
-      return "/unlock";
+      return { path: "/unlock", query: { redirect: to.fullPath } };
     }
     return true;
   });

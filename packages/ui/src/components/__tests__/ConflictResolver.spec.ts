@@ -4,6 +4,29 @@ import { describe, expect, it, vi } from "vitest";
 import ConflictResolver from "../ConflictResolver.vue";
 
 describe("ConflictResolver", () => {
+  it("groups the conflict content in readable cards", () => {
+    const wrapper = mount(ConflictResolver, {
+      props: {
+        base: "# base",
+        local: "# local",
+        remote: "# remote",
+      },
+    });
+
+    expect(
+      wrapper.get(".conflict-version-grid").findAll(".conflict-card"),
+    ).toHaveLength(3);
+    expect(
+      wrapper.get(".conflict-diff-grid").findAll(".conflict-card"),
+    ).toHaveLength(2);
+    expect(wrapper.get(".conflict-manual-card").find("textarea").exists()).toBe(
+      true,
+    );
+    expect(wrapper.get(".conflict-actions").classes()).toContain(
+      "conflict-card",
+    );
+  });
+
   it("nomme le bouton de publication comme son libellé visible", () => {
     const wrapper = mount(ConflictResolver, {
       props: {

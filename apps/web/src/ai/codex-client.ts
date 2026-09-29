@@ -300,7 +300,9 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       arguments?: unknown;
       call_id?: unknown;
       item?: unknown;
+      item_id?: unknown;
       name?: unknown;
+      output_index?: unknown;
       output_text?: unknown;
       part?: unknown;
       response?: unknown;
@@ -352,14 +354,27 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       }
     }
     if (event.type === "response.function_call_arguments.done") {
-      if (!hasRequiredFunctionCallFields(event)) {
+      if (hasRequiredFunctionCallFields(event)) {
+        calls.push({
+          arguments: event.arguments,
+          callId: event.call_id,
+          name: event.name,
+        });
+      } else if (
+        event.call_id !== undefined ||
+        event.name !== undefined ||
+        typeof event.arguments !== "string" ||
+        !event.arguments.trim() ||
+        typeof event.item_id !== "string" ||
+        !event.item_id.trim() ||
+        !Number.isInteger(event.output_index) ||
+        (event.output_index as number) < 0
+      ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      calls.push({
-        arguments: event.arguments,
-        callId: event.call_id,
-        name: event.name,
-      });
+      // Responses streams identify this event by item_id, not call_id.
+      // The completed output item (or response.completed) carries the call id
+      // and tool name required before any local action can be executed.
     }
     if (event.type === "response.output_item.added") {
       if (
@@ -611,6 +626,20 @@ export function clampReasoningEffort(
   return levels[0]?.id ?? "";
 }
 
+function supportsCatalogVersion(minimum: unknown): boolean {
+  if (minimum === undefined || minimum === null) return true;
+  if (typeof minimum !== "string" || !/^\d+\.\d+\.\d+$/.test(minimum)) {
+    return false;
+  }
+  const required = minimum.split(".").map(Number);
+  const current = CODEX_CLIENT_VERSION.split(".").map(Number);
+  for (let index = 0; index < 3; index++) {
+    if (current[index]! > required[index]!) return true;
+    if (current[index]! < required[index]!) return false;
+  }
+  return true;
+}
+
 function modelLabel(id: string, displayName?: string): string {
   if (displayName?.trim()) {
     return displayName.trim();
@@ -683,6 +712,7 @@ function parseModelList(body: unknown): CodexModelOption[] {
       default_reasoning_level?: unknown;
       display_name?: unknown;
       id?: unknown;
+      minimal_client_version?: unknown;
       name?: unknown;
       priority?: unknown;
       service_tiers?: unknown;
@@ -691,7 +721,10 @@ function parseModelList(body: unknown): CodexModelOption[] {
       title?: unknown;
       visibility?: unknown;
     };
-    if (record.visibility === "none") {
+    if (
+      record.visibility === "none" ||
+      !supportsCatalogVersion(record.minimal_client_version)
+    ) {
       continue;
     }
     const id = String(record.slug ?? record.id ?? record.name ?? "").trim();

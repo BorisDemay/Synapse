@@ -42,6 +42,9 @@ it("removes the activation token from the address and submits it only after conf
     }),
   );
   expect(wrapper.get('[role="status"]').text()).toContain("Compte activé");
+  expect(wrapper.get('[role="status"]').classes()).toContain(
+    "activation-status",
+  );
   expect(wrapper.get('[role="status"]').text()).toContain("phrase de coffre");
   expect(wrapper.text()).not.toContain("synthetic-activation");
   wrapper.unmount();

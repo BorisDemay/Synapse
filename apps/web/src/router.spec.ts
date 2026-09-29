@@ -11,7 +11,8 @@ describe("application routes", () => {
     await router.push("/vault");
     await router.isReady();
 
-    expect(router.currentRoute.value.fullPath).toBe("/login");
+    expect(router.currentRoute.value.path).toBe("/login");
+    expect(router.currentRoute.value.query.redirect).toBe("/vault");
   });
 
   it("redirects an authenticated visitor with a locked vault to unlock", async () => {
@@ -22,7 +23,8 @@ describe("application routes", () => {
     await router.push("/vault");
     await router.isReady();
 
-    expect(router.currentRoute.value.fullPath).toBe("/unlock");
+    expect(router.currentRoute.value.path).toBe("/unlock");
+    expect(router.currentRoute.value.query.redirect).toBe("/vault");
   });
 
   it("allows an unauthenticated visitor to open the register page", async () => {
@@ -68,6 +70,8 @@ describe("application routes", () => {
     await router.push("/admin");
     await router.isReady();
 
+    // Un compte ordinaire retombe sur le déverrouillage : la console
+    // d'administration n'est pas une destination à reprendre après coup.
     expect(router.currentRoute.value.fullPath).toBe("/unlock");
   });
 
@@ -80,5 +84,42 @@ describe("application routes", () => {
     await router.isReady();
 
     expect(router.currentRoute.value.fullPath).toBe("/vault");
+  });
+
+  it("transporte la note demandée jusqu'à l'écran de connexion", async () => {
+    const auth = { isAuthenticated: false };
+    const vault = { hasEncryptedVault: true, isUnlocked: false };
+    const router = createAppRouter(auth, vault, { memory: true });
+
+    await router.push("/vault?note=note-1");
+    await router.isReady();
+
+    expect(router.currentRoute.value.path).toBe("/login");
+    expect(router.currentRoute.value.query.redirect).toBe("/vault?note=note-1");
+  });
+
+  it("transporte la note demandée jusqu'au déverrouillage du coffre", async () => {
+    const auth = { isAuthenticated: true };
+    const vault = { hasEncryptedVault: true, isUnlocked: false };
+    const router = createAppRouter(auth, vault, { memory: true });
+
+    await router.push("/vault?note=note-1");
+    await router.isReady();
+
+    expect(router.currentRoute.value.path).toBe("/unlock");
+    expect(router.currentRoute.value.query.redirect).toBe("/vault?note=note-1");
+  });
+
+  it("ouvre la note demandée dès que le coffre est déverrouillé", async () => {
+    const auth = { isAuthenticated: true };
+    const vault = { hasEncryptedVault: true, isUnlocked: false };
+    const router = createAppRouter(auth, vault, { memory: true });
+    await router.push("/vault?note=note-1");
+    await router.isReady();
+
+    vault.isUnlocked = true;
+    await router.push("/vault?note=note-1");
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
   });
 });

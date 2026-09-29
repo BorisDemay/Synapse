@@ -1,17 +1,31 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { resetOverlayStack } from "@synapse/ui";
+
 import QuickAssistantPrompt from "./QuickAssistantPrompt.vue";
 
 const models = [
-  { id: "model-a", label: "Model A", reasoningLevels: [], serviceTiers: [] },
-  { id: "model-b", label: "Model B", reasoningLevels: [], serviceTiers: [] },
+  {
+    id: "gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    reasoningLevels: [],
+    serviceTiers: [],
+  },
+  {
+    id: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    reasoningLevels: [],
+    serviceTiers: [],
+  },
 ];
+
 function mountPrompt(
   options: {
     activeNote?: boolean;
     connected?: boolean;
     model?: string;
+    models?: typeof models;
     open?: boolean;
   } = {},
 ): VueWrapper {
@@ -20,66 +34,131 @@ function mountPrompt(
     props: {
       activeNote: options.activeNote ?? false,
       connected: options.connected ?? true,
-      model: options.model ?? "model-a",
-      models,
+      model: options.model ?? "gpt-5.6-sol",
+      models: options.models ?? models,
       open: options.open ?? true,
     },
   });
 }
+
 describe("QuickAssistantPrompt", () => {
   let wrapper: VueWrapper | undefined;
+
   beforeEach(() => {
     resetOverlayStack();
     document.body.removeAttribute("style");
   });
+
   afterEach(() => {
     wrapper?.unmount();
     wrapper = undefined;
     resetOverlayStack();
     document.body.removeAttribute("style");
   });
-  it("lets the user choose a model and emits the trimmed prompt", async () => {
+
+  it("n’expose qu’un champ de prompt et un sélecteur de modèle", () => {
     wrapper = mountPrompt();
-    await wrapper.get("input").setValue("  Draft a plan  ");
-    await wrapper.get("select").setValue("model-b");
-    await wrapper.get("form").trigger("submit");
-    expect(wrapper.emitted("submit")).toEqual([
-      [{ model: "model-b", prompt: "Draft a plan" }],
+
+    const dialog = wrapper.get('[role="dialog"][aria-modal="true"]');
+    expect(dialog.attributes("aria-modal")).toBe("true");
+    expect(wrapper.findAll("input")).toHaveLength(1);
+    expect(wrapper.get("input").attributes("type")).toBe("text");
+    expect(wrapper.findAll("select")).toHaveLength(1);
+
+    const options = wrapper.findAll("select option");
+    expect(options.map((option) => option.text())).toEqual([
+      "GPT-5.6 Sol",
+      "GPT-5.6 Luna",
+    ]);
+    expect(options.map((option) => option.attributes("value"))).toEqual([
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
     ]);
   });
-  it("discloses the active note plaintext transfer before submission", async () => {
+
+  it("émet le prompt saisi et le modèle choisi", async () => {
+    wrapper = mountPrompt();
+
+    await wrapper.get("input").setValue("Rédige un plan de journée");
+    await wrapper.get("select").setValue("gpt-5.6-luna");
+    await wrapper.get("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")).toEqual([
+      [{ model: "gpt-5.6-luna", prompt: "Rédige un plan de journée" }],
+    ]);
+  });
+
+  it("divulgue le transfert de note avant la soumission explicite", async () => {
     wrapper = mountPrompt({ activeNote: true });
+
     expect(wrapper.get('[role="note"]').text()).toContain(
       "texte en clair de la note actuellement ouverte",
     );
+    await wrapper.get("input").setValue("Réécris cette note");
+    expect(wrapper.emitted("submit")).toBeUndefined();
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("submit")).toHaveLength(1);
+
     await wrapper.setProps({ activeNote: false });
     expect(wrapper.get('[role="note"]').text()).toContain(
-      "Aucune note active ne sera transmise",
+      "Aucune note active ne sera transmise comme contexte",
     );
   });
-  it("disables submission while disconnected, busy, or empty", async () => {
+
+  it("refuse l’envoi d’un prompt vide", async () => {
+    wrapper = mountPrompt();
+
+    const submit = wrapper.get('button[type="submit"]');
+    expect(submit.attributes("disabled")).toBeDefined();
+
+    await wrapper.get("input").setValue("   ");
+    expect(submit.attributes("disabled")).toBeDefined();
+
+    await wrapper.get("input").setValue("Bonjour");
+    expect(submit.attributes("disabled")).toBeUndefined();
+  });
+
+  it("désactive l’envoi quand l’assistant est déconnecté", async () => {
     wrapper = mountPrompt({ connected: false });
-    await wrapper.get("input").setValue("Request");
+
     expect(wrapper.get('button[type="submit"]').attributes("disabled")).toBe(
       "",
     );
     expect(wrapper.get('[role="status"]').text()).toContain(
-      "Connectez l’assistant",
+      "Connectez l’assistant dans les paramètres",
     );
-    await wrapper.setProps({ connected: true, busy: true });
+
+    await wrapper.get("input").setValue("Bonjour");
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("submit")).toBeUndefined();
+  });
+
+  it("explique l’absence de modèle et désactive l’envoi", async () => {
+    wrapper = mountPrompt({ models: [] });
+
     expect(wrapper.get('button[type="submit"]').attributes("disabled")).toBe(
       "",
     );
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "Aucun modèle disponible.",
+    );
+    expect(wrapper.findAll("select option")).toHaveLength(0);
   });
-  it("traps focus, handles Escape through overlay stack, and restores opener focus", async () => {
+
+  it("ferme sur Échap et rend le focus au déclencheur", async () => {
     const opener = document.createElement("button");
     document.body.append(opener);
     opener.focus();
+
     wrapper = mountPrompt({ open: false });
     await wrapper.setProps({ open: true });
     await flushPromises();
+
+    const dialog = wrapper.get('[role="dialog"]');
     expect(document.activeElement).toBe(wrapper.get("input").element);
-    document.dispatchEvent(
+    expect(document.body.style.overflow).toBe("hidden");
+
+    dialog.element.dispatchEvent(
       new KeyboardEvent("keydown", {
         bubbles: true,
         cancelable: true,
@@ -87,18 +166,15 @@ describe("QuickAssistantPrompt", () => {
       }),
     );
     await wrapper.vm.$nextTick();
+
     expect(wrapper.emitted("close")).toHaveLength(1);
+
     await wrapper.setProps({ open: false });
     await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     expect(document.activeElement).toBe(opener);
+    expect(document.body.style.overflow).toBe("");
     opener.remove();
-  });
-  it("erases the plaintext prompt when closed", async () => {
-    wrapper = mountPrompt();
-    await wrapper.get("input").setValue("synthetic private prompt");
-    await wrapper.setProps({ open: false });
-    await wrapper.setProps({ open: true });
-    await flushPromises();
-    expect((wrapper.get("input").element as HTMLInputElement).value).toBe("");
   });
 });

@@ -20,7 +20,7 @@ function mockSignupStatus(publicSignup: boolean) {
   );
 }
 
-async function mountLogin(): Promise<{
+async function mountLogin(options?: { path?: string }): Promise<{
   wrapper: VueWrapper;
   router: ReturnType<typeof createRouter>;
 }> {
@@ -35,7 +35,7 @@ async function mountLogin(): Promise<{
       { component: { template: "<div />" }, path: "/vault" },
     ],
   });
-  await router.push("/login");
+  await router.push(options?.path ?? "/login");
   await router.isReady();
   const wrapper = mount(LoginView, {
     global: {
@@ -249,5 +249,60 @@ describe("LoginView", () => {
       },
     );
     expect(router.currentRoute.value.path).toBe("/unlock");
+  });
+
+  it("revient à la note demandée après une connexion avec appareil de confiance", async () => {
+    mockSignupStatus(false);
+    const { router, wrapper } = await mountLogin({
+      path: "/login?redirect=%2Fvault%3Fnote%3Dnote-1",
+    });
+    const auth = useAuthStore();
+    const vault = useVaultStore();
+    vi.spyOn(auth, "login").mockResolvedValue();
+    vi.spyOn(vault, "tryUnlockFromTrustedDevice").mockResolvedValue(true);
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
+  });
+
+  it("transmet la note demandée au déverrouillage quand l'appareil n'est pas de confiance", async () => {
+    mockSignupStatus(false);
+    const { router, wrapper } = await mountLogin({
+      path: "/login?redirect=%2Fvault%3Fnote%3Dnote-1",
+    });
+    const auth = useAuthStore();
+    const vault = useVaultStore();
+    vi.spyOn(auth, "login").mockResolvedValue();
+    vi.spyOn(vault, "tryUnlockFromTrustedDevice").mockResolvedValue(false);
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
+  });
+
+  it("ignore une destination externe et reprend le parcours habituel", async () => {
+    mockSignupStatus(false);
+    const { router, wrapper } = await mountLogin({
+      path: "/login?redirect=%2F%2Fevil.example",
+    });
+    const auth = useAuthStore();
+    const vault = useVaultStore();
+    vi.spyOn(auth, "login").mockResolvedValue();
+    vi.spyOn(vault, "tryUnlockFromTrustedDevice").mockResolvedValue(false);
+
+    await wrapper.get("#login-email").setValue("person@example.test");
+    await wrapper.get("#login-password").setValue("a secure password");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/unlock");
+    expect(router.currentRoute.value.fullPath).toBe("/unlock");
   });
 });

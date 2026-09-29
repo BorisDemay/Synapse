@@ -5,21 +5,21 @@
 }
 
 :root {
-  --synapse-color-surface: #f8fafc;
-  --synapse-color-surface-raised: #ffffff;
-  --synapse-color-surface-muted: #eef2f7;
-  --synapse-color-surface-accent: #e8f0ff;
+  --synapse-color-surface: #eef1f6;
+  --synapse-color-surface-raised: #f8fafc;
+  --synapse-color-surface-muted: #e4e9f1;
+  --synapse-color-surface-accent: #e2e8fb;
   --synapse-color-text: #172033;
   --synapse-color-text-muted: #526076;
-  --synapse-color-border: #d9e1ec;
+  --synapse-color-border: #cfd8e5;
   --synapse-color-accent: #4f46e5;
   --synapse-color-accent-strong: #3730a3;
   --synapse-color-accent-contrast: #ffffff;
   --synapse-color-success: #0f9f6e;
   --synapse-color-warning: #c47b14;
   --synapse-color-danger: #d14343;
-  --synapse-shadow-sm: 0 1px 2px rgb(15 23 42 / 5%);
-  --synapse-shadow-md: 0 18px 50px rgb(15 23 42 / 10%);
+  --synapse-shadow-sm: 0 1px 2px rgb(15 23 42 / 6%);
+  --synapse-shadow-md: 0 18px 50px rgb(15 23 42 / 12%);
   --synapse-space-1: 0.25rem;
   --synapse-space-2: 0.5rem;
   --synapse-space-3: 0.75rem;
@@ -94,7 +94,7 @@ button {
     radial-gradient(
       circle at 12% 0%,
       var(--synapse-color-surface-accent),
-      transparent 28rem
+      transparent 22rem
     ),
     var(--synapse-color-surface);
   transition: --app-shell-sidebar-width 240ms ease;

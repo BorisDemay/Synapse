@@ -1127,6 +1127,58 @@ describe("completeCodexChat", () => {
     expect(serialized).not.toContain(providerFixture);
   });
 
+  it("reads a completed tool item when the official arguments.done event has no call id or name", async () => {
+    const functionCall = {
+      arguments: '{"markdown":"# Brouillon"}',
+      call_id: "call-stream-official-1",
+      id: "fc-stream-official-1",
+      name: "create_note",
+      type: "function_call",
+    };
+    const events = [
+      {
+        arguments: functionCall.arguments,
+        item_id: functionCall.id,
+        output_index: 0,
+        type: "response.function_call_arguments.done",
+      },
+      { item: functionCall, type: "response.output_item.done" },
+      { response: { output: [functionCall] }, type: "response.completed" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            events
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: functionCall.arguments,
+          callId: functionCall.call_id,
+          name: functionCall.name,
+        },
+      ],
+      text: "",
+    });
+  });
+
   it("reads a local tool call from CRLF-framed ChatGPT subscription events", async () => {
     const functionCall = {
       arguments: '{"markdown":"# Brouillon CRLF"}',
@@ -2237,6 +2289,12 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it("advertises a Codex client version eligible for the current GPT-6 catalog", () => {
+    const [major, minor] = CODEX_CLIENT_VERSION.split(".").map(Number);
+    expect(major).toBe(0);
+    expect(minor).toBeGreaterThanOrEqual(155);
+  });
+
   it("lists ChatGPT Codex models without sending notes", async () => {
     vi.stubGlobal(
       "fetch",
@@ -2333,6 +2391,42 @@ describe("completeCodexChat", () => {
         version: CODEX_CLIENT_VERSION,
       }),
     );
+  });
+
+  it("omits models requiring a newer unverified Codex client", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            models: [
+              {
+                slug: "gpt-6-astra",
+                minimal_client_version: "0.153.0",
+                visibility: "list",
+              },
+              {
+                slug: "gpt-6-sol",
+                minimal_client_version: "0.155.0",
+                visibility: "list",
+              },
+              {
+                slug: "future-model",
+                minimal_client_version: "0.156.0",
+                visibility: "list",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const models = await listCodexModels({ token, transport: "chatgpt" });
+    expect(models.map((model) => model.id).sort()).toEqual([
+      "gpt-6-astra",
+      "gpt-6-sol",
+    ]);
   });
 
   it("does not substitute a hardcoded catalog when Codex returns none", async () => {

@@ -89,7 +89,9 @@ async function activate() {
             />
           </RouterLink>
         </div>
-        <p v-if="status" role="status" class="form-hint">{{ status }}</p>
+        <p v-if="status" role="status" class="form-hint activation-status">
+          {{ status }}
+        </p>
       </div>
     </section>
   </main>

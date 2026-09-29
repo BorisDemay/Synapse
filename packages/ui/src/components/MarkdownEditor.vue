@@ -10,16 +10,22 @@ import {
   markdownContextMenuItems,
 } from "../markdown/editor-tools";
 import { useTheme } from "../theme";
+import {
+  noteBodyForEditor,
+  restoreNoteTitle,
+} from "../markdown/note-title-editor";
 import MarkdownContextMenu from "./MarkdownContextMenu.vue";
 
 const props = withDefaults(
   defineProps<{
     attachmentUrls?: Record<string, string>;
+    hideFirstHeading?: boolean;
     modelValue: string;
     wikilinkSuggestions?: readonly { label: string; path: string }[];
   }>(),
   {
     attachmentUrls: () => ({}),
+    hideFirstHeading: false,
     wikilinkSuggestions: () => [],
   },
 );
@@ -62,7 +68,17 @@ const contextMenuInTable = ref(false);
 const contextMenuHeadingLevel = ref(0);
 const contextMenuSelectionEmpty = ref(false);
 const clipboardStatus = ref("");
+const selectedImageControl = ref<{
+  left: number;
+  src: string;
+  top: number;
+} | null>(null);
 let contextMenuRange: Range | undefined;
+
+const selectedImageDeleteStyle = computed(() => ({
+  insetBlockStart: `${selectedImageControl.value?.top ?? 0}px`,
+  insetInlineStart: `${selectedImageControl.value?.left ?? 0}px`,
+}));
 
 const contextMenuItems = computed(() =>
   markdownContextMenuItems({
@@ -140,16 +156,25 @@ function scheduleSave(value: string) {
   saveTimer = setTimeout(flushScheduledSave, 2000);
 }
 
+function displayedMarkdown(value: string): string {
+  return props.hideFirstHeading ? noteBodyForEditor(value) : value;
+}
+
 function handleInput(value: string) {
   renderEmptyListMarker();
-
-  if (value === currentValue) {
+  // Vditor replaces image nodes while parsing input; new nodes lose their
+  // local blob URL, even when the Markdown value itself has not changed.
+  rewriteAttachmentUrls();
+  const fullMarkdown = props.hideFirstHeading
+    ? restoreNoteTitle(currentValue, value)
+    : value;
+  if (fullMarkdown === currentValue) {
     return;
   }
 
-  currentValue = value;
-  emit("update:modelValue", value);
-  scheduleSave(value);
+  currentValue = fullMarkdown;
+  emit("update:modelValue", fullMarkdown);
+  scheduleSave(fullMarkdown);
 }
 
 function renderEmptyListMarker() {
@@ -327,7 +352,77 @@ function focusEditor() {
   selection?.addRange(range);
 }
 
+function imageImmediatelyBeforeCaret(): HTMLImageElement | null {
+  const editable = editorRoot.value?.querySelector<HTMLElement>(
+    '.vditor-ir [contenteditable="true"]',
+  );
+  const selection = window.getSelection();
+  if (!editable || !selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !editable.contains(range.startContainer)) return null;
+
+  let preceding: Node | null;
+  if (range.startContainer.nodeType === Node.TEXT_NODE) {
+    if (
+      range.startContainer.textContent
+        ?.slice(0, range.startOffset)
+        .replaceAll("\u200b", "")
+    ) {
+      return null;
+    }
+    preceding = range.startContainer.previousSibling;
+  } else {
+    preceding = range.startContainer.childNodes[range.startOffset - 1] ?? null;
+  }
+  // Vditor places zero-width caret helpers next to inline images.
+  while (
+    preceding &&
+    ((preceding.nodeType === Node.TEXT_NODE &&
+      !preceding.textContent?.replaceAll("\u200b", "")) ||
+      (preceding instanceof HTMLElement && preceding.tagName === "WBR"))
+  ) {
+    preceding = preceding.previousSibling;
+  }
+  if (preceding instanceof HTMLImageElement) return preceding;
+  if (
+    preceding instanceof HTMLElement &&
+    preceding.matches('.vditor-ir__node[data-type="img"]')
+  ) {
+    return preceding.querySelector("img");
+  }
+  return null;
+}
+
+function imageSource(image: HTMLImageElement): string {
+  return image.dataset.synapseMarkdownSrc || image.getAttribute("src") || "";
+}
+
 function onEditorKeydown(event: KeyboardEvent) {
+  if (
+    event.key === "Delete" &&
+    viewMode.value === "ir" &&
+    isEditorWritingArea(event.target) &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey
+  ) {
+    const image = imageImmediatelyBeforeCaret();
+    if (image) {
+      const source = imageSource(image);
+      const editable = image.closest('.vditor-ir [contenteditable="true"]');
+      const images = Array.from(editable?.querySelectorAll("img") ?? []);
+      const position = images.indexOf(image);
+      const occurrence = images
+        .slice(0, position + 1)
+        .filter((item) => imageSource(item) === source).length;
+      if (position >= 0 && removeImageFromNote(source, occurrence)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    }
+  }
   if (
     (event.ctrlKey || event.metaKey) &&
     event.shiftKey &&
@@ -653,11 +748,28 @@ function applyExternalValue(value: string) {
     saveTimer = undefined;
   }
   currentValue = value;
-  editor?.setValue(value, true);
+  editor?.setValue(displayedMarkdown(value), true);
+}
+
+function imageFromEventTarget(
+  target: EventTarget | null,
+): HTMLImageElement | null {
+  const element = target instanceof HTMLElement ? target : null;
+  const image = element?.closest("img") ?? null;
+  return image instanceof HTMLImageElement && editorRoot.value?.contains(image)
+    ? image
+    : null;
 }
 
 function onEditorClick(event: MouseEvent) {
-  const target = event.target as HTMLElement | null;
+  const image = imageFromEventTarget(event.target);
+  if (image) {
+    event.preventDefault();
+    showImageDeleteControl(image);
+    return;
+  }
+  selectedImageControl.value = null;
+  const target = event.target instanceof HTMLElement ? event.target : null;
   const wikilink = target?.closest("[data-wikilink]");
   const fromAttr = wikilink?.getAttribute("data-wikilink");
   if (fromAttr) {
@@ -676,13 +788,67 @@ function filesFromDataTransfer(data: DataTransfer | null): File[] {
   return data ? Array.from(data.files) : [];
 }
 
+function imageDataUrlFromClipboard(data: DataTransfer | null): string {
+  if (!data) {
+    return "";
+  }
+  const plain = data.getData("text/plain").trim();
+  if (plain.startsWith("data:image/")) {
+    return plain;
+  }
+  const html = data.getData("text/html");
+  if (!html) {
+    return "";
+  }
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return template.content.querySelector("img")?.getAttribute("src") ?? "";
+}
+
+function fileFromImageDataUrl(dataUrl: string): File | undefined {
+  const match =
+    /^data:(image\/(?:gif|jpeg|png|webp));base64,([a-z0-9+/=\s]+)$/iu.exec(
+      dataUrl,
+    );
+  if (!match) {
+    return undefined;
+  }
+
+  const [, type, payload] = match;
+  const extension = type === "image/jpeg" ? "jpg" : type.slice("image/".length);
+  const binary = window.atob(payload.replace(/\s/gu, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], `pasted-image.${extension}`, { type });
+}
+
+function onEditorPointerOver(event: PointerEvent) {
+  const image = imageFromEventTarget(event.target);
+  if (image) {
+    showImageDeleteControl(image);
+  }
+}
+
 function onEditorPaste(event: ClipboardEvent) {
   const files = filesFromDataTransfer(event.clipboardData);
-  if (files.length === 0) {
+  if (files.length > 0) {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("attach-files", files);
+    return;
+  }
+
+  const imageFile = fileFromImageDataUrl(
+    imageDataUrlFromClipboard(event.clipboardData),
+  );
+  if (!imageFile) {
     return;
   }
   event.preventDefault();
-  emit("attach-files", files);
+  event.stopPropagation();
+  emit("attach-files", [imageFile]);
 }
 
 function onEditorDrop(event: DragEvent) {
@@ -700,8 +866,10 @@ function rewriteAttachmentUrls() {
     return;
   }
   for (const image of root.querySelectorAll("img")) {
-    const src = image.getAttribute("src") ?? "";
+    const src =
+      image.dataset.synapseMarkdownSrc || image.getAttribute("src") || "";
     const mapped = props.attachmentUrls[src];
+    image.dataset.synapseMarkdownSrc = src;
     if (mapped) {
       image.setAttribute("src", mapped);
     }
@@ -714,6 +882,66 @@ function rewriteAttachmentUrls() {
       link.setAttribute("download", href.split("/").pop() ?? "fichier");
     }
   }
+}
+
+function showImageDeleteControl(image: HTMLImageElement) {
+  const source =
+    image.dataset.synapseMarkdownSrc || image.getAttribute("src") || "";
+  const container = editorRoot.value?.parentElement;
+  if (!source || !container) {
+    selectedImageControl.value = null;
+    return;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  selectedImageControl.value = {
+    left: imageRect.right - containerRect.left,
+    src: source,
+    top: imageRect.top - containerRect.top,
+  };
+}
+
+function markdownUrlTarget(raw: string): string {
+  return raw.startsWith("<") && raw.endsWith(">") ? raw.slice(1, -1) : raw;
+}
+
+function removeMarkdownImage(
+  value: string,
+  source: string,
+  occurrence = 1,
+): string {
+  const imagePattern =
+    /!\[([^\]\r\n]*)\]\(([^\s)]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\)/gu;
+  for (const match of value.matchAll(imagePattern)) {
+    const target = markdownUrlTarget(match[2] ?? "");
+    if (target !== source || --occurrence !== 0) {
+      continue;
+    }
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    return `${value.slice(0, start)}${value.slice(end)}`
+      .replace(/[ \t]+\n/gu, "\n")
+      .replace(/\n{3,}/gu, "\n\n");
+  }
+  return value;
+}
+
+function removeImageFromNote(source: string, occurrence = 1): boolean {
+  if (!source) return false;
+  const nextValue = removeMarkdownImage(currentValue, source, occurrence);
+  if (nextValue === currentValue) return false;
+  selectedImageControl.value = null;
+  currentValue = nextValue;
+  editor?.setValue(displayedMarkdown(nextValue), true);
+  rewriteAttachmentUrls();
+  emit("update:modelValue", nextValue);
+  scheduleSave(nextValue);
+  return true;
+}
+
+function deleteSelectedImage() {
+  removeImageFromNote(selectedImageControl.value?.src ?? "");
 }
 
 onMounted(() => {
@@ -809,7 +1037,7 @@ onMounted(() => {
       },
       { className: "synapse-edit-mode-host", name: "edit-mode" },
     ],
-    value: props.modelValue,
+    value: displayedMarkdown(props.modelValue),
     width: "100%",
     input: handleInput,
     after: () => {
@@ -891,7 +1119,8 @@ onBeforeUnmount(() => {
     @contextmenu="onEditorContextMenu"
     @drop="onEditorDrop"
     @keydown.capture="onEditorKeydown"
-    @paste="onEditorPaste"
+    @paste.capture="onEditorPaste"
+    @pointerover="onEditorPointerOver"
   >
     <div aria-label="Mode d'édition" class="markdown-editor-mode" role="group">
       <button
@@ -914,6 +1143,25 @@ onBeforeUnmount(() => {
       class="markdown-editor-host"
       data-editor-engine="vditor"
     />
+    <button
+      v-if="selectedImageControl"
+      aria-label="Supprimer l’image"
+      class="markdown-editor-image-delete"
+      :style="selectedImageDeleteStyle"
+      type="button"
+      @click="deleteSelectedImage"
+    >
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24">
+        <path
+          d="M5 7h14M10 7V5.8A1.8 1.8 0 0 1 11.8 4h.4A1.8 1.8 0 0 1 14 5.8V7m-7.2 0 .7 12.1A1.8 1.8 0 0 0 9.3 21h5.4a1.8 1.8 0 0 0 1.8-1.9L17.2 7M10 11v6M14 11v6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.25"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </button>
     <p
       v-if="clipboardStatus"
       class="markdown-editor-clipboard-status"
@@ -944,6 +1192,31 @@ onBeforeUnmount(() => {
   min-height: inherit;
   color: var(--synapse-color-text);
   background: var(--synapse-color-surface-raised);
+}
+
+.markdown-editor-image-delete {
+  position: absolute;
+  z-index: var(--synapse-z-panel);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  transform: translate(calc(-100% - 0.35rem), 0.35rem);
+  border: 1px solid var(--synapse-color-danger);
+  border-radius: 999px;
+  color: #fff;
+  background: var(--synapse-color-danger);
+  box-shadow: var(--synapse-shadow-md);
+  cursor: pointer;
+}
+
+.markdown-editor-image-delete:hover,
+.markdown-editor-image-delete:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--synapse-color-danger) 45%, transparent);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--synapse-color-danger) 85%, black);
 }
 
 .markdown-editor-clipboard-status {
@@ -1116,6 +1389,13 @@ onBeforeUnmount(() => {
 .markdown-editor :deep(.vditor-ir:focus),
 .markdown-editor :deep(.vditor-sv:focus) {
   outline: none;
+}
+
+/* Vditor expands IR Markdown markers around the caret, including the entire
+   data: URL of a pasted image. Keep the image itself visible while hiding its
+   syntax even when the image node is focused/expanded. Source mode is unchanged. */
+.markdown-editor :deep(.vditor-ir__node[data-type="img"] > .vditor-ir__marker) {
+  display: none !important;
 }
 
 .markdown-editor :deep(.vditor-reset ul),
