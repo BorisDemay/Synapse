@@ -166,6 +166,27 @@ function chatgptHeaders(
   return headers;
 }
 
+function validateOutputItem(item: CodexOutputItem): void {
+  if (item.type !== "message") {
+    return;
+  }
+  if (
+    item.role !== "assistant" ||
+    !("content" in item) ||
+    !Array.isArray(item.content)
+  ) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  for (const part of item.content) {
+    if (!part || typeof part !== "object" || Array.isArray(part)) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    if (part.type === "output_text" && typeof part.text !== "string") {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+  }
+}
+
 function outputItems(body: CodexResponseBody): CodexOutputItem[] {
   if (body.output === undefined) {
     return [];
@@ -177,20 +198,7 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
-    if (item.type !== "message" || !("content" in item)) {
-      continue;
-    }
-    if (!Array.isArray(item.content)) {
-      throw assistantError("L’assistant n’a pas pu répondre.");
-    }
-    for (const part of item.content) {
-      if (!part || typeof part !== "object" || Array.isArray(part)) {
-        throw assistantError("L’assistant n’a pas pu répondre.");
-      }
-      if (part.type === "output_text" && typeof part.text !== "string") {
-        throw assistantError("L’assistant n’a pas pu répondre.");
-      }
-    }
+    validateOutputItem(item);
   }
   return body.output;
 }
@@ -351,14 +359,6 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
       const item = event.item as CodexOutputItem;
-      if (
-        item.type === "message" &&
-        (item.role !== "assistant" ||
-          !("content" in item) ||
-          !Array.isArray(item.content))
-      ) {
-        throw assistantError("L’assistant n’a pas pu répondre.");
-      }
       outputItems({ output: [item] });
       extractFunctionCalls([item]);
     }
