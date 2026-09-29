@@ -737,6 +737,244 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("reads an official Responses tool completion only from its final output item", async () => {
+    const argumentsValue = '{"markdown":"# Brouillon officiel"}';
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            {
+              arguments: argumentsValue,
+              item_id: "item-official-tool-call",
+              output_index: 0,
+              type: "response.function_call_arguments.done",
+            },
+            {
+              item: {
+                arguments: argumentsValue,
+                call_id: "call-official-tool-call",
+                name: "create_note",
+                type: "function_call",
+              },
+              type: "response.output_item.done",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: argumentsValue,
+          callId: "call-official-tool-call",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
+  it.each([
+    {
+      arguments: '["provider-official-invalid-arguments-fixture"]',
+      itemId: "item-official-invalid",
+      label: "non-object arguments",
+      outputIndex: 0,
+    },
+    {
+      arguments: '{"markdown":"# Brouillon"}',
+      itemId: undefined,
+      label: "a missing item id",
+      outputIndex: 0,
+    },
+    {
+      arguments: '{"markdown":"# Brouillon"}',
+      itemId: "",
+      label: "a blank item id",
+      outputIndex: 0,
+    },
+    {
+      arguments: '{"markdown":"# Brouillon"}',
+      itemId: "item-official-invalid",
+      label: "a negative output index",
+      outputIndex: -1,
+    },
+    {
+      arguments: '{"markdown":"# Brouillon"}',
+      itemId: "item-official-invalid",
+      label: "a non-integer output index",
+      outputIndex: 0.5,
+    },
+  ])(
+    "rejects an official Responses tool completion with $label without exposing the provider fixture",
+    async ({ arguments: argumentsValue, itemId, outputIndex }) => {
+      const providerFixture = "provider-official-invalid-arguments-fixture";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            [
+              {
+                arguments: argumentsValue,
+                item_id: itemId,
+                output_index: outputIndex,
+                type: "response.function_call_arguments.done",
+              },
+              {
+                item: {
+                  arguments: '{"markdown":"# Brouillon"}',
+                  call_id: "call-official-invalid",
+                  name: "create_note",
+                  type: "function_call",
+                },
+                type: "response.output_item.done",
+              },
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+      );
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    },
+  );
+
+  it.each([
+    {
+      arguments: "provider-official-invalid-final-arguments-fixture",
+      label: "invalid arguments",
+      name: "create_note",
+    },
+    {
+      arguments: '{"markdown":"# Brouillon"}',
+      label: "an unoffered tool",
+      name: "provider-official-unoffered-tool-fixture",
+    },
+  ])(
+    "rejects an official Responses tool completion with $label in the final item without exposing the provider fixture",
+    async ({ arguments: argumentsValue, name }) => {
+      const providerFixture = String(
+        argumentsValue === "provider-official-invalid-final-arguments-fixture"
+          ? argumentsValue
+          : name,
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            [
+              {
+                arguments: '{"markdown":"# Brouillon"}',
+                item_id: "item-official-invalid-final",
+                output_index: 0,
+                type: "response.function_call_arguments.done",
+              },
+              {
+                item: {
+                  arguments: argumentsValue,
+                  call_id: "call-official-invalid-final",
+                  name,
+                  type: "function_call",
+                },
+                type: "response.output_item.done",
+              },
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}`)
+              .join("\n\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+      );
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    },
+  );
+
   it("rejects a streamed ChatGPT response that combines an authorized local tool call and text", async () => {
     vi.stubGlobal(
       "fetch",

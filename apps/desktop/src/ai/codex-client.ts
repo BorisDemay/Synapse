@@ -313,7 +313,9 @@ function parseResponsesSse(
       arguments?: unknown;
       call_id?: unknown;
       item?: unknown;
+      item_id?: unknown;
       name?: unknown;
+      output_index?: unknown;
       output_text?: unknown;
       part?: unknown;
       response?: unknown;
@@ -362,14 +364,25 @@ function parseResponsesSse(
       }
     }
     if (event.type === "response.function_call_arguments.done") {
-      if (!hasRequiredFunctionCallFields(event)) {
+      if (hasRequiredFunctionCallFields(event)) {
+        calls.push({
+          arguments: event.arguments,
+          callId: event.call_id,
+          name: event.name,
+        });
+      } else if (
+        event.call_id !== undefined ||
+        event.name !== undefined ||
+        !hasObjectJsonArguments(event.arguments) ||
+        typeof event.item_id !== "string" ||
+        !event.item_id.trim() ||
+        !Number.isInteger(event.output_index) ||
+        (event.output_index as number) < 0
+      ) {
         throw assistantError("L’assistant n’a pas pu répondre.");
       }
-      calls.push({
-        arguments: event.arguments,
-        callId: event.call_id,
-        name: event.name,
-      });
+      // Official Responses streams identify this partial event by item_id and
+      // output_index. Only a validated final output item may yield an action.
     }
     if (event.type === "response.output_item.added") {
       if (
