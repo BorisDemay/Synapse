@@ -78,6 +78,7 @@ interface CodexOutputItem {
   call_id?: unknown;
   content?: CodexOutputText[];
   name?: unknown;
+  role?: unknown;
   type?: unknown;
 }
 
@@ -153,6 +154,13 @@ function outputItems(body: CodexResponseBody): CodexOutputItem[] {
   }
   for (const item of body.output) {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw assistantError("L’assistant n’a pas pu répondre.");
+    }
+    if (
+      item.type === "message" &&
+      "role" in item &&
+      item.role !== "assistant"
+    ) {
       throw assistantError("L’assistant n’a pas pu répondre.");
     }
     if (item.type !== "message" || !("content" in item)) {

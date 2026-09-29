@@ -601,6 +601,64 @@ describe("completeCodexChat", () => {
     }
   });
 
+  it("rejects a non-assistant Responses message without content before a local tool call", async () => {
+    const fixture = "non-sensitive-fixture";
+    const message = { role: "user", type: "message" };
+    const functionCall = {
+      arguments: `{"fixture":"${fixture}"}`,
+      call_id: `call-${fixture}`,
+      name: "create_note",
+      type: "function_call",
+    };
+    const responses = [
+      new Response(JSON.stringify({ output: [message, functionCall] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+      new Response(
+        [
+          { item: message, type: "response.output_item.done" },
+          { ...functionCall, type: "response.function_call_arguments.done" },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}`)
+          .join("\n\n"),
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+      new Response(
+        `data: ${JSON.stringify({
+          response: { output: [message, functionCall] },
+          type: "response.completed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" }, status: 200 },
+      ),
+    ];
+
+    for (const response of responses) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+      let thrown: unknown;
+      try {
+        await completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(String(thrown)).not.toContain(fixture);
+      expect(
+        JSON.stringify(thrown, Object.getOwnPropertyNames(thrown ?? {})),
+      ).not.toContain(fixture);
+    }
+  });
+
   it("rejects completed SSE output items even when the event includes output_text", async () => {
     const validCall = {
       arguments: '{"markdown":"# Brouillon"}',
