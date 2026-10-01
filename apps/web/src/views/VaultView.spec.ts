@@ -1877,6 +1877,34 @@ describe("VaultView prompt rapide à l’assistant", () => {
     expect(toasts.value.at(-1)).toMatchObject({ kind: "info" });
   });
 
+  it("désactive l’envoi pendant la préparation asynchrone et ignore une seconde soumission", async () => {
+    const { wrapper } = await mountVault();
+    const assistant = useAssistantStore();
+    connectAssistant(assistant);
+    let resolveModel: (() => void) | undefined;
+    const setModel = vi.spyOn(assistant, "setModel").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveModel = resolve;
+        }),
+    );
+
+    pressQuickAssistantShortcut();
+    await flushPromises();
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    await prompt.get("input").setValue("Demande synthétique");
+    await prompt.get("form").trigger("submit");
+
+    expect(setModel).toHaveBeenCalledTimes(1);
+    expect(prompt.get('button[type="submit"]').attributes("disabled")).toBe("");
+
+    await prompt.get("form").trigger("submit");
+    expect(setModel).toHaveBeenCalledTimes(1);
+
+    resolveModel?.();
+    await flushPromises();
+  });
+
   it("bloque l’envoi et garde le brouillon si sa sauvegarde durable échoue", async () => {
     const { vault, wrapper } = await mountVault();
     const assistant = useAssistantStore();

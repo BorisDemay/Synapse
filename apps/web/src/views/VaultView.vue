@@ -127,7 +127,7 @@ const lastDeletedItem = ref<{ id: string; label: string } | null>(null);
 let lastDeletionToastId: number | null = null;
 let errorToastId: number | null = null;
 let quickAssistantToastId: number | null = null;
-let quickAssistantInFlight = false;
+const quickAssistantInFlight = ref(false);
 let quickAssistantRunId: symbol | null = null;
 let vaultViewEpoch = 0;
 
@@ -139,7 +139,7 @@ watch(
       message && vault.isUnlocked
         ? notify({
             kind: "error",
-            message: quickAssistantInFlight
+            message: quickAssistantInFlight.value
               ? "Une opération locale a échoué. Votre contenu est conservé. Réessayez après avoir vérifié la connexion ou le stockage local."
               : /réessayez|conservé|brouillon/iu.test(message)
                 ? message
@@ -820,7 +820,7 @@ async function deliverQuickAssistantPrompt(
   } finally {
     if (quickAssistantRunId === runId) {
       quickAssistantRunId = null;
-      quickAssistantInFlight = false;
+      quickAssistantInFlight.value = false;
     }
   }
 }
@@ -836,13 +836,13 @@ async function submitQuickAssistantPrompt(payload: {
     !model ||
     !assistant.connected ||
     assistant.busy ||
-    quickAssistantInFlight ||
+    quickAssistantInFlight.value ||
     !vault.isUnlocked
   )
     return;
   const runId = Symbol("quick-assistant-run");
   quickAssistantRunId = runId;
-  quickAssistantInFlight = true;
+  quickAssistantInFlight.value = true;
   let handedToDelivery = false;
   const context = {
     accountId: auth.userId,
@@ -923,14 +923,14 @@ async function submitQuickAssistantPrompt(payload: {
     }
     if (quickAssistantRunId === runId) {
       quickAssistantRunId = null;
-      quickAssistantInFlight = false;
+      quickAssistantInFlight.value = false;
     }
   } finally {
     if (!handedToDelivery) {
       dismissQuickProgress(progressToastId);
       if (quickAssistantRunId === runId) {
         quickAssistantRunId = null;
-        quickAssistantInFlight = false;
+        quickAssistantInFlight.value = false;
       }
     }
   }
@@ -1900,7 +1900,7 @@ watch(
     vaultViewEpoch++;
     quickAssistantToastId = null;
     quickAssistantRunId = null;
-    quickAssistantInFlight = false;
+    quickAssistantInFlight.value = false;
     clearToasts();
     errorToastId = null;
     lastDeletionToastId = null;
@@ -2505,7 +2505,7 @@ watch(settingsOpen, (open) => {
           (!vault.notes.has(noteId) && !isNewNoteDraft(content)),
       )
     "
-    :busy="assistant.busy"
+    :busy="assistant.busy || quickAssistantInFlight"
     :connected="assistant.connected"
     :model="assistant.model"
     :models="assistant.models"
