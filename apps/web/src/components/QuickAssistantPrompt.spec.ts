@@ -23,6 +23,7 @@ const models = [
 function mountPrompt(
   options: {
     activeNote?: boolean;
+    busy?: boolean;
     connected?: boolean;
     model?: string;
     models?: typeof models;
@@ -33,6 +34,7 @@ function mountPrompt(
     attachTo: document.body,
     props: {
       activeNote: options.activeNote ?? false,
+      busy: options.busy ?? false,
       connected: options.connected ?? true,
       model: options.model ?? "gpt-5.6-sol",
       models: options.models ?? models,
@@ -176,5 +178,36 @@ describe("QuickAssistantPrompt", () => {
     expect(document.activeElement).toBe(opener);
     expect(document.body.style.overflow).toBe("");
     opener.remove();
+  });
+
+  it("conserve le brouillon et ignore chaque fermeture utilisateur pendant la préparation", async () => {
+    wrapper = mountPrompt({ busy: true });
+    const input = wrapper.get<HTMLInputElement>(
+      '[aria-label="Prompt à envoyer à l’assistant"]',
+    );
+    await input.setValue("Demande synthétique");
+
+    expect(
+      wrapper
+        .get('[aria-label="Fermer le prompt rapide"]')
+        .attributes("disabled"),
+    ).toBe("");
+
+    await wrapper
+      .get('[aria-label="Fermer le prompt rapide"]')
+      .trigger("click");
+    await wrapper.get(".quick-assistant-backdrop").trigger("click");
+    wrapper.get('[role="dialog"]').element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Escape",
+      }),
+    );
+    await flushPromises();
+
+    expect(wrapper.emitted("close")).toBeUndefined();
+    expect(wrapper.get('[role="dialog"]').isVisible()).toBe(true);
+    expect(input.element.value).toBe("Demande synthétique");
   });
 });

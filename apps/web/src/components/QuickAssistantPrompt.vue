@@ -70,8 +70,12 @@ function openOverlay() {
   overlay.value ??= pushOverlay({
     label: "quick-assistant-prompt",
     lockScroll: true,
-    onEscape: () => emit("close"),
+    onEscape: requestClose,
   });
+}
+
+function requestClose() {
+  if (!props.busy) emit("close");
 }
 
 function closeOverlay() {
@@ -123,7 +127,7 @@ watch(
     class="quick-assistant-backdrop"
     role="presentation"
     :style="{ zIndex: overlay?.zIndex }"
-    @click.self="emit('close')"
+    @click.self="requestClose"
   >
     <section
       ref="dialogElement"
@@ -137,8 +141,9 @@ watch(
         <button
           aria-label="Fermer le prompt rapide"
           class="quick-assistant-close"
+          :disabled="props.busy"
           type="button"
-          @click="emit('close')"
+          @click="requestClose"
         >
           ×
         </button>
