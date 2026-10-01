@@ -1905,6 +1905,37 @@ describe("VaultView prompt rapide à l’assistant", () => {
     await flushPromises();
   });
 
+  it("conserve le prompt rapide si son raccourci est pressé pendant la préparation", async () => {
+    const { wrapper } = await mountVault();
+    const assistant = useAssistantStore();
+    connectAssistant(assistant);
+    let resolveModel: (() => void) | undefined;
+    vi.spyOn(assistant, "setModel").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveModel = resolve;
+        }),
+    );
+
+    pressQuickAssistantShortcut();
+    await flushPromises();
+    const prompt = wrapper.getComponent(QuickAssistantPrompt);
+    await prompt.get("input").setValue("Demande synthétique");
+    await prompt.get("form").trigger("submit");
+    await flushPromises();
+
+    pressQuickAssistantShortcut();
+    await flushPromises();
+
+    expect(prompt.props("open")).toBe(true);
+    expect((prompt.get("input").element as HTMLInputElement).value).toBe(
+      "Demande synthétique",
+    );
+
+    resolveModel?.();
+    await flushPromises();
+  });
+
   it("bloque l’envoi et garde le brouillon si sa sauvegarde durable échoue", async () => {
     const { vault, wrapper } = await mountVault();
     const assistant = useAssistantStore();

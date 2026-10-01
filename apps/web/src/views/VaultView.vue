@@ -693,6 +693,7 @@ function toggleQuickAssistantFromShortcut(event: KeyboardEvent) {
     return;
   event.preventDefault();
   event.stopPropagation();
+  if (quickAssistantInFlight.value) return;
   if (quickAssistantOpen.value) {
     closeQuickAssistant();
     return;
