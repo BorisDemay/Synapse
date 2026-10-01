@@ -529,16 +529,6 @@ function readAgentResponse(
   tools?: CodexTool[],
 ): CodexAgentResponse {
   const trimmed = raw.trim();
-  const isSse =
-    contentType.includes("event-stream") || trimmed.includes("data:");
-  if (isSse) {
-    return rejectMultipleFunctionCalls(
-      rejectUnofferedFunctionCalls(
-        rejectMixedTextAndFunctionCalls(parseResponsesSse(raw, tools)),
-        tools,
-      ),
-    );
-  }
   if (trimmed.startsWith("{")) {
     const response = extractAgentResponse(
       JSON.parse(trimmed) as CodexResponseBody,
@@ -549,6 +539,16 @@ function readAgentResponse(
     return rejectMultipleFunctionCalls(
       rejectUnofferedFunctionCalls(
         rejectMixedTextAndFunctionCalls(response),
+        tools,
+      ),
+    );
+  }
+  const isSse =
+    contentType.includes("event-stream") || trimmed.includes("data:");
+  if (isSse) {
+    return rejectMultipleFunctionCalls(
+      rejectUnofferedFunctionCalls(
+        rejectMixedTextAndFunctionCalls(parseResponsesSse(raw, tools)),
         tools,
       ),
     );

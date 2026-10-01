@@ -62,6 +62,29 @@ describe("completeCodexChat", () => {
     expect(body).not.toHaveProperty("service_tier");
   });
 
+  it("reads a JSON Responses output_text containing an SSE marker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            output_text: "Le marqueur littéral data: reste du texte.",
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      completeCodexChat({
+        instructions: "Réponds brièvement.",
+        messages: [{ content: "Quel est ce marqueur ?", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+      }),
+    ).resolves.toBe("Le marqueur littéral data: reste du texte.");
+  });
+
   it("reads assistant text from typed output items when output_text is absent", async () => {
     vi.stubGlobal(
       "fetch",
