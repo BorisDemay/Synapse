@@ -737,6 +737,102 @@ describe("completeCodexChat", () => {
     });
   });
 
+  it("reads a local tool call from CRLF-framed ChatGPT subscription events", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              "event: response.function_call_arguments.done",
+              'data: {"type":"response.function_call_arguments.done","call_id":"call-crlf-1","name":"create_note","arguments":"{\\\"markdown\\\":\\\"# Brouillon CRLF\\\"}"}',
+              "",
+              "event: response.completed",
+              'data: {"type":"response.completed"}',
+              "",
+            ].join("\r\n"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: '{"markdown":"# Brouillon CRLF"}',
+          callId: "call-crlf-1",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
+  it("reads a local tool call from CR-only ChatGPT subscription events", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            [
+              "event: response.function_call_arguments.done",
+              'data: {"type":"response.function_call_arguments.done","call_id":"call-cr-1","name":"create_note","arguments":"{\\\"markdown\\\":\\\"# Brouillon CR\\\"}"}',
+              "",
+              "event: response.completed",
+              'data: {"type":"response.completed"}',
+              "",
+            ].join("\r"),
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+    );
+
+    await expect(
+      completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+        tools: [
+          {
+            description: "Crée une note.",
+            name: "create_note",
+            parameters: { type: "object" },
+          },
+        ],
+        transport: "chatgpt",
+      }),
+    ).resolves.toEqual({
+      functionCalls: [
+        {
+          arguments: '{"markdown":"# Brouillon CR"}',
+          callId: "call-cr-1",
+          name: "create_note",
+        },
+      ],
+      text: "",
+    });
+  });
+
   it("reads an official Responses tool completion only from its final output item", async () => {
     const argumentsValue = '{"markdown":"# Brouillon officiel"}';
     vi.stubGlobal(
