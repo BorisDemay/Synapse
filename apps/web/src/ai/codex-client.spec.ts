@@ -2028,6 +2028,86 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    { label: "non-JSON", value: "invalid-arguments" },
+    { label: "a JSON string", value: '"invalid-arguments"' },
+    { label: "a JSON array", value: "[]" },
+    { label: "JSON null", value: "null" },
+    { label: "a JSON number", value: "42" },
+  ])(
+    "rejects $label function call arguments from JSON, direct SSE, and official SSE Responses flows before returning a local action",
+    async ({ value }) => {
+      const functionCall = {
+        arguments: value,
+        call_id: "call-invalid-object-arguments",
+        id: "fc-invalid-object-arguments",
+        name: "create_note",
+        type: "function_call",
+      };
+      const responses = [
+        new Response(JSON.stringify({ output: [functionCall] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+        new Response(
+          `data: ${JSON.stringify({
+            ...functionCall,
+            type: "response.function_call_arguments.done",
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+        new Response(
+          [
+            {
+              arguments: functionCall.arguments,
+              item_id: functionCall.id,
+              output_index: 0,
+              type: "response.function_call_arguments.done",
+            },
+            {
+              item: functionCall,
+              output_index: 0,
+              type: "response.output_item.done",
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}`)
+            .join("\n\n"),
+          { headers: { "content-type": "text/event-stream" }, status: 200 },
+        ),
+      ];
+
+      for (const response of responses) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+        let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+        const error = await completeCodexAgent({
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "gpt-5.6-luna",
+          token,
+          toolChoice: "required",
+          tools: [
+            {
+              description: "Crée une note.",
+              name: "create_note",
+              parameters: { type: "object" },
+            },
+          ],
+        })
+          .then((agentResponse) => {
+            result = agentResponse;
+            return undefined;
+          })
+          .catch((reason: unknown) => reason);
+
+        expect(result).toBeUndefined();
+        expect(error).toMatchObject({
+          message: "L’assistant n’a pas pu répondre.",
+        });
+      }
+    },
+  );
+
   it.each(["", "   "])(
     "rejects blank Responses arguments even when another call is valid",
     async (argumentsValue) => {
