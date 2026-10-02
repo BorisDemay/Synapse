@@ -2108,6 +2108,53 @@ describe("completeCodexChat", () => {
     },
   );
 
+  it.each([
+    { label: "non-JSON", value: "invalid-arguments" },
+    { label: "a JSON string", value: '"invalid-arguments"' },
+    { label: "a JSON scalar", value: "42" },
+    { label: "a JSON array", value: "[]" },
+    { label: "JSON null", value: "null" },
+  ])(
+    "rejects an official partial $label argument before awaiting a final call or returning a local action",
+    async ({ value }) => {
+      const parse = vi.spyOn(JSON, "parse");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            `data: ${JSON.stringify({
+              arguments: value,
+              item_id: "fc-invalid-official-partial",
+              output_index: 0,
+              type: "response.function_call_arguments.done",
+            })}\n\n`,
+            { headers: { "content-type": "text/event-stream" }, status: 200 },
+          ),
+        ),
+      );
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "gpt-5.6-luna",
+        token,
+        toolChoice: "required",
+      })
+        .then((response) => {
+          result = response;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(parse).toHaveBeenCalledWith(value);
+    },
+  );
+
   it.each(["", "   "])(
     "rejects blank Responses arguments even when another call is valid",
     async (argumentsValue) => {

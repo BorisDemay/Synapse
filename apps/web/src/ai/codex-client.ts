@@ -427,8 +427,7 @@ function parseResponsesSse(raw: string): CodexAgentResponse {
       } else if (
         event.call_id !== undefined ||
         event.name !== undefined ||
-        typeof event.arguments !== "string" ||
-        !event.arguments.trim() ||
+        !hasObjectJsonArguments(event.arguments) ||
         typeof event.item_id !== "string" ||
         !event.item_id.trim() ||
         !Number.isInteger(event.output_index) ||
