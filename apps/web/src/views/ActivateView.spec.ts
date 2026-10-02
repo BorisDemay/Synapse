@@ -10,6 +10,34 @@ function mountActivate(router: ReturnType<typeof createRouter>) {
   });
 }
 afterEach(() => vi.unstubAllGlobals());
+
+it("mounts the theme toggle without an unresolved Synapse tooltip directive warning", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  const wrapper = mountActivate(router);
+
+  try {
+    expect(
+      warn.mock.calls.some((args) =>
+        args.some(
+          (argument) =>
+            typeof argument === "string" &&
+            argument.includes("Failed to resolve directive: synapse-tooltip"),
+        ),
+      ),
+    ).toBe(false);
+  } finally {
+    wrapper.unmount();
+    warn.mockRestore();
+  }
+});
+
 it("removes the activation token from the address and submits it only after confirmation", async () => {
   const fetcher = vi
     .fn()
