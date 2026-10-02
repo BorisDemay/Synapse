@@ -2917,6 +2917,46 @@ describe("completeCodexAgent over chat completions", () => {
     },
   );
 
+  it.each([
+    {
+      label: "non-JSON",
+      value: '{"value":"fixture-fournisseur-non-json-sensible',
+    },
+    { label: "a JSON string", value: '"fixture-fournisseur-non-objet"' },
+    { label: "a JSON array", value: "[]" },
+    { label: "JSON null", value: "null" },
+  ])(
+    "rejects $label Chat Completions function arguments before returning a local action",
+    async ({ value }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          chatCompletionsToolCallResponse([
+            {
+              function: { arguments: value, name: "create_note" },
+              id: "call-invalid-object-arguments",
+              type: "function",
+            },
+          ]),
+        ),
+      );
+
+      const error = await completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(String(error)).not.toContain(value);
+    },
+  );
+
   it("rejects several tool calls with a fixed local error", async () => {
     vi.stubGlobal(
       "fetch",
