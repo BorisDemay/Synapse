@@ -18,7 +18,8 @@ export default defineConfig({
           // Chokidar 4 watches directories, not glob patterns.
           src: "../../packages/ui/node_modules/vditor/dist",
           dest: "vendor/vditor",
-          rename: { stripBase: 5 },
+          // Keep dist/: Vditor appends /dist/js/... to its CDN base URL.
+          rename: { stripBase: 4 },
         },
       ],
     }),
