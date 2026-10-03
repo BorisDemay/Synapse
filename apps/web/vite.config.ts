@@ -15,7 +15,8 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-          src: "../../packages/ui/node_modules/vditor/dist/**/*",
+          // Chokidar 4 watches directories, not glob patterns.
+          src: "../../packages/ui/node_modules/vditor/dist",
           dest: "vendor/vditor",
           rename: { stripBase: 4 },
         },

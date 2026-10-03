@@ -1,5 +1,8 @@
 overrides:
   nanoid: 3.3.18
+  brace-expansion@2: 2.1.7
+  # Chokidar 4 (MIT) removes vulnerable braces; copy targets are literal directories.
+  vite-plugin-static-copy>chokidar: 4.0.3
 
 packages:
   - "apps/*"
