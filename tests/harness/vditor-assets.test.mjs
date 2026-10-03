@@ -41,7 +41,7 @@ for (const app of ["web", "desktop"]) {
       await server.listen();
       const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
       const asset = async (path) => {
-        const response = await fetch(`${origin}/vendor/vditor/dist/${path}`);
+        const response = await fetch(`${origin}/vendor/vditor/${path}`);
         assert.equal(response.status, 200);
         return response.text();
       };
@@ -51,7 +51,7 @@ for (const app of ["web", "desktop"]) {
       const deadline = Date.now() + 5000;
       let added;
       while (Date.now() < deadline) {
-        added = await fetch(`${origin}/vendor/vditor/dist/js/new.js`).then(
+        added = await fetch(`${origin}/vendor/vditor/js/new.js`).then(
           (response) => response.text(),
         );
         if (added === "/* added asset */") break;
@@ -80,7 +80,7 @@ for (const app of ["web", "desktop"]) {
       });
       for (const path of ["index.css", "js/lute.min.js", "js/new.js"]) {
         assert.equal(
-          await readFile(join(root, "dist/vendor/vditor/dist", path), "utf8"),
+          await readFile(join(root, "dist/vendor/vditor", path), "utf8"),
           await readFile(join(source, path), "utf8"),
         );
       }
