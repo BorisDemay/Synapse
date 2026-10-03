@@ -29,8 +29,11 @@ test("edits offline then syncs the encrypted outbox after reconnect", async ({
       timeout: 30_000,
     },
   );
+  await expect(
+    page.getByLabel("Titre de la note", { exact: true }),
+  ).toHaveValue("offline edit");
   await expect(page.getByLabel("Éditeur Markdown")).toContainText(
-    "offline edit",
+    "still local",
   );
 
   await context.setOffline(false);

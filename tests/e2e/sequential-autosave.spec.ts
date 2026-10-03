@@ -6,6 +6,7 @@ import {
   registerAndUnlock,
   uniqueEmail,
   writeAndSave,
+  writeNoteDraft,
 } from "./fixtures";
 import { persistedMarkdown } from "./durable-cache";
 
@@ -52,13 +53,7 @@ test("a draft started before its preceding autosave is acknowledged does not con
     await page.clock.pauseAt(new Date(Date.now() + 1000));
     const latest =
       "# Sequential fixture\n\nSecond autosave, continuing the first.";
-    await page.evaluate(
-      (value) => navigator.clipboard.writeText(value),
-      latest,
-    );
-    await page.locator('.vditor-sv[contenteditable="true"]').click();
-    await page.keyboard.press("Control+A");
-    await page.keyboard.press("Control+V");
+    await writeNoteDraft(page, latest);
     await page.clock.runFor(50);
     releaseAck();
     await expect

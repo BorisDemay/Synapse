@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { persistedMarkdown } from "./durable-cache";
 import { join } from "node:path";
+import { noteBodyForEditor } from "../../packages/ui/src/markdown/note-title-editor";
 
 export type UnlockMode = "create" | "unlock";
 
@@ -82,7 +83,14 @@ export async function registerAndUnlock(
   });
 }
 
-export async function writeAndSave(page: Page, text: string): Promise<void> {
+/** Edit the title and body through the UI without waiting for autosave. */
+export async function writeNoteDraft(page: Page, text: string): Promise<void> {
+  const heading = /^# ([^\r\n]+)/u.exec(text);
+  expect(
+    heading,
+    "Note fixtures must supply the canonical title and body",
+  ).not.toBeNull();
+  const body = noteBodyForEditor(text);
   // The accessible label also exists on the mount point while Vditor loads.
   await expect(
     page.getByRole("textbox", { name: "Éditeur Markdown" }),
@@ -92,10 +100,23 @@ export async function writeAndSave(page: Page, text: string): Promise<void> {
   await expect(editor).toBeVisible();
   // Paste source text through the editor's supported multiline input path.
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((value) => navigator.clipboard.writeText(value), text);
-  await editor.click();
-  await page.keyboard.press("Control+A");
+  await page.evaluate((value) => navigator.clipboard.writeText(value), body);
+  await editor.selectText();
   await page.keyboard.press("Control+V");
+  // The workspace owns the canonical H1; it is not present in the body editor.
+  // Commit a changed title after pasting so both fields form one local save.
+  const title = page.getByRole("textbox", {
+    name: "Titre de la note",
+    exact: true,
+  });
+  if ((await title.inputValue()) !== heading![1]) {
+    await title.fill(heading![1]!);
+    await title.press("Enter");
+  }
+}
+
+export async function writeAndSave(page: Page, text: string): Promise<void> {
+  await writeNoteDraft(page, text);
   await expect
     .poll(() => persistedMarkdown(page, DEFAULT_PASSPHRASE), { timeout: 30000 })
     .toContain(text.trim());

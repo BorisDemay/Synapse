@@ -28,9 +28,9 @@ test("two offline contexts resolve a concurrent note conflict", async ({
   await expectSynced(pageA);
 
   await registerAndUnlock(pageB, email, password, passphrase, "unlock");
-  await expect(pageB.getByRole("treeitem", { name: "shared seed" })).toBeVisible(
-    { timeout: 30_000 },
-  );
+  await expect(
+    pageB.getByRole("treeitem", { name: "shared seed" }),
+  ).toBeVisible({ timeout: 30_000 });
   await pageB.getByRole("treeitem", { name: "shared seed" }).click();
 
   await contextA.setOffline(true);
@@ -44,9 +44,9 @@ test("two offline contexts resolve a concurrent note conflict", async ({
   await expect(
     pageA.getByRole("region", { name: "Résolution de conflit" }),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(pageA.getByLabel("Version locale", { exact: true })).toContainText(
-    "local branch",
-  );
+  await expect(
+    pageA.getByLabel("Version locale", { exact: true }),
+  ).toContainText("local branch");
   await expect(
     pageA.getByLabel("Version distante", { exact: true }),
   ).toContainText("remote branch");
@@ -54,7 +54,10 @@ test("two offline contexts resolve a concurrent note conflict", async ({
   pageA.once("dialog", (dialog) => dialog.accept());
   await pageA.getByRole("button", { name: "Garder la version locale" }).click();
   await expectSynced(pageA);
-  await expect(pageA.getByLabel("Éditeur Markdown")).toContainText("local branch");
+  await expect(
+    pageA.getByLabel("Titre de la note", { exact: true }),
+  ).toHaveValue("local branch");
+  await expect(pageA.getByLabel("Éditeur Markdown")).toContainText("from A");
 
   await contextA.close();
   await contextB.close();

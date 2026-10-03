@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { writeAndSave, expectSynced } from "./fixtures";
+import {
+  DEFAULT_PASSPHRASE,
+  DEFAULT_PASSWORD,
+  expectSynced,
+  registerAndUnlock,
+  uniqueEmail,
+  writeAndSave,
+} from "./fixtures";
+import { persistedMarkdown } from "./durable-cache";
 import { join } from "node:path";
 
 test("registers, creates a vault, and saves an encrypted note", async ({
@@ -73,11 +81,33 @@ test("registers, creates a vault, and saves an encrypted note", async ({
   await expectSynced(page);
   await writeAndSave(
     page,
-    "![image](https://attacker.invalid/private-markdown-media.png)",
+    "# hello from playwright\n\n![image](https://attacker.invalid/private-markdown-media.png)",
   );
   await page.getByRole("button", { name: "Markdown", exact: true }).click();
   const editor = page.getByLabel("Éditeur Markdown");
   await expect(editor.locator('img[alt="image"]')).toHaveCount(1);
   await expectSynced(page);
   expect(attemptedRemoteMedia).toBe(0);
+});
+
+test("writeAndSave replaces the entire existing multiline note", async ({
+  page,
+}) => {
+  await registerAndUnlock(
+    page,
+    uniqueEmail("editor-replacement"),
+    DEFAULT_PASSWORD,
+    DEFAULT_PASSPHRASE,
+    "create",
+  );
+  const initial = "# Original heading\n\nOld paragraph.\nAnother old line.";
+  const replacement =
+    "# Replacement heading\n\nFresh paragraph.\nAnother new line.";
+  await writeAndSave(page, initial);
+  await expectSynced(page);
+  await writeAndSave(page, replacement);
+  await expectSynced(page);
+  expect(await persistedMarkdown(page, DEFAULT_PASSPHRASE)).toEqual([
+    replacement,
+  ]);
 });
