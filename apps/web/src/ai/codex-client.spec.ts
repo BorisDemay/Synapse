@@ -2856,6 +2856,112 @@ describe("completeCodexAgent over chat completions", () => {
     },
   );
 
+  it.each([
+    {
+      content: { providerPayload: "contenu-objet-fournisseur-distinctif" },
+      label: "object",
+    },
+    { content: ["contenu-tableau-fournisseur-distinctif"], label: "array" },
+  ])(
+    "rejects a $label chat completions content before returning a valid local tool call without exposing it",
+    async ({ content }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: { arguments: "{}", name: "create_note" },
+                        id: "call-malformed-content",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      const result = await completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(result).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(result).not.toMatchObject({ functionCalls: expect.anything() });
+      expect(String(result)).not.toContain("contenu-");
+    },
+  );
+
+  it.each([
+    { label: "absent", message: {} },
+    { label: "null", message: { content: null } },
+  ])(
+    "accepts $label chat completions content with a valid local tool call",
+    async ({ message }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    ...message,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: { arguments: "{}", name: "create_note" },
+                        id: "call-nullable-content",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          baseUrl,
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "glm-4.6",
+          token,
+          toolChoice: "required",
+        }),
+      ).resolves.toMatchObject({
+        functionCalls: [
+          {
+            arguments: "{}",
+            callId: "call-nullable-content",
+            name: "create_note",
+          },
+        ],
+        text: "",
+      });
+    },
+  );
+
   it.each(["custom", undefined])(
     "rejects a tool call whose type is not function",
     async (type) => {
