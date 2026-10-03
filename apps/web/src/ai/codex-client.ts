@@ -1034,6 +1034,7 @@ interface ChatCompletionsToolCall {
 interface ChatCompletionsChoice {
   message?: {
     content?: unknown;
+    refusal?: unknown;
     role?: unknown;
     tool_calls?: unknown;
   };
@@ -1158,6 +1159,9 @@ async function completeChatCompletionsAgent(
     message.content !== null &&
     typeof message.content !== "string"
   ) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
+  if ("refusal" in message && message.refusal !== null) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
   const text = typeof message.content === "string" ? message.content : "";

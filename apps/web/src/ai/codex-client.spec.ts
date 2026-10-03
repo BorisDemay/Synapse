@@ -2909,6 +2909,58 @@ describe("completeCodexAgent over chat completions", () => {
   );
 
   it.each([
+    { label: "text", refusal: "refus-fournisseur-distinctif" },
+    {
+      label: "structured value",
+      refusal: { reason: "refus-fournisseur-structure-distinctif" },
+    },
+  ])(
+    "rejects a $label chat completions refusal before returning a valid local tool call without exposing it",
+    async ({ refusal }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    refusal,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: { arguments: "{}", name: "create_note" },
+                        id: "call-refused-tool",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      const result = await completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      }).catch((reason: unknown) => reason);
+
+      expect(result).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      expect(result).not.toMatchObject({ functionCalls: expect.anything() });
+      expect(String(result)).not.toContain("refus-fournisseur-");
+    },
+  );
+
+  it.each([
     { label: "absent", message: {} },
     { label: "null", message: { content: null } },
   ])(
@@ -2954,6 +3006,60 @@ describe("completeCodexAgent over chat completions", () => {
           {
             arguments: "{}",
             callId: "call-nullable-content",
+            name: "create_note",
+          },
+        ],
+        text: "",
+      });
+    },
+  );
+
+  it.each([
+    { label: "absent", message: {} },
+    { label: "null", message: { refusal: null } },
+  ])(
+    "accepts $label chat completions refusal with a valid local tool call",
+    async ({ message }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    ...message,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: { arguments: "{}", name: "create_note" },
+                        id: "call-nullable-refusal",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          baseUrl,
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "glm-4.6",
+          token,
+          toolChoice: "required",
+        }),
+      ).resolves.toMatchObject({
+        functionCalls: [
+          {
+            arguments: "{}",
+            callId: "call-nullable-refusal",
             name: "create_note",
           },
         ],
