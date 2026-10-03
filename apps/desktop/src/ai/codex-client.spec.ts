@@ -2824,6 +2824,120 @@ describe("completeCodexAgent over chat completions", () => {
     );
   });
 
+  it("rejects a refused chat completions message before returning its valid local tool call", async () => {
+    const providerFixture = "provider-refusal-fixture";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "",
+                  refusal: providerFixture,
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      function: { arguments: "{}", name: "create_note" },
+                      id: "call-refused-message",
+                      type: "function",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+    const error = await completeCodexAgent({
+      baseUrl,
+      instructions: "Utilise un outil local.",
+      messages: [{ content: "Crée une note.", role: "user" }],
+      model: "glm-4.6",
+      token,
+      toolChoice: "required",
+    })
+      .then((agentResponse) => {
+        result = agentResponse;
+        return undefined;
+      })
+      .catch((reason: unknown) => reason);
+
+    expect(result).toBeUndefined();
+    expect(error).toMatchObject({
+      message: "L’assistant n’a pas pu répondre.",
+    });
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as Error),
+    );
+    expect(String(error)).not.toContain(providerFixture);
+    expect(serialized).not.toContain(providerFixture);
+  });
+
+  it.each([
+    { label: "absent", message: {} },
+    { label: "null", message: { refusal: null } },
+  ])(
+    "accepts a $label chat completions refusal with a valid local tool call",
+    async ({ message }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: "",
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: "{}",
+                          name: "create_note",
+                        },
+                        id: "call-allowed-refusal",
+                        type: "function",
+                      },
+                    ],
+                    ...message,
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      await expect(
+        completeCodexAgent({
+          baseUrl,
+          instructions: "Utilise un outil local.",
+          messages: [{ content: "Crée une note.", role: "user" }],
+          model: "glm-4.6",
+          token,
+          toolChoice: "required",
+        }),
+      ).resolves.toEqual({
+        functionCalls: [
+          {
+            arguments: "{}",
+            callId: "call-allowed-refusal",
+            name: "create_note",
+          },
+        ],
+        text: "",
+      });
+    },
+  );
+
   it("rejects an empty chat completions tool call array", async () => {
     vi.stubGlobal(
       "fetch",
