@@ -1131,6 +1131,13 @@ async function completeChatCompletionsAgent(
   if ("refusal" in message && message.refusal !== null) {
     throw assistantError("L’assistant n’a pas pu répondre.");
   }
+  if (
+    "content" in message &&
+    message.content !== null &&
+    typeof message.content !== "string"
+  ) {
+    throw assistantError("L’assistant n’a pas pu répondre.");
+  }
   const text = typeof message.content === "string" ? message.content : "";
   const toolCalls = message.tool_calls;
   const functionCalls =

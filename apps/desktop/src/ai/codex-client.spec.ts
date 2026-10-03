@@ -2881,6 +2881,73 @@ describe("completeCodexAgent over chat completions", () => {
   });
 
   it.each([
+    {
+      content: { providerFixture: "provider-malformed-chat-content-fixture" },
+      label: "object",
+    },
+    {
+      content: ["provider-malformed-chat-content-fixture"],
+      label: "array",
+    },
+  ])(
+    "rejects a non-null non-string $label chat completions content before returning its valid local tool call",
+    async ({ content }) => {
+      const providerFixture = "provider-malformed-chat-content-fixture";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: { arguments: "{}", name: "create_note" },
+                        id: "call-malformed-content",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      let result: Awaited<ReturnType<typeof completeCodexAgent>> | undefined;
+      const error = await completeCodexAgent({
+        baseUrl,
+        instructions: "Utilise un outil local.",
+        messages: [{ content: "Crée une note.", role: "user" }],
+        model: "glm-4.6",
+        token,
+        toolChoice: "required",
+      })
+        .then((agentResponse) => {
+          result = agentResponse;
+          return undefined;
+        })
+        .catch((reason: unknown) => reason);
+
+      expect(result).toBeUndefined();
+      expect(error).toMatchObject({
+        message: "L’assistant n’a pas pu répondre.",
+      });
+      const serialized = JSON.stringify(
+        error,
+        Object.getOwnPropertyNames(error as Error),
+      );
+      expect(String(error)).not.toContain(providerFixture);
+      expect(serialized).not.toContain(providerFixture);
+    },
+  );
+
+  it.each([
     { label: "absent", message: {} },
     { label: "null", message: { refusal: null } },
   ])(
