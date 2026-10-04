@@ -1,6 +1,6 @@
 # ADR 0021 — Frontière de transport IA multi-fournisseur
 
-- Statut : proposé
+- Statut : accepté
 - Date : 2026-10-04
 - Complète : ADR 0008
 - Références : `docs/security/csp-ai-evidence-matrix.md`,
