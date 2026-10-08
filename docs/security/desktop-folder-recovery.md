@@ -10,6 +10,15 @@ the server. A different vault cannot adopt that directory. Unknown files and
 externally changed files are not silently replaced or deleted. Select an empty
 directory or explicitly import those files to recover interoperability.
 
+ADR 0013 defines the future, desktop-only external-edit reconciliation boundary.
+Until its implementation gates have passed, this manifest is not a file-import
+database: it does not identify a Markdown path with a note or retain a merge
+base. Any future identity mapping, encrypted baseline and reconciliation progress
+must remain local; discovery alone cannot write plaintext, mutate canonical
+encrypted state, emit a network operation or alter the manifest. Missing files
+are not deletions until explicitly confirmed, and unknown, unsafe or ambiguous
+files must remain unresolved rather than claimed by inference.
+
 Before replacing any file, the manifest journals both previous and intended
 hashes for the validated batch. Reopening can therefore recover on either side
 of each interrupted atomic write. Completion narrows the journal; partial
