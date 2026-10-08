@@ -70,6 +70,75 @@ conservée comme cache plaintext persistant.
 L’absence, l’incohérence ou l’expiration d’une baseline interdit toute fusion ou
 écrasement automatique et impose une résolution explicite.
 
+### Contrat exécutable R05.3a : binding opaque et baseline miroir
+
+Avant R05.3, le manifeste ne contient que `owner` et `hashes`. R05.3a le fait
+évoluer de manière compatible vers des entrées versionnées qui conservent, pour
+chaque chemin relatif validé de la réplique, un **`binding_id` aléatoire opaque**
+et les empreintes de détection déjà nécessaires. `binding_id` n’est dérivé ni du
+chemin, ni du Markdown, ni d’une empreinte, ni d’un horodatage ; il ne vaut pas
+`note_id`. Il est strictement local au dossier et ne sort jamais vers le serveur,
+les diagnostics, les métriques, les traces ou les exports. Le manifeste ne
+contient aucun Markdown, titre, tag, lien, extrait, ciphertext, nonce, clé,
+révision ou identifiant de note. Le chemin relatif n’est lisible que dans ce
+manifeste local nécessaire à la réplique et ne doit jamais être affiché ou
+journalisé hors du client.
+
+Le propriétaire de la relation note↔chemin est le cache canonique chiffré. Une
+entrée de baseline chiffrée, partitionnée par profil, compte le cas échéant,
+coffre et dossier lié, contient au minimum `binding_id`, `note_id`, la révision
+effectivement miroirée, l’identité/empreinte du ciphertext effectivement
+miroiré et la variante chiffrée de base — ou une référence durable à cette
+variante dans le cache chiffré. Son contenu est chiffré, authentifié et lié au
+coffre par les primitives et AAD existants ; R05.3a ne crée ni format
+cryptographique, ni clé, ni primitive. Les métadonnées de partition strictement
+nécessaires à IndexedDB ne suffisent jamais à reconstituer la relation depuis un
+chemin ou un hash. L’implémentation doit vérifier après déchiffrement que le
+`binding_id`, le coffre, la note, la révision et la variante concordent avant de
+considérer l’association prête.
+
+L’installation part du miroir canonique, jamais du disque : l’exporteur fournit
+explicitement dans le même appel la note, son chemin projeté, sa révision et sa
+variante chiffrée déjà persistée. Il crée un état de progression chiffré
+`installing`, écrit atomiquement les octets Markdown canoniques, puis persiste
+le binding dans le manifeste et la baseline `ready` avec la persistance
+canonique existante. Les étapes sont rejouables et contrôlées ; aucune d’elles
+ne rend un fichier importable tant que le manifeste et la baseline `ready` ne
+sont pas tous deux présents, cohérents et vérifiés. Après crash ou échec de
+stockage, la reprise relit cet état et vérifie le disque avant de reprendre,
+réécrire le miroir canonique ou signaler une divergence : elle ne crée aucune
+mutation, opération ou association à partir du contenu rencontré.
+
+Il n’existe pas de transaction commune filesystem/IndexedDB. Chaque frontière
+est donc compensée par l’état chiffré de progression et des écritures atomiques
+côté dossier ; la finalisation est idempotente et une reprise ne peut créer ni
+second `binding_id`, ni seconde mutation, ni seconde opération. Un échec après
+l’écriture disque mais avant la baseline laisse l’entrée bloquée en installation,
+pas possédée/importable. Un échec après une baseline préparée mais avant la
+finalisation du manifeste laisse aussi l’import bloqué ; la reprise vérifie ou
+compense, sans faire confiance à l’ordre des événements natifs.
+
+Les manifestes antérieurs restent lisibles pour préserver `owner` et les
+empreintes de détection, mais toutes leurs entrées sont **non liées**. Elles ne
+peuvent pas devenir liées par rapprochement de chemin, hash, contenu, date,
+copie ou snapshot. Une réplique existante ne reçoit un binding que pendant une
+réinstallation canonique dont l’exporteur apporte explicitement `note_id`,
+chemin et révision ; les hashes hérités servent seulement à détecter une
+divergence avant réécriture. Si cette preuve explicite ou la baseline manque,
+la réplique est compatible en lecture/détection mais R05.3 refuse l’import.
+
+Verrouillage, logout, changement de compte, de coffre, de dossier ou de profil
+annulent les travaux non finalisés en mémoire, arrêtent le watcher et invalident
+le contexte actif de binding/baseline. Les records chiffrés restent partitionnés
+pour une reprise du même contexte seulement ; une autre partition ne peut pas
+les adopter. Au prochain déverrouillage, un rescan revalide racine, propriétaire,
+manifeste, binding et baseline avant toute proposition. L’import est refusé
+fail-closed si le client est verrouillé, si le contexte est différent, si un
+record est absent, invalide, incohérent ou non déchiffrable, si l’entrée est
+legacy/non liée, si le chemin est dangereux/ambigu, si le disque a changé pendant
+la vérification, ou si un brouillon ou pull concurrent ne fournit pas les trois
+variantes réelles requises.
+
 ### Opt-in, classification et confirmation
 
 La détection externe est désactivée par défaut et réservée au dossier lié au
