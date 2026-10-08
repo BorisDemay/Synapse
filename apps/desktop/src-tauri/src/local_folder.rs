@@ -19,6 +19,14 @@ impl FolderEntry {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExternalMarkdownCandidate {
+    OwnedModified { path: VaultPath },
+    Dangerous,
+    Ambiguous,
+    Unknown { path: VaultPath },
+}
+
 #[derive(Default, Deserialize, Serialize)]
 struct Manifest {
     owner: String,
@@ -114,6 +122,64 @@ impl LocalFolderMirror {
         self.root.clone()
     }
 
+    /// Discovers changed Markdown already owned by this mirror without changing
+    /// the replica, manifest, or canonical vault state.
+    pub async fn discover_external_markdown(&self) -> Vec<ExternalMarkdownCandidate> {
+        self.discover_external_markdown_with_hook(|_| false).await
+    }
+
+    /// Provides a deterministic test seam for a replacement between scanning
+    /// and reading an owned candidate. A triggered seam is always ambiguous.
+    pub async fn discover_external_markdown_with_before_read<F>(
+        &self,
+        mut before_read: F,
+    ) -> Vec<ExternalMarkdownCandidate>
+    where
+        F: FnMut(&Path),
+    {
+        self.discover_external_markdown_with_hook(|path| {
+            before_read(path);
+            true
+        })
+        .await
+    }
+
+    async fn discover_external_markdown_with_hook<F>(
+        &self,
+        mut before_read: F,
+    ) -> Vec<ExternalMarkdownCandidate>
+    where
+        F: FnMut(&Path) -> bool,
+    {
+        let paths = match collect_markdown_paths(&self.root).await {
+            Ok(paths) => paths,
+            Err(()) => return vec![ExternalMarkdownCandidate::Dangerous],
+        };
+        let mut case_folded = BTreeSet::new();
+        if paths
+            .iter()
+            .any(|path| !case_folded.insert(path.as_str().to_lowercase()))
+        {
+            return vec![ExternalMarkdownCandidate::Ambiguous];
+        }
+        let mut candidates = Vec::new();
+        for path in paths {
+            match self.hashes.get(path.as_str()) {
+                Some(hashes) => match self
+                    .read_owned_candidate(&path, hashes, &mut before_read)
+                    .await
+                {
+                    Ok(true) => candidates.push(ExternalMarkdownCandidate::OwnedModified { path }),
+                    Ok(false) => {}
+                    Err(Some(())) => candidates.push(ExternalMarkdownCandidate::Ambiguous),
+                    Err(None) => candidates.push(ExternalMarkdownCandidate::Dangerous),
+                },
+                None => candidates.push(ExternalMarkdownCandidate::Unknown { path }),
+            }
+        }
+        candidates
+    }
+
     pub async fn apply(&mut self, entries: &[FolderEntry]) -> Result<(), String> {
         let changed = self.prepare_batch(entries).await?;
         for entry in changed {
@@ -148,6 +214,42 @@ impl LocalFolderMirror {
         // of every interrupted write remain recoverable without quadratic fsyncs.
         self.persist_manifest().await?;
         Ok(changed)
+    }
+
+    async fn read_owned_candidate<F>(
+        &self,
+        path: &VaultPath,
+        hashes: &[String],
+        before_read: &mut F,
+    ) -> Result<bool, Option<()>>
+    where
+        F: FnMut(&Path) -> bool,
+    {
+        let mut candidate = self.root.clone();
+        let mut components = path.as_str().split('/').peekable();
+        while let Some(component) = components.next() {
+            candidate.push(component);
+            let metadata = tokio::fs::symlink_metadata(&candidate)
+                .await
+                .map_err(|_| None)?;
+            if metadata.file_type().is_symlink()
+                || (components.peek().is_some() && !metadata.is_dir())
+                || (components.peek().is_none() && !metadata.is_file())
+            {
+                return Err(None);
+            }
+        }
+        if before_read(&candidate) {
+            return Err(Some(()));
+        }
+        let metadata = tokio::fs::symlink_metadata(&candidate)
+            .await
+            .map_err(|_| None)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(None);
+        }
+        let bytes = tokio::fs::read(candidate).await.map_err(|_| None)?;
+        Ok(!hashes.contains(&ContentHash::from_bytes(&bytes).to_string()))
     }
 
     pub async fn replace_snapshot(&mut self, entries: &[FolderEntry]) -> Result<(), String> {
@@ -376,6 +478,34 @@ async fn ensure_root_directory(root: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+async fn collect_markdown_paths(root: &Path) -> Result<Vec<VaultPath>, ()> {
+    let mut directories = vec![(root.to_path_buf(), String::new())];
+    let mut paths = Vec::new();
+    while let Some((directory, parent)) = directories.pop() {
+        let mut entries = tokio::fs::read_dir(directory).await.map_err(|_| ())?;
+        while let Some(entry) = entries.next_entry().await.map_err(|_| ())? {
+            let name = entry.file_name().into_string().map_err(|_| ())?;
+            let relative = if parent.is_empty() {
+                name
+            } else {
+                format!("{parent}/{name}")
+            };
+            let path = entry.path();
+            let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|_| ())?;
+            if metadata.file_type().is_symlink() {
+                return Err(());
+            }
+            if metadata.is_dir() {
+                directories.push((path, relative));
+            } else if metadata.is_file() && relative.ends_with(".md") {
+                paths.push(VaultPath::parse(&relative).map_err(|_| ())?);
+            }
+        }
+    }
+    paths.sort();
+    Ok(paths)
 }
 
 pub fn default_folder_path(documents_or_data: &Path, vault_id: &str) -> Result<PathBuf, String> {

@@ -1,7 +1,7 @@
 use synapse_core::{VaultAssetPath, VaultPath};
 use tempfile::tempdir;
 
-use synapse_desktop::local_folder::{FolderEntry, LocalFolderMirror};
+use synapse_desktop::local_folder::{ExternalMarkdownCandidate, FolderEntry, LocalFolderMirror};
 
 #[tokio::test]
 async fn mirror_reopens_the_canonical_root_persisted_after_folder_selection() {
@@ -391,4 +391,211 @@ async fn snapshot_rejects_case_collisions_before_writing() {
             .is_err()
     );
     assert!(!directory.path().join("A.md").exists());
+}
+
+#[tokio::test]
+async fn discovery_classifies_an_owned_modified_markdown_without_mutation() {
+    let directory = tempdir().expect("tempdir");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .apply(&[FolderEntry::Note {
+            path: "owned.md".to_owned(),
+            markdown: "canonical".to_owned(),
+        }])
+        .await
+        .expect("mirror writes owned note");
+    let manifest = directory.path().join("attachments/.synapse-mirror.json");
+    let manifest_before = tokio::fs::read(&manifest).await.expect("manifest reads");
+    let note = directory.path().join("owned.md");
+    tokio::fs::write(&note, "external edit")
+        .await
+        .expect("external edit writes");
+    let note_before = tokio::fs::read(&note).await.expect("note reads");
+    let written_before = mirror.written();
+
+    let candidates = mirror.discover_external_markdown().await;
+
+    assert_eq!(
+        candidates,
+        vec![ExternalMarkdownCandidate::OwnedModified {
+            path: VaultPath::parse("owned.md").expect("valid owned path"),
+        }]
+    );
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+    assert_eq!(
+        tokio::fs::read(&note).await.expect("note reads"),
+        note_before
+    );
+    assert_eq!(mirror.written(), written_before);
+}
+
+#[tokio::test]
+async fn discovery_classifies_an_unknown_markdown_without_adopting_it() {
+    let directory = tempdir().expect("tempdir");
+    let mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    let manifest = directory.path().join("attachments/.synapse-mirror.json");
+    mirror
+        .claim_selection()
+        .await
+        .expect("empty folder is claimed");
+    let manifest_before = tokio::fs::read(&manifest).await.expect("manifest reads");
+    let note = directory.path().join("unknown.md");
+    tokio::fs::write(&note, "external note")
+        .await
+        .expect("external note writes");
+    let note_before = tokio::fs::read(&note).await.expect("note reads");
+    let written_before = mirror.written();
+
+    let candidates = mirror.discover_external_markdown().await;
+
+    assert_eq!(
+        candidates,
+        vec![ExternalMarkdownCandidate::Unknown {
+            path: VaultPath::parse("unknown.md").expect("valid unknown path"),
+        }]
+    );
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+    assert_eq!(
+        tokio::fs::read(&note).await.expect("note reads"),
+        note_before
+    );
+    assert_eq!(mirror.written(), written_before);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_refuses_a_symlinked_markdown_without_mutation() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    let outside_note = outside.path().join("owned.md");
+    tokio::fs::write(&outside_note, "outside content")
+        .await
+        .expect("outside note writes");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .apply(&[FolderEntry::Note {
+            path: "owned.md".to_owned(),
+            markdown: "canonical".to_owned(),
+        }])
+        .await
+        .expect("mirror writes owned note");
+    let manifest = directory.path().join("attachments/.synapse-mirror.json");
+    let manifest_before = tokio::fs::read(&manifest).await.expect("manifest reads");
+    let note = directory.path().join("owned.md");
+    tokio::fs::remove_file(&note)
+        .await
+        .expect("owned note removes");
+    symlink(&outside_note, &note).expect("symlink replaces owned note");
+    let outside_before = tokio::fs::read(&outside_note)
+        .await
+        .expect("outside note reads");
+    let written_before = mirror.written();
+
+    let candidates = mirror.discover_external_markdown().await;
+
+    assert_eq!(candidates, vec![ExternalMarkdownCandidate::Dangerous]);
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+    assert_eq!(
+        tokio::fs::read(&outside_note)
+            .await
+            .expect("outside note reads"),
+        outside_before
+    );
+    assert_eq!(mirror.written(), written_before);
+}
+
+#[tokio::test]
+async fn discovery_refuses_case_colliding_markdown_without_mutation() {
+    let directory = tempdir().expect("tempdir");
+    let mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .claim_selection()
+        .await
+        .expect("empty folder is claimed");
+    let manifest = directory.path().join("attachments/.synapse-mirror.json");
+    let manifest_before = tokio::fs::read(&manifest).await.expect("manifest reads");
+    let upper = directory.path().join("Note.md");
+    let lower = directory.path().join("note.md");
+    tokio::fs::write(&upper, "upper")
+        .await
+        .expect("upper note writes");
+    tokio::fs::write(&lower, "lower")
+        .await
+        .expect("lower note writes");
+    let upper_before = tokio::fs::read(&upper).await.expect("upper note reads");
+    let lower_before = tokio::fs::read(&lower).await.expect("lower note reads");
+    let written_before = mirror.written();
+
+    let candidates = mirror.discover_external_markdown().await;
+
+    assert_eq!(candidates, vec![ExternalMarkdownCandidate::Ambiguous]);
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+    assert_eq!(
+        tokio::fs::read(&upper).await.expect("upper note reads"),
+        upper_before
+    );
+    assert_eq!(
+        tokio::fs::read(&lower).await.expect("lower note reads"),
+        lower_before
+    );
+    assert_eq!(mirror.written(), written_before);
+}
+
+#[tokio::test]
+async fn discovery_marks_a_scan_to_read_replacement_ambiguous_without_mutation() {
+    let directory = tempdir().expect("tempdir");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .apply(&[FolderEntry::Note {
+            path: "owned.md".to_owned(),
+            markdown: "canonical".to_owned(),
+        }])
+        .await
+        .expect("mirror writes owned note");
+    let manifest = directory.path().join("attachments/.synapse-mirror.json");
+    let manifest_before = tokio::fs::read(&manifest).await.expect("manifest reads");
+    let note = directory.path().join("owned.md");
+    let written_before = mirror.written();
+
+    let candidates = mirror
+        .discover_external_markdown_with_before_read(|candidate| {
+            std::fs::remove_file(candidate).expect("candidate removes");
+            std::fs::write(candidate, "replacement").expect("replacement writes");
+        })
+        .await;
+
+    assert_eq!(candidates, vec![ExternalMarkdownCandidate::Ambiguous]);
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+    assert_eq!(
+        tokio::fs::read(&note).await.expect("replacement reads"),
+        b"replacement"
+    );
+    assert_eq!(mirror.written(), written_before);
 }
