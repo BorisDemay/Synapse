@@ -1,3 +1,5 @@
+import { assertAllowedAssistantTransport } from "./transport-policy";
+
 export const CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const CODEX_OAUTH_ISSUER = "https://auth.openai.com";
 export const CODEX_CHATGPT_DEVICE_PATH = "/codex/device";
@@ -101,6 +103,7 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export async function startChatgptDeviceLogin(): Promise<ChatgptDeviceSession> {
+  assertAllowedAssistantTransport("chatgpt", USERCODE_URL);
   let response: Response;
   try {
     response = await fetch(USERCODE_URL, {
@@ -142,6 +145,7 @@ async function exchangeAuthorizationCode(
   code: string,
   codeVerifier: string,
 ): Promise<ChatgptTokens> {
+  assertAllowedAssistantTransport("chatgpt", OAUTH_TOKEN_URL);
   let response: Response;
   try {
     response = await fetch(OAUTH_TOKEN_URL, {
@@ -199,6 +203,7 @@ export async function completeChatgptDeviceLogin(
     }
     let response: Response;
     try {
+      assertAllowedAssistantTransport("chatgpt", DEVICE_TOKEN_URL);
       response = await fetch(DEVICE_TOKEN_URL, {
         body: JSON.stringify({
           device_auth_id: session.deviceAuthId,
@@ -246,6 +251,7 @@ export async function refreshChatgptTokens(
   if (!token) {
     throw oauthError("Session ChatGPT expirée. Reconnectez Codex.");
   }
+  assertAllowedAssistantTransport("chatgpt", OAUTH_TOKEN_URL);
   let response: Response;
   try {
     response = await fetch(OAUTH_TOKEN_URL, {

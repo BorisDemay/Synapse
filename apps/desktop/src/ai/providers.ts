@@ -1,8 +1,4 @@
-/**
- * Providers for the writing assistant. Any endpoint speaking the
- * OpenAI-compatible Chat Completions API works with just an API key; ChatGPT
- * keeps its device-code login flow.
- */
+/** Only destinations admitted by the local fail-closed transport registry. */
 export interface AssistantProvider {
   id: string;
   label: string;
@@ -27,34 +23,6 @@ export const ASSISTANT_PROVIDERS: AssistantProvider[] = [
     id: "codex",
     label: "OpenAI — clé API",
     baseUrl: "https://api.openai.com/v1",
-  },
-  {
-    id: "glm",
-    label: "GLM (Zhipu)",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    defaultModels: ["glm-4.6", "glm-4.5-air"],
-  },
-  {
-    id: "deepseek",
-    label: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
-    defaultModels: ["deepseek-chat", "deepseek-reasoner"],
-  },
-  {
-    id: "mistral",
-    label: "Mistral AI",
-    baseUrl: "https://api.mistral.ai/v1",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    baseUrl: "https://openrouter.ai/api/v1",
-  },
-  {
-    id: "custom",
-    label: "Autre (URL compatible OpenAI)",
-    baseUrl: "",
-    needsBaseUrl: true,
   },
 ];
 

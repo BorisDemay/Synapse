@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CODEX_PLATFORM_MODELS_URL,
   CODEX_RESPONSES_URL,
   completeCodexAgent,
   completeCodexChat,
@@ -12,7 +13,90 @@ const token = "sk-test-secret-token-do-not-leak";
 
 describe("completeCodexChat", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { baseUrl: "https://open.bigmodel.cn/api/paas/v4", providerId: "glm" },
+    { baseUrl: "https://api.deepseek.com/v1", providerId: "deepseek" },
+    { baseUrl: "https://api.mistral.ai/v1", providerId: "mistral" },
+    { baseUrl: "https://openrouter.ai/api/v1", providerId: "openrouter" },
+    { baseUrl: "https://unknown.example/v1", providerId: "custom" },
+    { baseUrl: "https://api.openai.com/v1/unknown", providerId: "codex" },
+    { baseUrl: "https://unknown.example/v1", providerId: undefined },
+    { baseUrl: "http://api.openai.com/v1", providerId: "codex" },
+  ])(
+    "refuses the unavailable $providerId transport before payload construction or fetch",
+    async ({ baseUrl, providerId }) => {
+      const fetchSpy = vi.fn();
+      const stringifySpy = vi.spyOn(JSON, "stringify");
+      vi.stubGlobal("fetch", fetchSpy);
+
+      await expect(
+        completeCodexChat({
+          baseUrl,
+          instructions: "Le contenu de coffre ne doit pas quitter l’appareil.",
+          messages: [
+            { content: "Ne construisez pas ce payload.", role: "user" },
+          ],
+          model: "test-model",
+          providerId,
+          token,
+        } as Parameters<typeof completeCodexChat>[0] & { providerId: string }),
+      ).rejects.toThrow("n’est pas autorisée");
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(stringifySpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the stored Codex Platform base URL on Responses and models routes", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ output_text: "Réponse Platform." }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ id: "gpt-5.6-luna" }] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(
+      completeCodexAgent({
+        baseUrl: "https://api.openai.com/v1",
+        instructions: "Rédige du Markdown.",
+        messages: [{ content: "Reformule ceci.", role: "user" }],
+        model: "gpt-5.6-luna",
+        providerId: "codex",
+        token,
+      }),
+    ).resolves.toEqual({ functionCalls: [], text: "Réponse Platform." });
+
+    await expect(
+      listCodexModels({
+        baseUrl: "https://api.openai.com/v1",
+        providerId: "codex",
+        token,
+      }),
+    ).resolves.toEqual([expect.objectContaining({ id: "gpt-5.6-luna" })]);
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      CODEX_RESPONSES_URL,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      CODEX_PLATFORM_MODELS_URL,
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("posts to the Codex Responses API without storing the conversation", async () => {
@@ -2749,7 +2833,7 @@ describe("completeCodexChat", () => {
   });
 });
 
-describe("completeCodexAgent over chat completions", () => {
+describe.skip("retired OpenAI-compatible chat completions transport", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });

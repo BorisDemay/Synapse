@@ -532,6 +532,7 @@ export const useAssistantStore = defineStore("assistant", () => {
           accountId: requestAccountId,
           baseUrl: providerBaseUrl || undefined,
           defaultModels: findAssistantProvider(requestProvider)?.defaultModels,
+          providerId: requestProvider,
           token: requestToken,
           transport: authKind === "chatgpt" ? "chatgpt" : "platform",
         });
@@ -870,6 +871,7 @@ Tu exécutes le modèle ${modelId}, fourni par ${providerLabel}. Si on te demand
           role: message.role,
         })),
         model: model.value,
+        providerId: provider,
         reasoningEffort: reasoningEffort.value || undefined,
         serviceTier: fast.value ? fastTier.value?.id : undefined,
         token: requestToken,

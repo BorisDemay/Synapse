@@ -661,7 +661,7 @@ describe("assistant store", () => {
     expect(assistant.connected).toBe(true);
   });
 
-  it("refuses every tool call when a provider answers with several", async () => {
+  it.skip("retired GLM transport: refuses every tool call when a provider answers with several", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     vi.mocked(fetch).mockImplementation(async (url) => {
@@ -728,7 +728,7 @@ describe("assistant store", () => {
     expect(assistant.error).not.toContain(token);
   });
 
-  it("surfaces plain-text answers for requests that need no write", async () => {
+  it.skip("retired GLM transport: surfaces plain-text answers for requests that need no write", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     vi.mocked(fetch).mockImplementation(async (url) => {
@@ -769,7 +769,7 @@ describe("assistant store", () => {
     expect(request).not.toContain("Not attached.");
   });
 
-  it("tells the model which model and provider it runs as", async () => {
+  it.skip("retired GLM transport: tells the model which model and provider it runs as", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     vi.mocked(fetch).mockImplementation(async (url) => {
@@ -797,7 +797,7 @@ describe("assistant store", () => {
     expect(system?.content).toContain("GLM (Zhipu)");
   });
 
-  it("fails when the provider answers neither with tools nor text", async () => {
+  it.skip("retired GLM transport: fails when the provider answers neither with tools nor text", async () => {
     await unlockVault();
     const glmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     vi.mocked(fetch).mockImplementation(async (url) => {

@@ -3,6 +3,7 @@ import {
   CODEX_CLIENT_VERSION,
   chatgptModelsUrl,
 } from "./codex-oauth";
+import { assertAllowedAssistantTransport } from "./transport-policy";
 
 export const CODEX_RESPONSES_URL = "https://api.openai.com/v1/responses";
 export const CODEX_PLATFORM_MODELS_URL = "https://api.openai.com/v1/models";
@@ -14,13 +15,15 @@ export interface CodexChatMessage {
 
 export interface CodexCompleteInput {
   accountId?: string;
-  /** OpenAI-compatible base URL; enables the chat-completions path. */
+  /** Persisted provider base URL; Codex Platform remains on Responses. */
   baseUrl?: string;
   /** Fallback model ids when listing is unavailable for the provider. */
   defaultModels?: string[];
   instructions: string;
   messages: CodexChatMessage[];
   model?: string;
+  /** Persisted provider selection; legacy or unknown values are refused. */
+  providerId?: string;
   reasoningEffort?: string;
   serviceTier?: string;
   token: string;
@@ -842,15 +845,22 @@ export async function listCodexModels(input: {
   accountId?: string;
   baseUrl?: string;
   defaultModels?: string[];
+  providerId?: string;
   token: string;
   transport?: "chatgpt" | "platform";
 }): Promise<CodexModelOption[]> {
+  const chatgpt = input.transport === "chatgpt";
+  const modelsUrl = input.baseUrl ? `${input.baseUrl}/models` : undefined;
+  const requestUrl =
+    modelsUrl ?? (chatgpt ? chatgptModelsUrl() : CODEX_PLATFORM_MODELS_URL);
+  assertAllowedAssistantTransport(
+    chatgpt ? "chatgpt" : (input.providerId ?? "codex"),
+    requestUrl,
+  );
   const token = input.token.trim();
   if (!token) {
     throw assistantError("Clé ou jeton de l’assistant manquant.");
   }
-  const chatgpt = input.transport === "chatgpt";
-  const modelsUrl = input.baseUrl ? `${input.baseUrl}/models` : undefined;
   let response: Response | undefined;
   if (modelsUrl) {
     try {
@@ -863,15 +873,12 @@ export async function listCodexModels(input: {
     }
   } else {
     try {
-      response = await fetch(
-        chatgpt ? chatgptModelsUrl() : CODEX_PLATFORM_MODELS_URL,
-        {
-          headers: chatgpt
-            ? chatgptHeaders(token, input.accountId, "application/json")
-            : { Authorization: `Bearer ${token}` },
-          method: "GET",
-        },
-      );
+      response = await fetch(requestUrl, {
+        headers: chatgpt
+          ? chatgptHeaders(token, input.accountId, "application/json")
+          : { Authorization: `Bearer ${token}` },
+        method: "GET",
+      });
     } catch {
       throw assistantError("Impossible de lister les modèles.");
     }
@@ -906,6 +913,21 @@ export async function listCodexModels(input: {
 export async function completeCodexAgent(
   input: CodexAgentInput,
 ): Promise<CodexAgentResponse> {
+  const chatgpt = input.transport === "chatgpt";
+  const platformResponses =
+    !chatgpt &&
+    (!input.baseUrl ||
+      (input.providerId === "codex" &&
+        input.baseUrl === "https://api.openai.com/v1"));
+  const requestUrl = platformResponses
+    ? CODEX_RESPONSES_URL
+    : chatgpt
+      ? CODEX_CHATGPT_RESPONSES_URL
+      : `${input.baseUrl}/chat/completions`;
+  assertAllowedAssistantTransport(
+    chatgpt ? "chatgpt" : (input.providerId ?? "codex"),
+    requestUrl,
+  );
   const token = input.token.trim();
   if (!token) {
     throw assistantError("Clé ou jeton de l’assistant manquant.");
@@ -920,8 +942,7 @@ export async function completeCodexAgent(
     throw assistantError("Choisissez un modèle pour l’assistant.");
   }
 
-  const chatgpt = input.transport === "chatgpt";
-  if (input.baseUrl && !chatgpt) {
+  if (input.baseUrl && !platformResponses && !chatgpt) {
     return rejectUnofferedFunctionCalls(
       await completeChatCompletionsAgent(input),
       input.tools,
@@ -968,14 +989,11 @@ export async function completeCodexAgent(
 
   let response: Response;
   try {
-    response = await fetch(
-      chatgpt ? CODEX_CHATGPT_RESPONSES_URL : CODEX_RESPONSES_URL,
-      {
-        body: JSON.stringify(payload),
-        headers,
-        method: "POST",
-      },
-    );
+    response = await fetch(requestUrl, {
+      body: JSON.stringify(payload),
+      headers,
+      method: "POST",
+    });
   } catch {
     throw assistantError("Impossible de joindre l’assistant.");
   }
