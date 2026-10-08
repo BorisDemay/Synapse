@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearUserOfflineData,
   closeOfflineDb,
+  deleteReplicaBaseline,
   deleteAssistantCredential,
   getAssistantCredential,
   getAssistantConversations,
   getCachedEnvelope,
   getCachedHeadRevision,
+  getReplicaBaseline,
   getTrustedDevice,
   listCachedNotes,
   openOfflineDb,
@@ -16,6 +18,7 @@ import {
   putAssistantConversations,
   putCachedEnvelope,
   putCachedNote,
+  putReplicaBaseline,
   putTrustedDevice,
   resetOfflineDbHandle,
   setCachedHeadRevision,
@@ -27,6 +30,10 @@ const userId = "0198e5de-user-7000-8000-000000000001";
 const vaultId = "0198e5de-1111-7222-8333-444455556666";
 const noteId = "0198e5de-7777-7888-8999-aaaabbbbcccc";
 const plaintext = "# Secret offline note";
+const replicaId = "replica-opaque-0198e5de";
+const bindingId = "binding-sensitive-0198e5de";
+const baselineNoteId = "note-sensitive-0198e5de";
+const baselineCiphertextHash = "ciphertext-identity-sensitive-0198e5de";
 const offlineDbName = "synapse-offline-v1";
 
 function deleteOfflineDb(): Promise<void> {
@@ -110,7 +117,101 @@ describe("offline cache", () => {
     expect(dumped).not.toContain("# ");
   });
 
-  it.each([1, 2, 3, 4, 5, 6])(
+  it("round-trips installing and ready replica baselines through a vault-bound encrypted envelope", async () => {
+    const vaultKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const baseline = {
+      baseVariant: {
+        ciphertext: [4, 8, 15, 16, 23, 42],
+        nonce: Array.from({ length: 24 }, (_, index) => index),
+      },
+      bindingId,
+      ciphertextHash: baselineCiphertextHash,
+      noteId: baselineNoteId,
+      revision: 7,
+      state: "installing" as const,
+    };
+
+    await putReplicaBaseline(userId, vaultId, replicaId, vaultKey, baseline);
+    expect(
+      await getReplicaBaseline(userId, vaultId, replicaId, vaultKey),
+    ).toEqual(baseline);
+
+    const ready = { ...baseline, state: "ready" as const };
+    await putReplicaBaseline(userId, vaultId, replicaId, vaultKey, ready);
+    expect(
+      await getReplicaBaseline(userId, vaultId, replicaId, vaultKey),
+    ).toEqual(ready);
+
+    const db = await openOfflineDb();
+    const keys = await db.getAllKeys("replica_baselines");
+    const dumped = JSON.stringify({
+      keys,
+      values: await db.getAll("replica_baselines"),
+    });
+    for (const sensitive of [
+      bindingId,
+      baselineNoteId,
+      baselineCiphertextHash,
+      "installing",
+      "ready",
+    ]) {
+      expect(dumped).not.toContain(sensitive);
+    }
+    expect(dumped).toContain(replicaId);
+    expect(await db.getAll("queue")).toEqual([]);
+  });
+
+  it("clears replica baselines for one user without touching another partition", async () => {
+    const vaultKey = new Uint8Array(32).fill(7);
+    const baseline = {
+      baseVariant: { ciphertext: [1, 2, 3], nonce: new Array(24).fill(0) },
+      bindingId,
+      ciphertextHash: baselineCiphertextHash,
+      noteId: baselineNoteId,
+      revision: 7,
+      state: "ready" as const,
+    };
+    const otherUserId = "0198e5de-other-7000-8000-000000000099";
+
+    await putReplicaBaseline(userId, vaultId, replicaId, vaultKey, baseline);
+    await putReplicaBaseline(
+      otherUserId,
+      vaultId,
+      replicaId,
+      vaultKey,
+      baseline,
+    );
+    await clearUserOfflineData(userId);
+
+    expect(
+      await getReplicaBaseline(userId, vaultId, replicaId, vaultKey),
+    ).toBeNull();
+    expect(
+      await getReplicaBaseline(otherUserId, vaultId, replicaId, vaultKey),
+    ).toEqual(baseline);
+  });
+
+  it("deletes one encrypted replica baseline without affecting the cache queue", async () => {
+    const vaultKey = new Uint8Array(32).fill(8);
+    const baseline = {
+      baseVariant: { ciphertext: [1], nonce: new Array(24).fill(1) },
+      bindingId,
+      ciphertextHash: baselineCiphertextHash,
+      noteId: baselineNoteId,
+      revision: 7,
+      state: "ready" as const,
+    };
+
+    await putReplicaBaseline(userId, vaultId, replicaId, vaultKey, baseline);
+    await deleteReplicaBaseline(userId, vaultId, replicaId);
+
+    expect(
+      await getReplicaBaseline(userId, vaultId, replicaId, vaultKey),
+    ).toBeNull();
+    expect(await (await openOfflineDb()).getAll("queue")).toEqual([]);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7])(
     "migrates encrypted notes from schema version %i without exposing plaintext",
     async (version) => {
       await closeOfflineDb();
@@ -137,6 +238,7 @@ describe("offline cache", () => {
           "note_revisions",
           "notes",
           "queue",
+          "replica_baselines",
           "trusted_devices",
           "vault_preferences",
         ]),

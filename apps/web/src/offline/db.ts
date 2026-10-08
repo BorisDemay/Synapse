@@ -48,6 +48,13 @@ export interface CachedVaultPreferencesRecord {
   vaultId: string;
 }
 
+export interface CachedReplicaBaselineRecord {
+  ciphertext: number[];
+  nonce: number[];
+  userId: string;
+  vaultId: string;
+}
+
 export type QueuedOperationRecord = EncryptedPushOperation & {
   sequence?: number;
   conflict?: Conflict | true;
@@ -86,6 +93,10 @@ interface SynapseOfflineSchema extends DBSchema {
     key: string;
     value: CachedRevisionRecord;
   };
+  replica_baselines: {
+    key: string;
+    value: CachedReplicaBaselineRecord;
+  };
   queue: {
     key: string;
     value: QueuedOperationRecord;
@@ -109,7 +120,7 @@ interface SynapseOfflineSchema extends DBSchema {
 }
 
 const DB_NAME = "synapse-offline-v1";
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let dbPromise: Promise<IDBPDatabase<SynapseOfflineSchema>> | undefined;
 
@@ -145,6 +156,14 @@ export function assistantConversationsKey(
 
 export function vaultPreferencesKey(userId: string, vaultId: string): string {
   return `${userId}:${vaultId}:preferences`;
+}
+
+export function replicaBaselineKey(
+  userId: string,
+  vaultId: string,
+  replicaId: string,
+): string {
+  return `${userId}:${vaultId}:replica:${replicaId}`;
 }
 
 export function revisionKey(
@@ -184,6 +203,7 @@ export function openOfflineDb(): Promise<IDBPDatabase<SynapseOfflineSchema>> {
           "ai_conversations",
           "vault_preferences",
           "note_revisions",
+          "replica_baselines",
         ] as const) {
           if (!db.objectStoreNames.contains(store)) {
             db.createObjectStore(store);

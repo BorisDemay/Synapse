@@ -6,28 +6,98 @@ import {
   metaKey,
   noteKey,
   openOfflineDb,
+  replicaBaselineKey,
   resetOfflineDbHandle,
   revisionKey,
   type CachedAssistantCredentialRecord,
   type CachedAssistantConversationsRecord,
   type CachedNoteRecord,
   type CachedRevisionRecord,
+  type CachedReplicaBaselineRecord,
   type CachedVaultPreferencesRecord,
   trustedDeviceKey,
   vaultPreferencesKey,
   type TrustedDeviceRecord,
 } from "./db";
+import {
+  unwrapReplicaBaseline,
+  wrapReplicaBaseline,
+  type ReplicaBaseline,
+} from "../crypto/replica-baseline";
 
 export type {
   CachedAssistantCredentialRecord,
   CachedAssistantConversationsRecord,
   CachedNoteRecord,
   CachedRevisionRecord,
+  CachedReplicaBaselineRecord,
   CachedVaultPreferencesRecord,
   TrustedDeviceRecord,
 };
 
 export { closeOfflineDb, openOfflineDb, resetOfflineDbHandle };
+
+export type { ReplicaBaseline };
+
+export async function putReplicaBaseline(
+  userId: string,
+  vaultId: string,
+  replicaId: string,
+  vaultKey: Uint8Array,
+  baseline: ReplicaBaseline,
+): Promise<void> {
+  const envelope = wrapReplicaBaseline(
+    vaultKey,
+    userId,
+    vaultId,
+    replicaId,
+    baseline,
+  );
+  const db = await openOfflineDb();
+  const value: CachedReplicaBaselineRecord = {
+    ciphertext: envelope.ciphertext,
+    nonce: envelope.nonce,
+    userId,
+    vaultId,
+  };
+  await db.put(
+    "replica_baselines",
+    value,
+    replicaBaselineKey(userId, vaultId, replicaId),
+  );
+}
+
+export async function getReplicaBaseline(
+  userId: string,
+  vaultId: string,
+  replicaId: string,
+  vaultKey: Uint8Array,
+): Promise<ReplicaBaseline | null> {
+  const db = await openOfflineDb();
+  const record = await db.get(
+    "replica_baselines",
+    replicaBaselineKey(userId, vaultId, replicaId),
+  );
+  if (!record) {
+    return null;
+  }
+  if (record.userId !== userId || record.vaultId !== vaultId) {
+    throw new Error("Unable to read replica baseline");
+  }
+  return unwrapReplicaBaseline(vaultKey, userId, vaultId, replicaId, record);
+}
+
+export async function deleteReplicaBaseline(
+  userId: string,
+  vaultId: string,
+  replicaId: string,
+): Promise<void> {
+  const db = await openOfflineDb();
+  await db.delete(
+    "replica_baselines",
+    replicaBaselineKey(userId, vaultId, replicaId),
+  );
+}
 
 export async function putCachedNote(
   userId: string,
@@ -335,6 +405,7 @@ export async function clearUserOfflineData(userId: string): Promise<void> {
     "ai_conversations",
     "vault_preferences",
     "note_revisions",
+    "replica_baselines",
   ] as const) {
     const keys = await db.getAllKeys(store);
     await Promise.all(
