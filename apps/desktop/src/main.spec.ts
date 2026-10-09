@@ -1,0 +1,18 @@
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+const mainSource = readFileSync("src/main.ts", "utf8");
+
+describe("desktop bootstrap", () => {
+  it("uses the canonical encrypted web stores behind the native shell", () => {
+    expect(mainSource).toContain('import App from "./App.vue";');
+    expect(mainSource).toContain('import { createAppRouter } from "./router";');
+    expect(mainSource).toContain(
+      'import { useAuthStore } from "../../web/src/stores/auth";',
+    );
+    expect(mainSource).toContain(
+      'import { useVaultStore } from "../../web/src/stores/vault";',
+    );
+  });
+});

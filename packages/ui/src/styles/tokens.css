@@ -1,0 +1,701 @@
+@property --app-shell-sidebar-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 17rem;
+}
+
+:root {
+  --synapse-color-surface: #efeee7;
+  --synapse-color-surface-raised: #fbfaf6;
+  --synapse-color-surface-muted: #e5e3d9;
+  --synapse-color-surface-accent: #d9e9e2;
+  --synapse-color-text: #1a1c19;
+  --synapse-color-text-muted: #5f645b;
+  --synapse-color-border: #d8d5c8;
+  --synapse-color-accent: #1d6b57;
+  --synapse-color-accent-strong: #114a3b;
+  --synapse-color-accent-contrast: #ffffff;
+  --synapse-color-success: #0f9f6e;
+  --synapse-color-warning: #9a5b00;
+  --synapse-color-danger: #b3362b;
+  --synapse-shadow-sm: 0 1px 2px rgb(15 23 42 / 6%);
+  --synapse-shadow-md: 0 18px 50px rgb(15 23 42 / 12%);
+  --synapse-space-1: 0.25rem;
+  --synapse-space-2: 0.5rem;
+  --synapse-space-3: 0.75rem;
+  --synapse-space-4: 1rem;
+  --synapse-space-5: 1.25rem;
+  --synapse-space-6: 1.5rem;
+  --synapse-space-8: 2rem;
+  --synapse-radius-sm: 0.5rem;
+  --synapse-radius-md: 0.8rem;
+  --synapse-radius-lg: 1.2rem;
+  --synapse-font-sans:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Cantarell",
+    "Noto Sans", "Liberation Sans", sans-serif;
+  --synapse-font-serif:
+    "Iowan Old Style", "Sitka Text", "Charter", "Cambria", "Noto Serif",
+    "Liberation Serif", Georgia, serif;
+  --synapse-font-mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  --app-shell-sidebar-width-expanded: 17rem;
+  --app-shell-sidebar-width-collapsed: 3rem;
+  --app-shell-relations-width: 16rem;
+  --app-shell-assistant-history-width: 16rem;
+  --app-shell-assistant-width: 24rem;
+
+  /* Échelle d'empilement : source unique de vérité.
+     Les overlays applicatifs (palettes, panneaux de réglages, menus contextuels,
+     aperçus de pièce jointe) tirent leur profondeur de `packages/ui/src/overlay-stack.ts`,
+     qui positionne chaque overlay au-dessus du précédent à partir de la bande
+     --synapse-z-overlay. Ne jamais écrire de valeur numérique d'empilement dans
+     un composant : utiliser ces tokens. */
+  --synapse-z-resize-handle: 10;
+  --synapse-z-panel-backdrop: 20;
+  --synapse-z-panel: 30;
+  --synapse-z-nav-toggle: 40;
+  --synapse-z-drawer-backdrop: 50;
+  --synapse-z-drawer: 60;
+  --synapse-z-overlay: 1000;
+  --synapse-z-tooltip: 1100;
+  --synapse-z-toast: 1200;
+  /* Bande haute réservée aux overlays internes de PrimeVue (Select) ; elle est
+     configurée dans packages/ui/src/plugin.ts et doit rester au-dessus de la pile. */
+  --synapse-z-primevue-overlay: 2000;
+  --synapse-z-primevue-modal: 2100;
+  --synapse-z-primevue-tooltip: 2200;
+}
+
+.synapse-dark {
+  --synapse-color-surface: #111412;
+  --synapse-color-surface-raised: #171b19;
+  --synapse-color-surface-muted: #202522;
+  --synapse-color-surface-accent: #1a322b;
+  --synapse-color-text: #e7e6de;
+  --synapse-color-text-muted: #9ca298;
+  --synapse-color-border: #2b312d;
+  --synapse-color-accent: #6ccfae;
+  --synapse-color-accent-strong: #9be3ca;
+  --synapse-color-accent-contrast: #0c1512;
+  --synapse-shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --synapse-shadow-md: 0 18px 50px rgb(0 0 0 / 30%);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.app-shell {
+  --app-shell-sidebar-width: var(--app-shell-sidebar-width-expanded);
+  display: grid;
+  grid-template-columns: var(--app-shell-sidebar-width) minmax(0, 1fr);
+  min-height: 100%;
+  color: var(--synapse-color-text);
+  background:
+    radial-gradient(
+      circle at 12% 0%,
+      var(--synapse-color-surface-accent),
+      transparent 22rem
+    ),
+    var(--synapse-color-surface);
+  transition: --app-shell-sidebar-width 240ms ease;
+}
+
+.app-shell-tool-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--synapse-z-panel-backdrop);
+  background: rgb(0 0 0 / 35%);
+}
+.app-shell-nav-toggle[inert],
+.app-shell-nav-toggle[aria-expanded="true"] {
+  visibility: hidden;
+}
+.app-shell-nav-close {
+  align-self: flex-end;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: 0.4rem;
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface);
+}
+
+.app-shell--resizing {
+  transition: none;
+  user-select: none;
+}
+
+.app-shell--sidebar-collapsed {
+  --app-shell-sidebar-width: var(--app-shell-sidebar-width-collapsed);
+}
+
+.app-shell > .app-shell-sidebar {
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    padding 240ms ease,
+    border-color 240ms ease;
+}
+
+.app-shell.app-shell--sidebar-collapsed > .app-shell-sidebar {
+  padding: var(--synapse-space-2) var(--synapse-space-1);
+}
+
+.app-shell:has(> .app-shell-relations) {
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-relations-width);
+}
+
+.app-shell:has(> .app-shell-assistant) {
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-assistant-width);
+}
+
+.app-shell:has(> .app-shell-assistant-history) {
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-assistant-history-width);
+}
+
+.app-shell:has(> .app-shell-relations):has(> .app-shell-assistant) {
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-relations-width) var(--app-shell-assistant-width);
+}
+
+.app-shell:has(> .app-shell-assistant-history):has(> .app-shell-assistant) {
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-assistant-history-width) var(--app-shell-assistant-width);
+}
+
+.app-shell:has(> .app-shell-relations):has(> .app-shell-assistant-history):has(
+    > .app-shell-assistant
+  ) {
+  grid-template-columns:
+    var(--app-shell-sidebar-width) minmax(0, 1fr)
+    var(--app-shell-relations-width) var(--app-shell-assistant-history-width)
+    var(--app-shell-assistant-width);
+}
+
+.app-shell-nav-toggle {
+  display: none;
+}
+
+.app-shell > aside {
+  position: relative;
+  padding: var(--synapse-space-5);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 90%,
+    transparent
+  );
+  border-inline-end: 1px solid var(--synapse-color-border);
+}
+
+.app-shell > main {
+  position: relative;
+  min-width: 0;
+  padding: var(--synapse-space-6);
+}
+
+.app-shell > .app-shell-relations,
+.app-shell > .app-shell-assistant,
+.app-shell > .app-shell-assistant-history {
+  display: flex;
+  min-width: 0;
+  padding: var(--synapse-space-5);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-surface-raised) 92%,
+    transparent
+  );
+  border-inline-start: 1px solid var(--synapse-color-border);
+}
+
+.app-shell > .app-shell-relations {
+  flex-direction: column;
+  gap: 1.25rem;
+  overflow: auto;
+}
+
+.app-shell > .app-shell-assistant-history {
+  overflow: auto;
+}
+
+.app-shell-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  width: 8px;
+  z-index: var(--synapse-z-resize-handle);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.app-shell-resize-handle[data-edge="end"] {
+  inset-inline-end: 0;
+}
+
+.app-shell-resize-handle[data-edge="start"] {
+  inset-inline-start: 0;
+}
+
+.app-shell-resize-handle:hover,
+.app-shell-resize-handle:focus-visible,
+.app-shell-resize-handle[data-active] {
+  background: color-mix(in srgb, var(--synapse-color-accent) 55%, transparent);
+  outline: none;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--synapse-space-2);
+  border: 1px solid var(--synapse-color-border);
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  cursor: pointer;
+  font: inherit;
+  box-shadow: var(--synapse-shadow-sm);
+}
+
+.theme-toggle:hover {
+  border-color: var(--synapse-color-accent);
+}
+
+/* Infobulle applicative : un seul élément, empilé dans la bande applicative.
+   Voir packages/ui/src/tooltip.ts (directive v-synapse-tooltip). */
+.synapse-tooltip {
+  position: fixed;
+  z-index: var(--synapse-z-tooltip);
+  max-width: min(18rem, calc(100vw - 1rem));
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: var(--synapse-shadow-sm);
+  font-size: 0.8rem;
+  line-height: 1.3;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.synapse-tooltip[hidden] {
+  display: none;
+}
+
+.p-button,
+button[data-pc-name="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--synapse-color-accent);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-accent-contrast);
+  background: var(--synapse-color-accent);
+  box-shadow: var(--synapse-shadow-sm);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.p-button:hover:not(:disabled),
+button[data-pc-name="button"]:hover:not(:disabled) {
+  border-color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-accent-strong);
+}
+
+.p-button:active:not(:disabled),
+button[data-pc-name="button"]:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.p-button:disabled,
+button[data-pc-name="button"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.p-button.p-button-outlined,
+button[data-pc-name="button"][data-p-variant="outlined"],
+button[data-pc-name="button"][data-p-outlined] {
+  color: var(--synapse-color-accent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.p-button.p-button-outlined:hover:not(:disabled),
+button[data-pc-name="button"][data-p-variant="outlined"]:hover:not(:disabled),
+button[data-pc-name="button"][data-p-outlined]:hover:not(:disabled) {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+}
+
+.p-inputtext,
+.p-textarea,
+.p-password-input,
+input[data-pc-name="inputtext"],
+input[data-pc-extend="inputtext"],
+textarea[data-pc-name="textarea"] {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  font: inherit;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.p-inputtext::placeholder,
+.p-textarea::placeholder,
+input[data-pc-name="inputtext"]::placeholder,
+input[data-pc-extend="inputtext"]::placeholder,
+textarea[data-pc-name="textarea"]::placeholder {
+  color: var(--synapse-color-text-muted);
+}
+
+.p-inputtext:enabled:focus,
+.p-textarea:enabled:focus,
+.p-password-input:enabled:focus,
+input[data-pc-name="inputtext"]:enabled:focus,
+input[data-pc-extend="inputtext"]:enabled:focus,
+textarea[data-pc-name="textarea"]:enabled:focus {
+  border-color: var(--synapse-color-accent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--synapse-color-accent) 18%, transparent);
+  outline: 0;
+}
+
+/* Select: PrimeVue runs unstyled, so it only emits data-pc-* attributes. The
+   overlay is teleported to <body> and only carries data-pc-section (PrimeVue
+   emits data-pc-name on roots only), so overlay rules cannot be scoped by
+   [data-pc-name="select"]; :has() keeps the panel look limited to overlays
+   that render an option list. */
+[data-pc-name="select"][data-pc-section="root"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.7rem 2.75rem 0.7rem 0.8rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+[data-pc-name="select"][data-pc-section="root"]:hover {
+  border-color: var(--synapse-color-accent);
+}
+
+[data-pc-name="select"][data-pc-section="root"][data-p-focused="true"] {
+  border-color: var(--synapse-color-accent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--synapse-color-accent) 18%, transparent);
+}
+
+[data-pc-name="select"][data-pc-section="root"][data-p-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+[data-pc-name="select"] [data-pc-section="label"] {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-pc-name="select"] [data-pc-section="label"][data-p-placeholder="true"] {
+  color: var(--synapse-color-text-muted);
+}
+
+[data-pc-name="select"] [data-pc-section="dropdown"] {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 0.8rem;
+  display: grid;
+  place-items: center;
+  color: var(--synapse-color-text-muted);
+  transform: translateY(-50%);
+}
+
+[data-pc-section="overlay"]:has([data-pc-section="list"]) {
+  position: absolute;
+  z-index: var(--synapse-z-primevue-overlay);
+  max-block-size: 16rem;
+  margin-block-start: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: var(--synapse-shadow-md);
+  overflow: auto;
+}
+
+[data-pc-section="overlay"] [data-pc-section="list"] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-pc-section="overlay"] [data-pc-section="option"] {
+  padding: 0.55rem 0.7rem;
+  border-radius: calc(var(--synapse-radius-sm) - 0.2rem);
+  cursor: pointer;
+}
+
+[data-pc-section="overlay"] [data-pc-section="option"][data-p-focused="true"] {
+  background: var(--synapse-color-surface-muted);
+}
+
+[data-pc-section="overlay"] [data-pc-section="option"][data-p-selected="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  font-weight: 600;
+}
+
+[data-pc-section="overlay"] [data-pc-section="emptymessage"] {
+  padding: 0.55rem 0.7rem;
+  color: var(--synapse-color-text-muted);
+}
+
+.p-password,
+div[data-pc-name="password"] {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+}
+
+.p-password-input,
+input[data-pc-extend="inputtext"] {
+  padding-inline-end: 2.75rem;
+}
+
+.p-password-toggle-mask,
+div[data-pc-name="password"] > svg[data-pc-section$="icon"] {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.p-message,
+div[data-pc-name="message"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-muted);
+}
+
+.p-message.p-message-error,
+div[data-pc-name="message"][data-p-severity="error"] {
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-danger) 35%,
+    var(--synapse-color-border)
+  );
+  color: var(--synapse-color-danger);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-danger) 9%,
+    var(--synapse-color-surface-raised)
+  );
+}
+
+.p-message.p-message-info,
+div[data-pc-name="message"][data-p-severity="info"] {
+  border-color: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 35%,
+    var(--synapse-color-border)
+  );
+  color: var(--synapse-color-accent-strong);
+  background: color-mix(
+    in srgb,
+    var(--synapse-color-accent) 9%,
+    var(--synapse-color-surface-raised)
+  );
+}
+
+@media (max-width: 75rem) {
+  .app-shell,
+  .app-shell:has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-assistant-history),
+  .app-shell:has(> .app-shell-relations),
+  .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-assistant-history):has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-relations):has(
+      > .app-shell-assistant-history
+    ):has(> .app-shell-assistant) {
+    grid-template-columns: var(--app-shell-sidebar-width) minmax(0, 1fr);
+  }
+
+  .app-shell > .app-shell-relations,
+  .app-shell > .app-shell-assistant-history,
+  .app-shell > .app-shell-assistant {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: var(--synapse-z-panel);
+    box-shadow: var(--synapse-shadow-md);
+  }
+
+  .app-shell > .app-shell-relations {
+    width: min(var(--app-shell-relations-width), 100%);
+  }
+
+  .app-shell > .app-shell-assistant-history {
+    width: min(var(--app-shell-assistant-history-width), 100%);
+  }
+
+  .app-shell > .app-shell-assistant {
+    width: min(var(--app-shell-assistant-width), 100%);
+  }
+}
+
+@media (max-width: 48rem) {
+  .app-shell,
+  .app-shell:has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-assistant-history),
+  .app-shell:has(> .app-shell-relations),
+  .app-shell:has(> .app-shell-relations):has(> .app-shell-assistant),
+  .app-shell:has(> .app-shell-relations):has(
+      > .app-shell-assistant-history
+    ):has(> .app-shell-assistant) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell > aside.app-shell-sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: var(--synapse-z-drawer);
+    width: min(20rem, 85vw);
+    padding: var(--synapse-space-5);
+    background: var(--synapse-color-surface-raised);
+    border-inline-end: 1px solid var(--synapse-color-border);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 200ms ease,
+      visibility 200ms ease;
+  }
+
+  [dir="rtl"] .app-shell > aside.app-shell-sidebar {
+    transform: translateX(100%);
+  }
+
+  .app-shell.app-shell--sidebar-collapsed > aside.app-shell-sidebar {
+    padding: var(--synapse-space-5);
+  }
+
+  .app-shell.app-shell--navigation-drawer-open > aside.app-shell-sidebar {
+    transform: none;
+    visibility: visible;
+    box-shadow: var(--synapse-shadow-md);
+  }
+
+  .app-shell > .app-shell-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: var(--synapse-z-drawer-backdrop);
+    border: 0;
+    padding: 0;
+    background: rgb(15 23 42 / 45%);
+  }
+
+  .app-shell-nav-toggle {
+    position: fixed;
+    top: 0.75rem;
+    inset-inline-start: 0.75rem;
+    z-index: var(--synapse-z-nav-toggle);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    border: 1px solid var(--synapse-color-border);
+    border-radius: var(--synapse-radius-sm);
+    color: var(--synapse-color-text);
+    background: var(--synapse-color-surface-raised);
+    box-shadow: var(--synapse-shadow-sm);
+  }
+
+  .app-shell-nav-toggle:hover,
+  .app-shell-nav-toggle:focus-visible {
+    border-color: var(--synapse-color-accent);
+    color: var(--synapse-color-accent-strong);
+    outline: none;
+  }
+
+  .app-shell-nav-toggle svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .app-shell > main {
+    padding: var(--synapse-space-4);
+  }
+
+  .app-shell-resize-handle {
+    display: none;
+  }
+}
+
+/* Titres en sérif, comme la vue note Papier : même famille sur tout le site. */
+h1,
+h2 {
+  font-family: var(--synapse-font-serif);
+  font-weight: 600;
+}

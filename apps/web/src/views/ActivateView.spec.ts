@@ -1,0 +1,176 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { createMemoryHistory, createRouter } from "vue-router";
+import PrimeVue from "primevue/config";
+import { afterEach, expect, it, vi } from "vitest";
+import ActivateView from "./ActivateView.vue";
+
+function mountActivate(router: ReturnType<typeof createRouter>) {
+  return mount(ActivateView, {
+    global: { plugins: [router, PrimeVue] },
+  });
+}
+afterEach(() => vi.unstubAllGlobals());
+
+it("mounts the theme toggle without an unresolved Synapse tooltip directive warning", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  const wrapper = mountActivate(router);
+
+  try {
+    expect(
+      warn.mock.calls.some((args) =>
+        args.some(
+          (argument) =>
+            typeof argument === "string" &&
+            argument.includes("Failed to resolve directive: synapse-tooltip"),
+        ),
+      ),
+    ).toBe(false);
+  } finally {
+    wrapper.unmount();
+    warn.mockRestore();
+  }
+});
+
+it("removes the activation token from the address and submits it only after confirmation", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetcher);
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  await router.push("/activate?token=synthetic-activation");
+  await router.isReady();
+  const wrapper = mountActivate(router);
+  await flushPromises();
+  expect(router.currentRoute.value.fullPath).toBe("/activate");
+  expect(fetcher).not.toHaveBeenCalled();
+  const activateButton = wrapper
+    .findAll("button")
+    .find((candidate) => candidate.text().includes("Activer le compte"));
+  expect(activateButton).toBeDefined();
+  await activateButton?.trigger("click");
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledWith(
+    "/auth/activate",
+    expect.objectContaining({
+      body: JSON.stringify({ token: "synthetic-activation" }),
+      method: "POST",
+    }),
+  );
+  expect(wrapper.get('[role="status"]').text()).toContain("Compte activé");
+  expect(wrapper.get('[role="status"]').classes()).toContain(
+    "activation-status",
+  );
+  expect(wrapper.get('[role="status"]').text()).toContain("phrase de coffre");
+  expect(wrapper.text()).not.toContain("synthetic-activation");
+  wrapper.unmount();
+});
+
+it("distinguishes an unreachable server from a used or expired link", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockRejectedValue(new TypeError("network down")),
+  );
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  await router.push("/activate?token=synthetic-activation");
+  await router.isReady();
+  const wrapper = mountActivate(router);
+  await flushPromises();
+  const activateButton = wrapper
+    .findAll("button")
+    .find((candidate) => candidate.text().includes("Activer le compte"));
+  await activateButton?.trigger("click");
+  await flushPromises();
+
+  expect(wrapper.get('[role="status"]').text()).toContain("injoignable");
+  expect(wrapper.get('[role="status"]').text()).toContain("réessayez");
+  wrapper.unmount();
+});
+
+it("suggests reopening the email link and asking a new one when activation fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(null, { status: 400 })),
+  );
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  await router.push("/activate?token=synthetic-activation");
+  await router.isReady();
+  const wrapper = mountActivate(router);
+  await flushPromises();
+  const activateButton = wrapper
+    .findAll("button")
+    .find((candidate) => candidate.text().includes("Activer le compte"));
+  await activateButton?.trigger("click");
+  await flushPromises();
+
+  const status = wrapper.get('[role="status"]').text();
+  expect(status).toContain("expiré");
+  expect(status).toContain("réessayez");
+  expect(status).toContain("email");
+  expect(status).toContain("administrateur");
+  wrapper.unmount();
+});
+
+it("uses the shared auth card layout with styled headings and links", () => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  const wrapper = mountActivate(router);
+
+  expect(wrapper.find("h2").text()).toContain("Activer votre compte");
+  expect(wrapper.get(".subtitle").text()).toContain("activation");
+  const actions = wrapper.get(".form-actions");
+  const buttons = actions.findAll("button");
+  expect(buttons).toHaveLength(2);
+  expect(buttons[0]!.text()).toBe("Activer le compte");
+  expect(buttons[1]!.text()).toBe("Se connecter");
+  expect(buttons[0]!.classes().join(" ")).not.toContain("secondary");
+  expect(buttons[1]!.classes().join(" ")).toContain("secondary");
+  expect(buttons[1]!.classes().join(" ")).not.toContain("p-disabled");
+  wrapper.unmount();
+});
+
+it("mirrors the two-column auth layout with the branding aside", () => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/activate", component: ActivateView },
+      { path: "/login", component: { template: "<div />" } },
+    ],
+  });
+  const wrapper = mountActivate(router);
+
+  const aside = wrapper.get(".auth-aside");
+  expect(aside.get(".auth-brand").text()).toContain("Synapse");
+  expect(aside.get("h1").text()).toContain("idées");
+  expect(wrapper.get(".page-toolbar").text()).toContain("Activation");
+  wrapper.unmount();
+});

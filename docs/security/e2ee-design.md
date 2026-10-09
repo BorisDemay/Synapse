@@ -1,0 +1,32 @@
+# Chiffrement de coffre côté client
+
+## Portée du MVP
+
+Chaque contenu synchronisé est chiffré localement avec une clé de coffre aléatoire de 256 bits et XChaCha20-Poly1305. Le serveur ne reçoit jamais le Markdown, les titres, chemins, tags, wikilinks, index de recherche, aperçus ou clés de coffre en clair.
+
+L’AAD versionné lie chaque ciphertext à son `vault_id`, son `note_id` et sa révision. Une tentative de déchiffrement avec une autre combinaison échoue.
+
+## Enveloppe locale de clé
+
+La clé de coffre est enveloppée localement avec une clé dérivée de la phrase secrète par Argon2id. Chaque enveloppe utilise un sel aléatoire unique et un nonce XChaCha20-Poly1305 généré par le CSPRNG du système. Les clés et clés dérivées sont zéroïsées en mémoire lorsqu’elles sont libérées et leurs implémentations `Debug` ne révèlent pas de matière secrète.
+
+La phrase secrète est distincte du mot de passe d’authentification et ne traverse jamais l’API. L’enveloppe sérialisée contient seulement le sel, le nonce et le ciphertext de la clé de coffre.
+
+## Assistant IA côté client
+
+L’assistant optionnel est une exception explicite à la confidentialité E2EE vis-à-vis
+du fournisseur IA choisi : le texte des notes liées est déchiffré sur le client
+et envoyé directement au fournisseur, jamais au serveur Synapse. Le prompt rapide
+lie uniquement la note active persistée à un fil neuf. Un avis visible avant sa
+soumission explique le transfert en clair ; la soumission après cet avis vaut
+consentement. Sans note active, aucun contenu du coffre n’est inclus. Un brouillon
+sale ou une sauvegarde en cours est durablement sauvegardé avant le transfert ;
+une erreur de persistance bloque l’envoi. Voir [ADR 0008](../adr/0008-client-side-codex-assistant.md).
+
+## Limites et récupération
+
+- Une phrase secrète perdue rend le coffre irrécupérable sans mécanisme de récupération explicitement conçu ; le MVP n’en fournit pas.
+- Dans le client web, les mutations restent durablement enregistrées comme ciphertext et opération en attente avant transport; des snapshots chiffrés de récupération sont espacés d’au moins cinq minutes et conservés sept jours. Ils ne constituent pas une sauvegarde indépendante. Ils sont expirés physiquement lors d’une sauvegarde ultérieure (les notes dormantes peuvent donc garder des snapshots expirés sur disque), et l’interface masque déjà les snapshots expirés de la note active. Les données historiques denses non marquées ne sont pas effacées; les références nommées et la capture avant suppression demeurent disponibles. Un arrêt brutal avant le délai d’autosauvegarde web de deux secondes peut perdre le brouillon en mémoire. Voir [ADR 0020](../adr/0020-local-recovery-snapshots.md).
+- Changer la phrase secrète exige de déverrouiller localement la clé de coffre puis de la ré-envelopper ; aucun re-chiffrement de contenu n’est nécessaire.
+- Le MVP ne prend pas en charge le partage E2EE entre comptes : la distribution, la rotation et la révocation de clés de groupe sont hors périmètre.
+- Le chiffrement ne masque pas les métadonnées de transport telles que tailles de ciphertext, volumes, révisions, timing, membres autorisés et adresse IP observée par le serveur.
