@@ -29,7 +29,56 @@ function baselineAad(): Uint8Array {
   );
 }
 
+function expectGenericError(operation: () => void, message: string): void {
+  expect(operation).toThrow(message);
+  try {
+    operation();
+  } catch (error) {
+    expect(String(error)).toBe(`Error: ${message}`);
+    expect(String(error)).not.toContain(baseline.noteId);
+    expect(String(error)).not.toContain(baseline.bindingId);
+  }
+}
+
 describe("replica baseline envelope", () => {
+  it("rejects negative revisions with generic errors when writing and reading", () => {
+    const negativeRevision = { ...baseline, revision: -1 };
+
+    expectGenericError(
+      () =>
+        wrapReplicaBaseline(
+          vaultKey,
+          userId,
+          vaultId,
+          replicaId,
+          negativeRevision,
+        ),
+      "Unable to store replica baseline",
+    );
+
+    const encryptedNegativeRevision = Array.from(
+      xchacha20poly1305(vaultKey, new Uint8Array(24), baselineAad()).encrypt(
+        new TextEncoder().encode(JSON.stringify(negativeRevision)),
+      ),
+    );
+    const invalidEnvelope = {
+      ciphertext: encryptedNegativeRevision,
+      nonce: new Array(24).fill(0),
+    };
+
+    expectGenericError(
+      () =>
+        unwrapReplicaBaseline(
+          vaultKey,
+          userId,
+          vaultId,
+          replicaId,
+          invalidEnvelope,
+        ),
+      "Unable to read replica baseline",
+    );
+  });
+
   it("rejects changed partitions, ciphertext, nonce, and malformed JSON with generic errors", () => {
     const envelope = wrapReplicaBaseline(
       vaultKey,

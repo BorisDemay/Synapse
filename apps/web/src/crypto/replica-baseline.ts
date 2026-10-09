@@ -64,7 +64,9 @@ function parseBaseline(value: unknown): ReplicaBaseline {
     !isIdentifier(baseline.bindingId) ||
     !isIdentifier(baseline.ciphertextHash) ||
     !isIdentifier(baseline.noteId) ||
+    typeof baseline.revision !== "number" ||
     !Number.isSafeInteger(baseline.revision) ||
+    baseline.revision < 0 ||
     (baseline.state !== "installing" && baseline.state !== "ready") ||
     !isByteArray((baseVariant as Record<string, unknown>).ciphertext) ||
     !isByteArray((baseVariant as Record<string, unknown>).nonce, 24) ||
