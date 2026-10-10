@@ -24,6 +24,7 @@ import {
   downloadNotePdf,
   isNewNoteDraft,
   noteUpdatedAt,
+  outlineFor,
   parseNote,
   renderTemplate,
   resolveWikilink,
@@ -67,6 +68,12 @@ import {
   planZipImport,
   type MarkdownImportPlan,
 } from "../import/markdown-folder";
+import {
+  incomingLinks,
+  noteOutline,
+  noteProperties as noteMarginProperties,
+  outgoingLinks as noteOutgoingLinks,
+} from "../vault/note-margin";
 import { clearToasts, dismissToast, notify } from "../notifications/toasts";
 import { useAssistantStore } from "../stores/assistant";
 import { useAuthStore } from "../stores/auth";
@@ -365,6 +372,36 @@ const currentQueryNote = computed(() =>
 const currentNoteTitle = computed(() =>
   noteTitle(content.value, currentQueryNote.value?.label ?? "Nouvelle note"),
 );
+
+/** Marge Papier : dérivée du texte en cours d'édition, pas de la version
+ * enregistrée, pour que le sommaire et les liens suivent la saisie. */
+const marginNote = computed<QueryNote>(() => ({
+  content: content.value,
+  id: noteId.value,
+  label: currentNoteTitle.value,
+  path: fullNotePath(vault.notes.get(noteId.value)?.path, noteId.value),
+}));
+const marginOutline = computed(() => noteOutline(content.value));
+const marginBacklinks = computed(() =>
+  incomingLinks(queryNotes.value, marginNote.value),
+);
+const marginOutgoing = computed(() =>
+  noteOutgoingLinks(queryNotes.value, content.value, noteId.value),
+);
+const marginProperties = computed(() => noteMarginProperties(content.value));
+
+/** Le sommaire ignore le premier titre (masqué par l'éditeur) : on retrouve le
+ * titre visé en comptant depuis la fin du document rendu. */
+function scrollToOutline(index: number) {
+  const headings = document.querySelectorAll<HTMLElement>(
+    ".editor-surface .vditor-ir .vditor-reset :is(h1, h2, h3, h4, h5, h6)",
+  );
+  const total = outlineFor(content.value).length;
+  headings[headings.length - (total - index)]?.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+}
 
 /** Brouillon de saisie du titre ; null quand le champ reflète le titre réel. */
 const noteTitleDraft = ref<string | null>(null);
@@ -1979,14 +2016,10 @@ watch(settingsOpen, (open) => {
           </span>
         </div>
         <VaultExplorerToolbar
-          show-import
-          show-import-folder
           show-template
           :compact="sidebar.compact.value"
           :sidebar-collapsed="sidebar.collapsed.value"
           @from-template="startFromTemplate"
-          @import="requestImport"
-          @import-folder="requestFolderImport"
           @toggle-compact="sidebar.toggleCompact()"
           @toggle-sidebar="sidebar.toggleCollapsed()"
         />
@@ -2355,18 +2388,83 @@ watch(settingsOpen, (open) => {
             </button>
           </p>
         </section>
-        <div class="editor-surface">
-          <MarkdownEditor
-            ref="editorSurface"
-            :model-value="content"
-            :hide-first-heading="true"
-            @update:model-value="updateDraft"
-            :attachment-urls="blobUrls"
-            :wikilink-suggestions="wikilinkSuggestions"
-            @attach-files="attachFiles"
-            @open-wikilink="openWikilink"
-            @save="save"
-          />
+        <div class="note-page">
+          <div class="editor-surface">
+            <MarkdownEditor
+              ref="editorSurface"
+              :model-value="content"
+              :hide-first-heading="true"
+              @update:model-value="updateDraft"
+              :attachment-urls="blobUrls"
+              :wikilink-suggestions="wikilinkSuggestions"
+              @attach-files="attachFiles"
+              @open-wikilink="openWikilink"
+              @save="save"
+            />
+          </div>
+          <aside class="note-margin" aria-label="Marge de la note">
+            <section>
+              <h2 class="note-margin-label">Sommaire</h2>
+              <p v-if="!marginOutline.length" class="note-margin-empty">
+                Les titres de la note apparaîtront ici.
+              </p>
+              <ol v-else class="note-outline">
+                <li
+                  v-for="entry in marginOutline"
+                  :key="entry.index"
+                  :style="{ '--depth': entry.depth }"
+                >
+                  <button
+                    type="button"
+                    data-test="outline-entry"
+                    @click="scrollToOutline(entry.index)"
+                  >
+                    {{ entry.text }}
+                  </button>
+                </li>
+              </ol>
+            </section>
+            <section data-test="backlinks">
+              <h2 class="note-margin-label">Liens entrants</h2>
+              <p v-if="!marginBacklinks.length" class="note-margin-empty">
+                Aucune note ne pointe vers celle-ci.
+              </p>
+              <ul v-else class="note-links">
+                <li v-for="link in marginBacklinks" :key="link.id">
+                  <button type="button" @click="selectNote(link.id)">
+                    {{ link.label }}
+                  </button>
+                </li>
+              </ul>
+            </section>
+            <section v-if="marginOutgoing.length">
+              <h2 class="note-margin-label">Liens sortants</h2>
+              <ul class="note-links">
+                <li v-for="link in marginOutgoing" :key="link.target">
+                  <button
+                    type="button"
+                    :data-missing="link.id ? undefined : 'true'"
+                    @click="openWikilink(link.target)"
+                  >
+                    {{ link.label }}
+                    <small v-if="!link.id">à créer</small>
+                  </button>
+                </li>
+              </ul>
+            </section>
+            <section v-if="marginProperties.length" data-test="properties">
+              <h2 class="note-margin-label">Propriétés</h2>
+              <dl class="note-properties">
+                <template
+                  v-for="property in marginProperties"
+                  :key="property.key"
+                >
+                  <dt>{{ property.key }}</dt>
+                  <dd>{{ property.value }}</dd>
+                </template>
+              </dl>
+            </section>
+          </aside>
         </div>
       </template>
       <div v-if="searchQuery && !searchPaletteOpen" class="saved-search-action">
@@ -2481,6 +2579,8 @@ watch(settingsOpen, (open) => {
     @open-admin="openAdminConsole"
     @delete-account="deleteAccount"
     @export-notes="exportNotes"
+    @import-folder="requestFolderImport"
+    @import-zip="requestImport"
     @forget-device="forgetDevice"
     @lock-vault="lockVault"
     @remember-device="rememberDevice"
@@ -3651,5 +3751,248 @@ watch(settingsOpen, (open) => {
   .workspace-header {
     padding-inline-start: 3.75rem;
   }
+}
+</style>
+
+<style scoped>
+/* Mise en page Papier : colonne de lecture et marge à droite. */
+.note-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.note-page > .editor-surface {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.note-margin {
+  position: relative;
+  z-index: var(--synapse-z-panel);
+  min-height: 0;
+  padding: 1rem 1.25rem 2rem 0.5rem;
+  background: var(--synapse-color-surface-raised);
+  overflow-y: auto;
+  color: var(--synapse-color-text);
+  font-size: 0.8125rem;
+}
+
+.note-margin section {
+  margin-top: 1.5rem;
+}
+
+.note-margin-label {
+  margin: 0 0 0.4rem;
+  color: var(--synapse-color-text-muted);
+  font-family: var(--synapse-font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-margin-empty {
+  margin: 0;
+  color: var(--synapse-color-text-muted);
+}
+
+.note-outline,
+.note-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note-outline {
+  border-inline-start: 1px solid var(--synapse-color-border);
+}
+
+.note-outline button,
+.note-links button {
+  display: block;
+  width: 100%;
+  padding: 0.25rem 0;
+  overflow: hidden;
+  color: var(--synapse-color-text-muted);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-outline li {
+  padding-inline-start: calc(0.75rem + var(--depth, 0) * 0.75rem);
+}
+
+.note-outline button:hover,
+.note-links button:hover {
+  color: var(--synapse-color-text);
+}
+
+.note-links button {
+  color: var(--synapse-color-accent);
+}
+
+.note-links button[data-missing="true"] {
+  color: var(--synapse-color-text-muted);
+}
+
+.note-links small {
+  margin-inline-start: 0.35rem;
+  font-size: 0.6875rem;
+}
+
+.note-properties {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.3rem 0.75rem;
+  margin: 0;
+}
+
+.note-properties dt {
+  color: var(--synapse-color-text-muted);
+}
+
+.note-properties dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Corps et titre en sérif, comme la proposition Papier. */
+.editor-surface :deep(.vditor-ir),
+.editor-surface :deep(.vditor-sv) {
+  font-family: var(--synapse-font-serif);
+  font-size: 1.05rem;
+  line-height: 1.62;
+}
+
+.editor-surface :deep(.vditor-reset :is(h1, h2, h3, h4)) {
+  font-family: var(--synapse-font-serif);
+  font-weight: 600;
+}
+
+/* Sous ~72rem la marge n'a plus de place à côté du texte : elle se masque. */
+@media (max-width: 72rem) {
+  .note-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .note-margin {
+    display: none;
+  }
+}
+
+/* En-tête et panneau de gauche en mode Papier : titre sérif, étiquettes sobres. */
+.note-title-input,
+.workspace-titleblock h2 {
+  font-family: var(--synapse-font-serif);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.tag-filter button {
+  border: 0;
+  border-radius: 0.25rem;
+  padding-inline: 0.45rem;
+  color: var(--synapse-color-text-muted);
+  background: transparent;
+}
+
+.tag-filter button[data-active="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+}
+</style>
+
+<style scoped>
+/* Index Papier : panneau de gauche sobre, sans cadres ni pastilles. */
+.vault-page .vault-nav-header {
+  padding-bottom: 0.25rem;
+}
+
+.vault-page .sidebar-section-label {
+  margin-top: 1.1rem;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+}
+
+.vault-page .sidebar-nav-item {
+  border-radius: 0.375rem;
+  color: var(--synapse-color-text-muted);
+}
+
+.vault-page .sidebar-nav-item[data-active="true"] {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  font-weight: 600;
+}
+
+.vault-page :deep(.vault-tree-row) {
+  border-radius: 0.375rem;
+}
+
+.vault-page :deep(.vault-tree-item[aria-selected="true"] > .vault-tree-row) {
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
+  font-weight: 600;
+}
+
+.vault-page :deep(.vault-tree-item[data-kind="folder"] > .vault-tree-row) {
+  color: var(--synapse-color-text-muted);
+  font-weight: 600;
+}
+
+.vault-page .sidebar-footer {
+  gap: 0.1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--synapse-color-border);
+}
+
+.vault-page .sidebar-footer button {
+  color: var(--synapse-color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.vault-page .sidebar-footer button:hover {
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-muted);
+}
+
+/* Le panneau reste dans sa largeur : la rangée de marque passe à la ligne et
+   la recherche se réduit au lieu de déborder. */
+.vault-page .vault-brand-row {
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+  min-width: 0;
+}
+
+.vault-page .vault-search-trigger {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.vault-page .vault-search-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Lignes de notes compactes : une note tient sur une ligne fine. */
+.vault-page :deep(.vault-tree-item) {
+  gap: 0;
+}
+
+.vault-page :deep(.vault-tree-row) {
+  min-height: 1.7rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.8125rem;
+  line-height: 1.3;
 }
 </style>

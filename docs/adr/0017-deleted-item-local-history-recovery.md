@@ -3,7 +3,7 @@
 - Statut : accepté
 - Date : 2026-09-22
 - Complète : ADR 0002, ADR 0010, ADR 0011 et ADR 0016
-- Plan : `docs/plans/2026-09-22-writing-first.md`
+- Validation historique : [writing-first, 2026-09-22](../testing/validation-history.md#2026-09-22--writing-first)
 
 ## Contexte
 

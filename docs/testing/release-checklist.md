@@ -1,124 +1,106 @@
-# Checklist de préversion Synapse
+# Synapse — pre-release readiness checklist
 
-Exécuter dans l'ordre sur une machine de référence (Linux ou Windows/WSL2).
-Ne cocher une case qu'après une sortie réelle de commande.
+Updated: 2026-10-03. The product remains pre-release. This checklist tracks
+release evidence; it is not a list of features already built or a promise that
+future features are required for the MVP. Open product work is in the
+[current roadmap and todo](../plans/roadmap.md).
 
-## Mise à jour continue
+## Current verified baseline
 
-Les points ci-dessous ont été développés et validés localement le 2026-09-17
-(Linux/WSL2). Les exécutions qui dépendent de Windows ou d'un NAS réel restent
-signalées comme telles.
+For commit `b7ba4735aabc20ecc8f4dfc346cc7c524d91ff22`,
+[CI run 37159224532](https://github.com/BorisDemay/Synapse/actions/runs/37159224532)
+completed successfully with all jobs green:
 
-- [x] `node --test tests/release/*.test.mjs` — 57 tests : parité, SemVer, SHA,
-      URLs immuables, vérification des signatures updater, workflow et
-      déployeur.
-- [x] Les signatures updater des artefacts construits sont vérifiées contre
-      `TAURI_UPDATER_PUBLIC_KEY` dans le job `desktop` (Linux et Windows) et
-      re-vérifiées dans le job `publish` avant l'assemblage de l'archive.
-      `infra/scripts/release/verify-signature.mjs` et
-      `tests/release/signing.test.mjs` couvrent le contrôle, et le test de
-      workflow garantit son ordre après le bundling.
-- [x] Exécution réelle du workflow `main-release` — run `35256069995`
-      (SHA `5f0da27`) : tous les jobs verts, dont `desktop-bundle
-      (windows-latest)`, qui importe le certificat Authenticode, sonde
-      `signtool`, construit le paquet signé, vérifie la signature Tauri contre
-      `TAURI_UPDATER_PUBLIC_KEY` puis publie la release GitHub `v0.1.32`.
-      Le certificat de test étant auto-signé, la confiance Authenticode est
-      explicitement ignorée ; la vérification stricte `signtool verify /pa`
-      reste appliquée à un certificat non auto-signé.
-- [x] L'instance NAS exécute une release publiée. Observé le 2026-09-17 :
-      bootstrap de `0.1.33` (SHA `da048ad3…`) — `/health/version`,
-      `/build.json`, `/updates/stable/latest.json` et `/updates/stable/web.json`
-      exposent la même version et le même SHA, `.active-version` et
-      `releases/stable/current` pointent sur `0.1.33`, les conteneurs tournent
-      en `synapse-{server,web}:0.1.33`. Corrigés pour y parvenir : layout
-      comparé sous un nom de projet unique, `backup.sh` appelé avec `ENV_FILE`,
-      nginx custom servant les manifests via `current`, résolution locale de
-      l'URL publique. Tailscale mis à jour (1.98.8 → 1.102.3) en `serve`
-      tailnet-only, sans Funnel.
-- [x] Updater authentifié : PAT fine-grained (`Contents: Read-only`) déposé dans
-      `/srv/synapse/.update-token` (root, `0600`) ; `synapse-update.service`
-      sort en `Result=success` / `ExecMainStatus=0` au lieu du 404 initial. Le
-      timer récupère donc les prochaines releases `main` toutes les 15 min.
-- [x] `/health/version`, `web.json` et `latest.json` exposent la même version et
-      le même SHA : le déployeur relit les deux manifests stables après
-      activation et exige l'identité attendue, sinon il déclenche le rollback.
-      Observé par 31 tests `deploy-release` et par `release_drill.sh`.
-- [x] `just e2e-recovery` — le scénario `update-ready.spec.ts` ouvre une page
-      construite, sert un `web.json` plus récent, déclenche `focus` et observe
-      la notification « Une mise à jour est disponible » dans Chromium réel. Les clients desktop
-      partagent le coordinateur, la bannière et le déclencheur (tests
-      unitaires) ; leur exécution native reste dans le job CI.
-- [x] `bash tests/integration/release_drill.sh` — projet Compose jetable,
-      images étiquetées et TLS local : sauvegarde sur changement de migration,
-      manifestes en dernier et rollback d'images et de pointeur observés
-      (exécution locale Linux, ~1 min). Inclus dans `just verify` via
-      `test-release-drill`.
+- `verify-code`: configured Rust/frontend checks, harness/security/operations
+  checks, typechecks, lint and dependency audits.
+- `verify-e2e`: built-web real-API/PostgreSQL recovery journeys.
+- `verify-recovery` and `verify-selfhosted`: isolated backup/restore, deployment
+  drill and self-hosting checks.
+- `desktop-native (ubuntu-latest)` and `desktop-native (windows-latest)`:
+  native Tauri recovery, not merely two browser contexts.
+- `desktop-bundle` on both OS targets, `images` and `publish`.
 
-Les coches ci-dessous concernent la revue de fiabilité du 2026-09-08 sur
-Linux/WSL2 (i5-14600KF). Les anciennes observations du 2026-08-11 ne valident
-pas les modifications de cette revue. Les résultats Windows doivent provenir
-du job Windows ; une exécution sous WSL2 constitue une observation Linux.
+[Release v0.1.157](https://github.com/BorisDemay/Synapse/releases/tag/v0.1.157)
+was published for that SHA. A green run is evidence for its revision only. Do
+not copy these results onto a later revision without checking its run.
+Historical local/CI observations, counts and platform qualifications are retained
+in [validation history](validation-history.md).
 
-## Qualité locale
+No end-user fresh-install/update or live-provider test is inferred from the
+above jobs. No new product validation commands were run for this documentation
+reset; the baseline was checked through GitHub's run/job/release metadata.
 
-- [x] `just verify` - suite intégrée sur l'état final de la revue, sortie réelle
-      `just verify: all gates passed`, code de sortie 0.
-- [x] Format Rust et clippy workspace ; 174 tests Rust de référence avec PostgreSQL réelle.
-- [x] 27 tests Rust natifs, dont 13 tests de réplique dossier et 7 tests de
-      session/transport ; format et clippy natifs passent également.
-- [x] 11 tests Python des opérations de sauvegarde/restauration.
-- [x] 392 tests JavaScript, 7 tests du harness et 9 tests de publication ;
-      typechecks, formatage, clippy et audits passent, y compris l'audit npm du
-      graphe complet.
-- [x] Régression de sécurité locale bornée : 31 contrôles HTTP, navigateur et
-      WebSocket, zéro finding.
-- [x] Benchmark du client canonique avec 10 000 notes chiffrées et réplique native
-      (voir `docs/architecture/performance-budgets.md`). Les anciens benchmarks
-      SQLite/FTS5 ne mesurent pas le parcours Vue/IndexedDB actuel.
+## Outstanding acceptance evidence
 
-## Self-hosting
+Record the tested version/SHA, OS/environment, command or scenario, actual result
+and relevant limitations before checking an item. Use synthetic vault content;
+never include credentials, keys, note content or production URLs in reports.
 
-- [x] `bash tests/integration/self_hosted.sh` - projet jetable sur 18090,
-      compte et session persistants après redémarrage, nettoyage observé.
-- [x] `bash tests/integration/backup_restore.sh`
-- [x] `docker compose --env-file .env.example -f docker-compose.yml config --quiet`
+### R01 — clean-machine installation and updates
 
-Le scénario de restauration a réellement détruit les volumes de son projet
-jetable, restauré PostgreSQL et les blobs, puis comparé le ciphertext et le
-nonce. Les archives incomplètes, altérées ou invalides ont été refusées avant
-la restauration destructive. Aucun projet de développement existant n'est
-utilisé pour ce scénario.
+- [ ] Install the published Windows package on a clean Windows machine; confirm
+      installer/signature trust and open/create/unlock a vault. Do not count a
+      self-signed test certificate as a publicly trusted signature.
+- [ ] Install the published Linux package on a clean supported Linux machine;
+      confirm packaged editor assets and local/offline operation.
+- [ ] On each OS, exercise a real signed update, restart and version/SHA parity,
+      preserving local data and pending encrypted work.
+- [ ] Exercise supported server/web rollback and desktop downgrade rejection;
+      confirm compatible data and truthful update/error feedback.
 
-## Parcours vertical
+See [release](../operations/release.md), [upgrades](../operations/upgrades.md)
+and [rollback](../operations/rollback.md). The first updater-compatible desktop
+binary still requires manual installation.
 
-- [x] `just e2e-recovery` — neuf scénarios de l’application construite, inscription/activation,
-      sauvegarde automatique, ouverture hors ligne, reprise, conflits, historique et
-      détection d’une mise à jour web dans un onglet déjà ouvert.
-- [x] `dbus-run-session -- xvfb-run -a corepack pnpm --filter @synapse/desktop test:e2e:native` -
-      véritable fenêtre Tauri Linux, profil et dossier temporaires, édition et reprise
-      après redémarrage du processus ; deux exécutions Linux réussies, dont celle
-      du reviewer indépendant. Reconnexion et résolution de conflit suivies jusqu'à
-      acquittement, puis vérification des octets répliqués.
-- [x] Jobs CI natifs Windows/Linux et gate avant build de publication revus.
-- [x] Job CI natif Windows - mêmes garanties dans le WebView Windows.
-      Observation Windows, distincte des validations Linux/WSL2 : workflow `verify`
-      34654442136 (`ci/windows-native`, SHA `8cd941c565ce584fe4eeddaed6a5ec2686fe6d72`)
-      réussi ; job `desktop-native (windows-latest)` 103443659815 réussi, dont
-      `Native Tauri recovery`.
-- [x] `tests/e2e/full-sync.spec.ts` tourne sans variable d’environnement dans
-      `just e2e-recovery` ; la sauvegarde/restauration réelle est couverte par
-      `tests/integration/backup_restore.sh`.
+### R02 — target-deployment restoration
 
-## Limites connues à relire dans le README
+- [ ] Restore a representative encrypted PostgreSQL/blob backup into a disposable
+      environment; verify integrity, version/migration compatibility and health.
+- [ ] Reopen a restored vault with user-held unlock material and verify encrypted
+      sync/recovery behavior. A server backup cannot replace a lost passphrase.
+- [ ] Record and verify the operator recovery procedure. Any action involving a
+      live deployment or production secrets requires explicit approval.
 
-- [x] Deux contextes Playwright vérifient deux clients navigateur ; ils ne
-      constituent pas une preuve de fonctionnement du pont Rust ou du WebView natif.
-- [x] Le serveur ne voit aucun clair de coffre ; la phrase de déchiffrement ne quitte pas le client.
-- [x] Aucun SaaS obligatoire ; SBOM via `just sbom` (artefacts sous `target/sbom/` seulement).
-- [x] Les coffres desktop sans serveur ont un profil distinct. Leur réplique
-      Markdown reste en clair sur disque après verrouillage ; les modifications
-      externes ne sont pas importées automatiquement.
+Existing backup/restore automation already exists and is exercised in CI. This
+item is target-environment readiness, not a claim that restoration is missing.
+See [backup/restore](../operations/backup-restore.md).
 
-Les commits et validations de cette revue sont consignés dans la
-[checklist de préversion](release-checklist.md).
+### R03 — remaining documentation reconciliation
+
+- [ ] Review security/operator descriptions against shipped behavior, especially
+      multi-provider AI, CSP and native/client boundaries. Resolve discrepancies
+      through reviewed ADR changes where needed, not undocumented exceptions.
+- [ ] Ensure install/update/backup instructions are reproducible and label
+      historical counts/results by revision and platform.
+
+The README, active roadmap and readiness/history split were refreshed during
+this reset. This remaining item is the deeper cross-document review.
+
+### R04 — optional live AI-provider validation
+
+- [ ] With explicit external-call consent and user-supplied credentials, exercise
+      supported providers/authentication modes using synthetic notes only.
+- [ ] Verify streaming, tool mutations, refusals/malformed responses, cancellation
+      and failures, including no success claim when no note was written.
+- [ ] Record which providers were actually tested; keep live calls and credentials
+      out of ordinary CI. Mocked tests do not prove provider availability.
+
+## Limits that must remain explicit
+
+- The server stores opaque ciphertext and never sees vault content or keys in
+  plaintext. A forgotten passphrase is not currently recoverable without an
+  already usable decryption method.
+- Desktop Markdown replicas remain plaintext on disk after locking. Automatic
+  import of unknown/externally modified files is not implemented (R05).
+- Cross-account E2EE sharing is not implemented (R06). Instance administration
+  and user invitations are not the same feature as shared vault access.
+- Notes/attachments are capped at 10 MiB per encrypted item; larger attachments
+  require a separately approved streamed protocol (R07).
+- Local deletion recovery and sparse encrypted snapshots are not independent
+  backups. A sudden close during the two-second idle-save window can lose the
+  unsaved in-memory draft.
+- An optional AI provider sees the content explicitly sent to it. Synapse's
+  E2EE claim does not make that content private from the chosen provider.
+
+Real-time collaboration, plugins and a new opt-in recovery design (R08–R10) are
+future explorations, not unresolved failures of the current MVP.

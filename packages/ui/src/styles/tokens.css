@@ -5,19 +5,19 @@
 }
 
 :root {
-  --synapse-color-surface: #eef1f6;
-  --synapse-color-surface-raised: #f8fafc;
-  --synapse-color-surface-muted: #e4e9f1;
-  --synapse-color-surface-accent: #e2e8fb;
-  --synapse-color-text: #172033;
-  --synapse-color-text-muted: #526076;
-  --synapse-color-border: #cfd8e5;
-  --synapse-color-accent: #4f46e5;
-  --synapse-color-accent-strong: #3730a3;
+  --synapse-color-surface: #efeee7;
+  --synapse-color-surface-raised: #fbfaf6;
+  --synapse-color-surface-muted: #e5e3d9;
+  --synapse-color-surface-accent: #d9e9e2;
+  --synapse-color-text: #1a1c19;
+  --synapse-color-text-muted: #5f645b;
+  --synapse-color-border: #d8d5c8;
+  --synapse-color-accent: #1d6b57;
+  --synapse-color-accent-strong: #114a3b;
   --synapse-color-accent-contrast: #ffffff;
   --synapse-color-success: #0f9f6e;
-  --synapse-color-warning: #c47b14;
-  --synapse-color-danger: #d14343;
+  --synapse-color-warning: #9a5b00;
+  --synapse-color-danger: #b3362b;
   --synapse-shadow-sm: 0 1px 2px rgb(15 23 42 / 6%);
   --synapse-shadow-md: 0 18px 50px rgb(15 23 42 / 12%);
   --synapse-space-1: 0.25rem;
@@ -30,7 +30,12 @@
   --synapse-radius-sm: 0.5rem;
   --synapse-radius-md: 0.8rem;
   --synapse-radius-lg: 1.2rem;
-  --synapse-font-sans: "Inter", "Avenir Next", "Segoe UI", sans-serif;
+  --synapse-font-sans:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Cantarell",
+    "Noto Sans", "Liberation Sans", sans-serif;
+  --synapse-font-serif:
+    "Iowan Old Style", "Sitka Text", "Charter", "Cambria", "Noto Serif",
+    "Liberation Serif", Georgia, serif;
   --synapse-font-mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
   --app-shell-sidebar-width-expanded: 17rem;
   --app-shell-sidebar-width-collapsed: 3rem;
@@ -61,16 +66,16 @@
 }
 
 .synapse-dark {
-  --synapse-color-surface: #0f172a;
-  --synapse-color-surface-raised: #172033;
-  --synapse-color-surface-muted: #1e293b;
-  --synapse-color-surface-accent: #25245a;
-  --synapse-color-text: #e5e7eb;
-  --synapse-color-text-muted: #a5b4c7;
-  --synapse-color-border: #334155;
-  --synapse-color-accent: #818cf8;
-  --synapse-color-accent-strong: #a5b4fc;
-  --synapse-color-accent-contrast: #111827;
+  --synapse-color-surface: #111412;
+  --synapse-color-surface-raised: #171b19;
+  --synapse-color-surface-muted: #202522;
+  --synapse-color-surface-accent: #1a322b;
+  --synapse-color-text: #e7e6de;
+  --synapse-color-text-muted: #9ca298;
+  --synapse-color-border: #2b312d;
+  --synapse-color-accent: #6ccfae;
+  --synapse-color-accent-strong: #9be3ca;
+  --synapse-color-accent-contrast: #0c1512;
   --synapse-shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
   --synapse-shadow-md: 0 18px 50px rgb(0 0 0 / 30%);
 }
@@ -686,4 +691,11 @@ div[data-pc-name="message"][data-p-severity="info"] {
   .app-shell-resize-handle {
     display: none;
   }
+}
+
+/* Titres en sérif, comme la vue note Papier : même famille sur tout le site. */
+h1,
+h2 {
+  font-family: var(--synapse-font-serif);
+  font-weight: 600;
 }

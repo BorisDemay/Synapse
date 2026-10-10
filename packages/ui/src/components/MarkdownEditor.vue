@@ -99,8 +99,11 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingSaveValue: string | undefined;
 let activeTableCell: HTMLTableCellElement | undefined;
 
+/** Vditor assets are copied to the application root at build time. Resolve
+ * them from the origin, not from the current route: a relative path would
+ * become /design/vendor/vditor on nested routes and fail to load. */
 function localAssetBase(): string {
-  return new URL("vendor/vditor", document.baseURI)
+  return new URL("/vendor/vditor", window.location.origin)
     .toString()
     .replace(/\/$/, "");
 }

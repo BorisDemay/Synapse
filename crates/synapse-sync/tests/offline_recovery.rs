@@ -98,6 +98,82 @@ fn reconnect_pulls_before_pushing_queued_operations() {
 }
 
 #[test]
+fn reconnect_catches_up_every_page_before_pushing_queued_operations() {
+    struct PagedTransport {
+        events: Rc<RefCell<Vec<&'static str>>>,
+        pages_served: RefCell<usize>,
+    }
+
+    impl SyncTransport for PagedTransport {
+        fn push(&self, operation: EncryptedPushOperation) -> Result<PushAck, TransportError> {
+            self.events.borrow_mut().push("push");
+            Ok(PushAck {
+                operation_id: operation.operation_id,
+                revision: 5,
+            })
+        }
+
+        fn pull(&self, _: PullRequest) -> Result<PullOutcome, TransportError> {
+            self.events.borrow_mut().push("pull");
+            let mut served = self.pages_served.borrow_mut();
+            *served += 1;
+            // Three non-empty pages, then an empty page: the local cursor is current.
+            let (operations, next_cursor) = if *served <= 3 {
+                (
+                    vec![remote_operation()],
+                    Some(
+                        SyncCursor::new(format!("0198e5de-1111-7222-8333-00000000000{served}"))
+                            .expect("valid cursor"),
+                    ),
+                )
+            } else {
+                (Vec::new(), None)
+            };
+            Ok(PullOutcome::Page(PullResponse {
+                protocol_version: PROTOCOL_VERSION,
+                operations,
+                next_cursor,
+            }))
+        }
+    }
+
+    let store = LocalStore::open_in_memory().expect("store opens");
+    store
+        .enqueue_operation(&pending_operation())
+        .expect("operation persists");
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let transport = PagedTransport {
+        events: events.clone(),
+        pages_served: RefCell::new(0),
+    };
+    let mut engine = SyncEngine::new(store, transport, VAULT_ID, RetryPolicy::without_delay(1));
+
+    assert_eq!(
+        engine.synchronize().expect("sync succeeds"),
+        SyncState::Synced
+    );
+    assert_eq!(
+        events.borrow().as_slice(),
+        &["pull", "pull", "pull", "pull", "push"],
+    );
+}
+
+fn remote_operation() -> EncryptedPushOperation {
+    EncryptedPushOperation {
+        protocol_version: PROTOCOL_VERSION,
+        operation_id: OperationId::new().to_string(),
+        vault_id: VAULT_ID.to_owned(),
+        note_id: NoteId::new().to_string(),
+        base_revision: 1,
+        ciphertext: vec![7; 16],
+        nonce: vec![3; 24],
+        aad_version: PROTOCOL_VERSION,
+        ciphertext_hash: "b".repeat(64),
+        encrypted_vault_key_envelope: None,
+    }
+}
+
+#[test]
 fn reconnect_consumes_bounded_exponential_jitter_before_acknowledging_the_outbox() {
     let store = LocalStore::open_in_memory().expect("store opens");
     let operation = pending_operation();

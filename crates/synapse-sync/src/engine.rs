@@ -7,6 +7,10 @@ use synapse_protocol::v1::{
 
 use crate::client::{PullOutcome, SyncTransport, TransportError, WakeSignal};
 
+/// Upper bound on pages fetched in one catch-up, so a misbehaving server cannot
+/// keep the client pulling forever.
+const MAX_PULL_PAGES: usize = 10_000;
+
 pub trait Jitter {
     fn jitter_millis(&self, upper_bound_millis: u64) -> u64;
 }
@@ -209,20 +213,40 @@ where
         Ok(SyncState::Pending)
     }
 
+    /// Pulls every page until the server has nothing more to send. The server
+    /// issues a `next_cursor` only for a non-empty page, so an empty page is the
+    /// signal that the local cursor is current; pushing before that would use a
+    /// stale `base_revision` and surface spurious conflicts.
     fn pull_until_current_cursor(
         &self,
     ) -> Result<(SyncState, Vec<EncryptedPushOperation>), SyncError> {
-        let cursor = self
-            .store
-            .sync_cursor(&self.vault_id)?
-            .map(SyncCursor::new)
-            .transpose()
-            .map_err(|_| SyncError::Protocol)?;
-        match self.pull(cursor) {
-            Err(TransportError::Network) => Ok((SyncState::Pending, Vec::new())),
-            Err(TransportError::Protocol | TransportError::Conflict(_)) => Err(SyncError::Protocol),
-            Ok(outcome) => self.handle_pull_outcome(outcome),
+        let mut collected = Vec::new();
+        for _ in 0..MAX_PULL_PAGES {
+            let cursor = self
+                .store
+                .sync_cursor(&self.vault_id)?
+                .map(SyncCursor::new)
+                .transpose()
+                .map_err(|_| SyncError::Protocol)?;
+            match self.pull(cursor) {
+                Err(TransportError::Network) => return Ok((SyncState::Pending, collected)),
+                Err(TransportError::Protocol | TransportError::Conflict(_)) => {
+                    return Err(SyncError::Protocol);
+                }
+                Ok(outcome) => {
+                    let (state, operations) = self.handle_pull_outcome(outcome)?;
+                    if state != SyncState::Synced {
+                        collected.extend(operations);
+                        return Ok((state, collected));
+                    }
+                    if operations.is_empty() {
+                        return Ok((SyncState::Synced, collected));
+                    }
+                    collected.extend(operations);
+                }
+            }
         }
+        Err(SyncError::Protocol)
     }
 
     fn handle_pull_outcome(

@@ -23,6 +23,12 @@ export type VaultItem =
 export type DecodedVaultItem = { kind: "legacy"; markdown: string } | VaultItem;
 
 export function encodeVaultItem(item: VaultItem): Uint8Array {
+  // Header values are written line by line: a line break in a path or a
+  // content type would forge extra header fields on decode.
+  assertSingleLineHeaderValue(item.path);
+  if (item.kind === "attachment") {
+    assertSingleLineHeaderValue(item.contentType);
+  }
   const headerLines = [
     `${ITEM_MAGIC}`,
     `kind: ${item.kind}`,
@@ -43,6 +49,12 @@ export function encodeVaultItem(item: VaultItem): Uint8Array {
     throw new Error("Vault item is too large");
   }
   return encoded;
+}
+
+function assertSingleLineHeaderValue(value: string): void {
+  if (/[\r\n]/u.test(value)) {
+    throw new Error("Vault item header values must be single-line");
+  }
 }
 
 export function encodeNotePlaintext(

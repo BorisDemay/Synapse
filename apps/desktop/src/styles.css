@@ -218,7 +218,7 @@ a {
   padding: clamp(2rem, 7vw, 6rem);
   color: #fff;
   background:
-    linear-gradient(145deg, rgb(49 46 129 / 96%), rgb(79 70 229 / 92%)), #4338ca;
+    linear-gradient(145deg, rgb(17 74 59 / 96%), rgb(29 107 87 / 92%)), #1d6b57;
 }
 
 .auth-aside h1 {

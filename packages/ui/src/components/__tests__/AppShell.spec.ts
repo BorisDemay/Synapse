@@ -456,6 +456,6 @@ describe("AppShell navigation drawer (compact)", () => {
 
   it("assombrit la couleur de texte secondaire claire pour des icônes lisibles", () => {
     const rootBlock = tokensCss.split(".synapse-dark")[0] ?? "";
-    expect(rootBlock).toContain("--synapse-color-text-muted: #526076");
+    expect(rootBlock).toContain("--synapse-color-text-muted: #5f645b");
   });
 });

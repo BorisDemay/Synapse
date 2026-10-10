@@ -586,6 +586,16 @@ describe("SettingsPanel", () => {
       .trigger("click");
     expect(wrapper.emitted("exportNotes")).toHaveLength(1);
 
+    await wrapper
+      .get('[aria-label="Importer un dossier Markdown"]')
+      .trigger("click");
+    expect(wrapper.emitted("importFolder")).toHaveLength(1);
+
+    await wrapper
+      .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
+      .trigger("click");
+    expect(wrapper.emitted("importZip")).toHaveLength(1);
+
     await selectCategory(wrapper, "Appareil");
     await wrapper
       .get('[aria-label="Révoquer la session session-other"]')

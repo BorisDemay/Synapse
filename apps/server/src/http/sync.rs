@@ -102,7 +102,7 @@ pub async fn push(
     };
     let result = timeout(
         SYNC_REQUEST_TIMEOUT,
-        apply::apply(&pool, blob_store.as_ref(), user_id, vault_id, operation),
+        apply::apply(&pool, blob_store, user_id, vault_id, operation),
     )
     .await;
     match result {

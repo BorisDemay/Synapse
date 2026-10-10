@@ -9,7 +9,9 @@
 
 **Status: pre-release.** The MVP works: a Tauri desktop client, an encrypted
 web interface, a self-hosted Rust server, operation-based synchronization and
-signed updates. The server never sees a vault in plaintext.
+signed updates. The server never sees a vault in plaintext. Remaining work is
+tracked in the [current roadmap and todo](docs/plans/roadmap.md); release
+readiness is separate from future feature development.
 
 - **Get started locally**: [Local development](#local-development)
 - **Self-host**: [Docker Compose](#self-hosting-with-docker-compose) · [operator guide](docs/operations/install.md)
@@ -191,7 +193,14 @@ accesses vault content in plaintext.
 ## Verified MVP state
 
 The [pre-release checklist](docs/testing/release-checklist.md) distinguishes
-observed results, CI checks and validations that still have to run.
+observed results, CI checks and validations that still have to run. As of
+2026-10-03, commit `b7ba473` passed all jobs in
+[CI run 37159224532](https://github.com/BorisDemay/Synapse/actions/runs/37159224532),
+including native Windows/Linux recovery, bundles and publication of
+[v0.1.157](https://github.com/BorisDemay/Synapse/releases/tag/v0.1.157).
+This evidence is revision-specific; clean-machine installation/update QA and
+live AI-provider checks remain separate tasks. Earlier results are retained in
+[validation history](docs/testing/validation-history.md).
 
 ### Local development
 
@@ -354,30 +363,36 @@ limits and earlier Rust/k6 benchmarks:
 
 ## Roadmap
 
-### Phase 1 — local foundations
+The [current roadmap and todo](docs/plans/roadmap.md) is the single active
+product plan. The earlier implementation plans have been retired; their
+architecture decisions and dated validation evidence are retained, not treated
+as unfinished features.
 
-- Vault model, Markdown read/write and file watching.
-- Editor, preview, tree, backlinks and local search.
-- Minimal history and non-regression tests.
+### Release readiness
 
-### Phase 2 — synchronization service
+- **R01** — Clean installation and real signed-update QA on Windows/Linux.
+- **R02** — Backup restoration in an isolated environment representative of the
+  target deployment, followed by client reopening.
+- **R03** — Reconcile remaining security/operator documentation with shipped
+  behavior and the ADRs, without silently widening trust boundaries.
+- **R04** — Consent-based live smoke tests for optional AI providers; ordinary CI
+  remains deterministic and uses no real provider credentials.
 
-- Accounts, vaults, authorization and a versioned API.
-- Incremental replication, operation queue and conflict handling.
-- Docker deployment, backups and baseline observability.
+### Next product features
 
-### Phase 3 — web and robustness
+- **R05** — Import and reconcile external Markdown edits on desktop. This is the
+  recommended next feature; the encrypted client remains canonical.
+- **R06** — Cross-account E2EE vault sharing, after an approved design for roles,
+  key distribution, rotation and revocation.
+- **R07** — Larger encrypted attachments through bounded streaming/resume,
+  rather than raising the current 10 MiB JSON item limit.
 
-- Web client with synchronization and local cache.
-- Sharing, roles, audit and usage limits.
-- Load testing, security hardening and operations documentation.
+### Later explorations — not MVP blockers
 
-### Phase 4 — advanced collaboration
-
-- Real-time editing of a note, presence and optional comments.
-- Evolution of encrypted sharing and key management; E2EE of synchronized
-  content is already mandatory.
-- Extensions/public API, import/export and an isolated plugin ecosystem.
+- **R08** — E2EE-compatible real-time collaboration and evaluated CRDTs.
+- **R09** — Restricted plugins/extensions, with explicit permissions and isolation.
+- **R10** — An explicit user-controlled lost-passphrase recovery design. No
+  implicit server escrow or promise of recovery without any recovery material.
 
 ## Initial non-goals
 

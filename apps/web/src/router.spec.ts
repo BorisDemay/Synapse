@@ -122,4 +122,17 @@ describe("application routes", () => {
 
     expect(router.currentRoute.value.fullPath).toBe("/vault?note=note-1");
   });
+
+  it("no longer serves the retired design and /vault-next routes", async () => {
+    const unlocked = createAppRouter(
+      { isAuthenticated: true },
+      { hasEncryptedVault: true, isUnlocked: true },
+      { memory: true },
+    );
+    for (const path of ["/vault-next", "/design", "/design/1", "/design/2"]) {
+      await unlocked.push(path);
+      await unlocked.isReady();
+      expect(unlocked.currentRoute.value.path).toBe("/vault");
+    }
+  });
 });

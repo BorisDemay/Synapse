@@ -71,6 +71,8 @@ const emit = defineEmits<{
   close: [];
   deleteAccount: [password: string];
   exportNotes: [];
+  importFolder: [];
+  importZip: [];
   forgetDevice: [];
   lockVault: [];
   rememberDevice: [];
@@ -633,6 +635,30 @@ function selectInvitationLink(event: Event) {
                 Exporter les notes en Markdown
               </button>
             </template>
+            <p>
+              Importe une archive ZIP de notes Markdown dans le coffre. Chaque
+              fichier est chiffré avant d’entrer dans le coffre.
+            </p>
+            <button
+              class="settings-action"
+              type="button"
+              aria-label="Importer un ZIP Markdown (.zip)"
+              @click="emit('importZip')"
+            >
+              Importer un ZIP Markdown (.zip)
+            </button>
+            <p>
+              Importe un dossier Markdown local dans le coffre. Chaque fichier
+              est chiffré avant d’entrer dans le coffre.
+            </p>
+            <button
+              class="settings-action"
+              type="button"
+              aria-label="Importer un dossier Markdown"
+              @click="emit('importFolder')"
+            >
+              Importer un dossier Markdown
+            </button>
             <form
               class="settings-form"
               data-form="vault-preferences"

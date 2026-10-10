@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt, sync::Mutex};
+use std::fmt;
 
 use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305,
@@ -91,7 +91,6 @@ impl fmt::Debug for EncryptedContent {
 pub enum CryptoError {
     EncryptionFailed,
     DecryptionFailed,
-    NonceAlreadyUsed,
 }
 
 impl fmt::Display for CryptoError {
@@ -99,9 +98,6 @@ impl fmt::Display for CryptoError {
         match self {
             Self::EncryptionFailed => formatter.write_str("content encryption failed"),
             Self::DecryptionFailed => formatter.write_str("content decryption failed"),
-            Self::NonceAlreadyUsed => {
-                formatter.write_str("content encryption nonce was already used")
-            }
         }
     }
 }
@@ -110,15 +106,11 @@ impl std::error::Error for CryptoError {}
 
 pub struct VaultCipher {
     key: VaultKey,
-    used_nonces: Mutex<HashSet<[u8; 24]>>,
 }
 
 impl VaultCipher {
     pub fn new(key: VaultKey) -> Self {
-        Self {
-            key,
-            used_nonces: Mutex::new(HashSet::new()),
-        }
+        Self { key }
     }
 
     pub fn encrypt(&self, aad: &Aad, plaintext: &[u8]) -> Result<EncryptedContent, CryptoError> {
@@ -137,15 +129,6 @@ impl VaultCipher {
         plaintext: &[u8],
         nonce: [u8; 24],
     ) -> Result<EncryptedContent, CryptoError> {
-        let mut used_nonces = self
-            .used_nonces
-            .lock()
-            .map_err(|_| CryptoError::EncryptionFailed)?;
-        if !used_nonces.insert(nonce) {
-            return Err(CryptoError::NonceAlreadyUsed);
-        }
-        drop(used_nonces);
-
         let cipher = XChaCha20Poly1305::new_from_slice(&self.key.0[..])
             .map_err(|_| CryptoError::EncryptionFailed)?;
         let ciphertext = cipher
@@ -184,27 +167,26 @@ impl VaultCipher {
 mod tests {
     use synapse_core::{NoteId, Revision, VaultId};
 
-    use super::{Aad, CryptoError, VaultCipher, VaultKey};
+    use super::{Aad, VaultCipher, VaultKey};
 
     #[test]
-    fn rejects_reusing_a_nonce_for_encryption() {
+    fn every_encryption_draws_a_fresh_nonce() {
         let cipher = VaultCipher::new(VaultKey::generate());
         let aad = Aad::new(
             VaultId::new(),
             NoteId::new(),
             Revision::new(1).expect("a positive revision"),
         );
-        let nonce = [7_u8; 24];
 
-        cipher
-            .encrypt_with_nonce(&aad.bytes(), b"first", nonce)
-            .expect("first use succeeds");
+        let (first_nonce, _) = cipher
+            .encrypt(&aad, b"same")
+            .expect("encrypts")
+            .into_transport_parts();
+        let (second_nonce, _) = cipher
+            .encrypt(&aad, b"same")
+            .expect("encrypts")
+            .into_transport_parts();
 
-        assert_eq!(
-            cipher
-                .encrypt_with_nonce(&aad.bytes(), b"second", nonce)
-                .expect_err("nonce reuse is rejected"),
-            CryptoError::NonceAlreadyUsed
-        );
+        assert_ne!(first_nonce, second_nonce);
     }
 }

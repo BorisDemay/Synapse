@@ -374,26 +374,21 @@ describe("VaultView folder import action", () => {
   it("normalizes the French import labels", async () => {
     const { wrapper } = await mountVault();
 
-    for (const label of [
-      "Importer un ZIP Markdown (.zip)",
-      "Importer un dossier Markdown",
-    ]) {
-      const action = wrapper.get(`[aria-label="${label}"]`);
-
-      expect(action.attributes("aria-label")).toBe(label);
-      expect(action.attributes("title")).toBeUndefined();
-    }
+    expect(
+      wrapper.find('[aria-label="Importer un ZIP Markdown (.zip)"]').exists(),
+    ).toBe(false);
+    expect(
+      wrapper.find('[aria-label="Importer un dossier Markdown"]').exists(),
+    ).toBe(false);
   });
 
-  it("opens the directory picker from the folder import action", async () => {
+  it("opens the directory picker when settings request a folder import", async () => {
     const { wrapper } = await mountVault();
     const picker = wrapper.get("input[webkitdirectory]")
       .element as HTMLInputElement;
     const click = vi.spyOn(picker, "click").mockImplementation(() => {});
 
-    await wrapper
-      .get('[aria-label="Importer un dossier Markdown"]')
-      .trigger("click");
+    wrapper.getComponent({ name: "SettingsPanel" }).vm.$emit("importFolder");
 
     expect(click).toHaveBeenCalledOnce();
     click.mockRestore();
@@ -405,9 +400,7 @@ describe("VaultView folder import action", () => {
       .element as HTMLInputElement;
     const click = vi.spyOn(picker, "click").mockImplementation(() => {});
 
-    await wrapper
-      .get('[aria-label="Importer un ZIP Markdown (.zip)"]')
-      .trigger("click");
+    wrapper.getComponent({ name: "SettingsPanel" }).vm.$emit("importZip");
 
     expect(click).toHaveBeenCalledOnce();
     click.mockRestore();
@@ -506,10 +499,10 @@ describe("VaultView sidebar layout", () => {
     );
     expect(
       wrapper.find('[aria-label="Importer un ZIP Markdown (.zip)"]').exists(),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       wrapper.find('[aria-label="Importer un dossier Markdown"]').exists(),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       wrapper.find('[aria-label="Afficher la barre latérale"]').exists(),
     ).toBe(true);

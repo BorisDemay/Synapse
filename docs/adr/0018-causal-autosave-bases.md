@@ -3,7 +3,7 @@
 - Statut : accepté
 - Date : 2026-09-22
 - Complète : ADR 0002 et ADR 0011
-- Plan : `docs/plans/2026-09-22-autosave-conflicts.md`
+- Validation historique : [autosauvegardes causales, 2026-09-22](../testing/validation-history.md#2026-09-22--causal-autosave-bases)
 
 ## Contexte
 
