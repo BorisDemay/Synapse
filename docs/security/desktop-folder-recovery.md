@@ -19,6 +19,16 @@ encrypted state, emit a network operation or alter the manifest. Missing files
 are not deletions until explicitly confirmed, and unknown, unsafe or ambiguous
 files must remain unresolved rather than claimed by inference.
 
+Manifest version 2 can additionally record, per owned note path, an opaque
+`binding_id` supplied by the unlocked client during a canonical installation
+(ADR 0013, R05.3b). It is a random lowercase UUID, never a note ID, and is not
+derived from a path, hash or content. Version 1 manifests remain readable but
+their entries stay unbound; equal paths, hashes or content never bind them. A
+replayed installation with the same binding is a no-op, while a second binding
+for a path, or one binding on two paths, is refused. No command exposes this yet
+and nothing is importable: the client-side `installing`/`ready` baseline flow is
+not implemented.
+
 Before replacing any file, the manifest journals both previous and intended
 hashes for the validated batch. Reopening can therefore recover on either side
 of each interrupted atomic write. Completion narrows the journal; partial

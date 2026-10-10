@@ -602,3 +602,226 @@ async fn discovery_marks_a_scan_to_read_replacement_ambiguous_without_mutation()
     );
     assert_eq!(mirror.written(), written_before);
 }
+
+const BINDING: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const OTHER_BINDING: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+#[tokio::test]
+async fn install_binds_a_canonical_note_and_survives_restart() {
+    let directory = tempdir().expect("tempdir");
+    let path = VaultPath::parse("owned.md").expect("valid owned path");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+
+    mirror
+        .install_note_binding("owned.md", "canonical", BINDING)
+        .await
+        .expect("canonical note installs");
+
+    assert_eq!(
+        tokio::fs::read(directory.path().join("owned.md"))
+            .await
+            .expect("note reads"),
+        b"canonical"
+    );
+    assert_eq!(mirror.binding_id(&path), Some(BINDING));
+    let manifest =
+        tokio::fs::read_to_string(directory.path().join("attachments/.synapse-mirror.json"))
+            .await
+            .expect("manifest reads");
+    assert!(!manifest.contains("canonical"));
+    let reopened = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror reopens");
+    assert_eq!(reopened.binding_id(&path), Some(BINDING));
+}
+
+#[tokio::test]
+async fn legacy_manifest_entries_stay_unbound_despite_matching_content() {
+    let directory = tempdir().expect("tempdir");
+    tokio::fs::create_dir(directory.path().join("attachments"))
+        .await
+        .expect("attachments directory creates");
+    tokio::fs::write(directory.path().join("owned.md"), "canonical")
+        .await
+        .expect("note writes");
+    let legacy = serde_json::json!({ "owner": "test-profile", "hashes": {"owned.md": [synapse_core::ContentHash::from_bytes(b"canonical").to_string()] }});
+    tokio::fs::write(
+        directory.path().join("attachments/.synapse-mirror.json"),
+        serde_json::to_vec(&legacy).expect("manifest serializes"),
+    )
+    .await
+    .expect("legacy manifest writes");
+
+    let mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("legacy manifest stays readable");
+
+    assert_eq!(
+        mirror.binding_id(&VaultPath::parse("owned.md").expect("valid owned path")),
+        None
+    );
+    assert_eq!(mirror.discover_external_markdown().await, vec![]);
+}
+
+#[tokio::test]
+async fn install_replay_is_idempotent_and_never_creates_a_second_binding() {
+    let directory = tempdir().expect("tempdir");
+    let path = VaultPath::parse("owned.md").expect("valid owned path");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .install_note_binding("owned.md", "canonical", BINDING)
+        .await
+        .expect("canonical note installs");
+    let manifest = directory.path().join("attachments/.synapse-mirror.json");
+    let manifest_before = tokio::fs::read(&manifest).await.expect("manifest reads");
+
+    mirror
+        .install_note_binding("owned.md", "canonical", BINDING)
+        .await
+        .expect("replay succeeds");
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+
+    assert!(
+        mirror
+            .install_note_binding("owned.md", "canonical", OTHER_BINDING)
+            .await
+            .is_err()
+    );
+    assert!(
+        mirror
+            .install_note_binding("other.md", "canonical", BINDING)
+            .await
+            .is_err()
+    );
+    assert_eq!(mirror.binding_id(&path), Some(BINDING));
+    assert!(!directory.path().join("other.md").exists());
+    assert_eq!(
+        tokio::fs::read(&manifest).await.expect("manifest reads"),
+        manifest_before
+    );
+}
+
+#[tokio::test]
+async fn install_refuses_an_externally_modified_replica_without_binding_it() {
+    let directory = tempdir().expect("tempdir");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .apply(&[FolderEntry::Note {
+            path: "owned.md".to_owned(),
+            markdown: "canonical".to_owned(),
+        }])
+        .await
+        .expect("mirror writes owned note");
+    let note = directory.path().join("owned.md");
+    tokio::fs::write(&note, "external edit")
+        .await
+        .expect("external edit writes");
+
+    let error = mirror
+        .install_note_binding("owned.md", "newer canonical", BINDING)
+        .await
+        .expect_err("divergent replica is refused");
+
+    assert!(!error.contains("owned.md") && !error.contains("external edit"));
+    assert_eq!(
+        tokio::fs::read(&note).await.expect("note reads"),
+        b"external edit"
+    );
+    assert_eq!(
+        mirror.binding_id(&VaultPath::parse("owned.md").expect("valid owned path")),
+        None
+    );
+    let reopened = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror reopens");
+    assert_eq!(
+        reopened.binding_id(&VaultPath::parse("owned.md").expect("valid owned path")),
+        None
+    );
+}
+
+#[tokio::test]
+async fn install_rejects_malformed_bindings_and_paths_before_writing() {
+    let directory = tempdir().expect("tempdir");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+
+    for binding in [
+        "",
+        "owned.md",
+        "0F8FAD5B-D9CB-469F-A165-70867728950E",
+        "0f8fad5bd9cb469fa16570867728950e",
+    ] {
+        assert!(
+            mirror
+                .install_note_binding("owned.md", "canonical", binding)
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        mirror
+            .install_note_binding("../escape.md", "canonical", BINDING)
+            .await
+            .is_err()
+    );
+    assert!(!directory.path().join("owned.md").exists());
+}
+
+#[tokio::test]
+async fn manifest_with_inconsistent_bindings_is_rejected() {
+    for bindings in [
+        serde_json::json!({ "missing.md": BINDING }),
+        serde_json::json!({ "a.md": BINDING, "b.md": BINDING }),
+        serde_json::json!({ "a.md": "not-a-binding" }),
+    ] {
+        let directory = tempdir().expect("tempdir");
+        tokio::fs::create_dir(directory.path().join("attachments"))
+            .await
+            .expect("attachments directory creates");
+        let hash = synapse_core::ContentHash::from_bytes(b"canonical").to_string();
+        let manifest = serde_json::json!({ "version": 2, "owner": "test-profile", "hashes": {"a.md": [hash.clone()], "b.md": [hash] }, "bindings": bindings });
+        tokio::fs::write(
+            directory.path().join("attachments/.synapse-mirror.json"),
+            serde_json::to_vec(&manifest).expect("manifest serializes"),
+        )
+        .await
+        .expect("manifest writes");
+
+        assert!(LocalFolderMirror::open(directory.path()).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn snapshot_removal_drops_the_binding_of_a_removed_note() {
+    let directory = tempdir().expect("tempdir");
+    let path = VaultPath::parse("owned.md").expect("valid owned path");
+    let mut mirror = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror opens");
+    mirror
+        .install_note_binding("owned.md", "canonical", BINDING)
+        .await
+        .expect("canonical note installs");
+
+    mirror
+        .replace_snapshot(&[])
+        .await
+        .expect("snapshot removes the note");
+
+    assert_eq!(mirror.binding_id(&path), None);
+    let reopened = LocalFolderMirror::open(directory.path())
+        .await
+        .expect("mirror reopens");
+    assert_eq!(reopened.binding_id(&path), None);
+}
