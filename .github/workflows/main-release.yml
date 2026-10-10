@@ -33,8 +33,9 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
@@ -77,8 +78,9 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -111,8 +113,9 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2
         with:
           tool: just
@@ -128,13 +131,32 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2
         with:
           tool: just
           fallback: none
-      - run: just test-recovery-backup test-release-drill
+      - run: just test-recovery-backup
+
+  verify-release-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Reclaim Linux runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
+      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2
+        with:
+          tool: just
+          fallback: none
+      - run: just test-release-drill
 
   desktop-native:
     name: desktop-native (${{ matrix.os }})
@@ -150,8 +172,9 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -219,8 +242,9 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -349,8 +373,9 @@ jobs:
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
+          # Removing the unused SDKs takes one to three minutes. It runs behind
+          # the following steps, which never need that space immediately.
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc >/dev/null 2>&1 &
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -413,6 +438,7 @@ jobs:
       - verify-e2e
       - verify-selfhosted
       - verify-recovery
+      - verify-release-drill
       - desktop-native
       - desktop-bundle
       - images

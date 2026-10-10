@@ -14,6 +14,7 @@ test("main release is serialized, parity gated, and publishes before pull deploy
     "verify-e2e",
     "verify-selfhosted",
     "verify-recovery",
+    "verify-release-drill",
     "desktop-native",
     "desktop-bundle",
     "images",
@@ -73,10 +74,8 @@ test("parallel release work remains gated by all checks without duplicate verifi
   assert.doesNotMatch(workflow, /- run: just verify\b/u);
   assert.match(workflow, /- run: just fmt-check clippy/u);
   assert.match(workflow, /- run: just e2e-recovery/u);
-  assert.match(
-    workflow,
-    /- run: just test-recovery-backup test-release-drill/u,
-  );
+  assert.match(workflow, /- run: just test-recovery-backup\n/u);
+  assert.match(workflow, /- run: just test-release-drill\n/u);
   assert.match(justfile, /verify: [^\n]*test-native-rust[^\n]*test-release/u);
   assert.doesNotMatch(workflow, /- run: cargo test --manifest-path/u);
   assert.match(workflow, /tauri build\b[^\n]*--bundles/u);
@@ -380,4 +379,39 @@ test("the Linux bundle job installs the Tauri build prerequisites", async () => 
     bundle,
     /if: runner\.os == 'Linux'\n\s+run: sudo apt-get update[^\n]*libwebkit2gtk-4\.1-dev/u,
   );
+});
+
+test("the two slow recovery drills run as separate parallel jobs", async () => {
+  for (const path of [
+    ".github/workflows/verify.yml",
+    ".github/workflows/main-release.yml",
+  ]) {
+    const workflow = await readFile(path, "utf8");
+    assert.match(workflow, /\n  verify-recovery:\n/u);
+    assert.match(workflow, /\n  verify-release-drill:\n/u);
+    assert.doesNotMatch(
+      workflow,
+      /- run: just test-recovery-backup test-release-drill/u,
+      `${path} must not chain both drills in one job`,
+    );
+  }
+});
+
+test("reclaiming runner disk space never blocks the following steps", async () => {
+  for (const path of [
+    ".github/workflows/verify.yml",
+    ".github/workflows/main-release.yml",
+  ]) {
+    const workflow = await readFile(path, "utf8");
+    const reclaims = workflow.match(/rm -rf \/usr\/share\/dotnet[^\n]*/gu) ?? [];
+    assert.ok(reclaims.length > 0, `${path} still reclaims disk space`);
+    for (const line of reclaims) {
+      assert.match(line, />\/dev\/null 2>&1 &$/u, `${path}: ${line}`);
+    }
+  }
+});
+
+test("instances poll for a new release every two minutes", async () => {
+  const timer = await readFile("infra/systemd/synapse-update.timer", "utf8");
+  assert.match(timer, /^OnUnitActiveSec=2min$/mu);
 });

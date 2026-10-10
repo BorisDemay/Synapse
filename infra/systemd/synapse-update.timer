@@ -3,7 +3,8 @@ Description=Check for Synapse releases
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=15min
+# A check that finds nothing new is one authenticated API call (about a second).
+OnUnitActiveSec=2min
 Persistent=true
 
 [Install]
