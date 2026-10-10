@@ -56,6 +56,7 @@ async function submitLogin(wrapper: VueWrapper): Promise<void> {
 
 describe("LoginView", () => {
   beforeEach(() => {
+    localStorage.clear();
     invoke.mockReset();
     nativeFetch.mockReset();
     vi.spyOn(globalThis, "fetch").mockImplementation(nativeFetch);
@@ -133,6 +134,54 @@ describe("LoginView", () => {
     expect(option).toContain("jamais");
     expect(option).toContain("export");
     expect(option).not.toContain("automatiquement synchronisé");
+  });
+
+  it("keeps a single primary action so the local vault does not compete with login", async () => {
+    const { wrapper } = await mountLogin();
+
+    const localButton = wrapper.get(".local-vault-option button");
+    expect(localButton.attributes("data-p")).toContain("outlined");
+    expect(
+      wrapper.get('button[type="submit"]').attributes("data-p") ?? "",
+    ).not.toContain("outlined");
+  });
+
+  it("shows the instance field on first use, when no instance is remembered", async () => {
+    const { wrapper } = await mountLogin();
+
+    expect(wrapper.find("#login-instance").exists()).toBe(true);
+  });
+
+  it("collapses a remembered instance into a summary that can be edited", async () => {
+    localStorage.setItem(
+      "synapse-instance-url",
+      "https://synapse.example.test",
+    );
+    const { wrapper } = await mountLogin();
+
+    expect(wrapper.find("#login-instance").exists()).toBe(false);
+    const summary = wrapper.get(".instance-summary");
+    expect(summary.text()).toContain("synapse.example.test");
+
+    await summary.get("button").trigger("click");
+
+    expect(
+      (wrapper.get("#login-instance").element as HTMLInputElement).value,
+    ).toBe("https://synapse.example.test");
+  });
+
+  it("reopens the instance field when the remembered instance is unreachable", async () => {
+    localStorage.setItem(
+      "synapse-instance-url",
+      "https://synapse.example.test",
+    );
+    const { wrapper } = await mountLogin();
+    const auth = useAuthStore();
+    vi.spyOn(auth, "login").mockRejectedValue(new TypeError("network down"));
+
+    await submitLogin(wrapper);
+
+    expect(wrapper.find("#login-instance").exists()).toBe(true);
   });
 
   it("explains that an unactivated account must be confirmed by email", async () => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
-import { onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 
 import Button from "primevue/button";
@@ -16,10 +16,18 @@ import { useVaultStore } from "../../../web/src/stores/vault";
 const auth = useAuthStore();
 const vault = useVaultStore();
 const router = useRouter();
+const rememberedInstanceUrl = localStorage.getItem("synapse-instance-url");
 const instanceUrl = ref(
-  localStorage.getItem("synapse-instance-url") ??
+  rememberedInstanceUrl ??
     import.meta.env.VITE_SYNAPSE_INSTANCE_URL ??
     "http://127.0.0.1:3000",
+);
+const editingInstance = ref(rememberedInstanceUrl === null);
+const instanceLabel = computed(() =>
+  instanceUrl.value
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, ""),
 );
 const email = ref("");
 const password = ref("");
@@ -37,6 +45,12 @@ async function configureInstance() {
   const url = instanceUrl.value.trim();
   await invoke("set_instance_url", { url });
   localStorage.setItem("synapse-instance-url", url);
+}
+
+async function editInstance() {
+  editingInstance.value = true;
+  await nextTick();
+  document.getElementById("login-instance")?.focus();
 }
 
 async function openLocal() {
@@ -80,6 +94,7 @@ async function submit() {
         error.value = "Connexion impossible.";
       }
     } else {
+      editingInstance.value = true;
       error.value =
         "Serveur injoignable. Vérifiez votre connexion ou l’URL de l’instance, puis réessayez.";
     }
@@ -117,32 +132,43 @@ async function submit() {
         </div>
         <h2>Bon retour.</h2>
         <p class="subtitle">
-          Retrouvez un coffre déjà créé sur votre instance. La phrase de
+          Connectez-vous à votre instance ou continuez sans compte. La phrase de
           déchiffrement reste locale.
         </p>
         <div class="local-vault-option">
-          <p class="form-hint">
-            Pas de compte, ou notes à garder sur cet appareil ?
-          </p>
+          <div class="local-vault-copy">
+            <strong>Sans compte</strong>
+            <p class="form-hint">
+              Notes chiffrées sur cet appareil, jamais envoyées à un compte. Y
+              passer plus tard demande un export/import.
+            </p>
+          </div>
           <Button
+            class="local-vault-button"
             :disabled="busy"
-            label="Utiliser un coffre local sans compte"
+            label="Ouvrir un coffre local"
+            outlined
             severity="secondary"
+            size="small"
             @click="openLocal"
           />
-          <p class="form-hint">
-            Le coffre local reste chiffré sur cet appareil. Ses notes ne sont
-            jamais envoyées automatiquement à un compte : passer plus tard à un
-            compte exige un export/import explicite.
-          </p>
         </div>
         <div
           class="account-form-divider"
           role="separator"
           aria-label="ou se connecter à un compte"
-        ></div>
+        >
+          <span aria-hidden="true">ou avec un compte</span>
+        </div>
         <form class="form-stack" @submit.prevent="submit">
-          <div class="form-field">
+          <div v-if="!editingInstance" class="instance-summary">
+            <span class="instance-summary-label">Instance</span>
+            <span class="instance-summary-url" :title="instanceUrl">{{
+              instanceLabel
+            }}</span>
+            <button type="button" @click="editInstance">Modifier</button>
+          </div>
+          <div v-else class="form-field">
             <label for="login-instance">URL de l’instance</label>
             <InputText
               id="login-instance"
@@ -177,22 +203,25 @@ async function submit() {
               toggle-mask
             />
           </div>
-          <label class="trusted-device-option" for="login-remember-device">
-            <input
-              id="login-remember-device"
-              v-model="rememberDevice"
-              type="checkbox"
-              aria-describedby="login-remember-hint"
-            />
-            <span>Se souvenir de cet appareil</span>
-          </label>
-          <p id="login-remember-hint" class="form-hint">
-            Garde la session de compte ouverte sur cet appareil (30 jours) : le
-            mot de passe de compte sera demandé moins souvent. Ce n’est pas
-            l’appareil de confiance : la phrase du coffre reste exigée, sauf si
-            vous avez activé l’appareil de confiance après un déverrouillage.
-            N’activez pas cette option sur un appareil partagé.
-          </p>
+          <div class="remember-option">
+            <label class="trusted-device-option" for="login-remember-device">
+              <input
+                id="login-remember-device"
+                v-model="rememberDevice"
+                type="checkbox"
+                aria-describedby="login-remember-hint"
+              />
+              <span>Se souvenir de cet appareil</span>
+            </label>
+            <p id="login-remember-hint" class="form-hint">
+              Garde la session ouverte 30 jours. La phrase du coffre reste
+              exigée, sauf si l’appareil de confiance est activé. À éviter sur
+              un appareil partagé.
+            </p>
+          </div>
+          <div v-if="error" role="alert">
+            <Message severity="error" :closable="false">{{ error }}</Message>
+          </div>
           <Button
             :disabled="busy"
             :loading="busy"
@@ -200,9 +229,6 @@ async function submit() {
             type="submit"
           />
         </form>
-        <p v-if="error" role="alert">
-          <Message severity="error" :closable="false">{{ error }}</Message>
-        </p>
         <p v-if="publicSignup" class="form-footer">
           Pas encore de compte ?
           <RouterLink to="/register">Créer un compte</RouterLink>
@@ -213,16 +239,110 @@ async function submit() {
 </template>
 
 <style scoped>
+.auth-card .subtitle {
+  margin-bottom: 1.25rem;
+}
+
 .local-vault-option {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-md);
+  background: var(--synapse-color-surface-muted);
+}
+
+.local-vault-copy {
+  display: contents;
+  font-size: 0.9rem;
+}
+
+.local-vault-copy .form-hint {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+
+.local-vault-option .form-hint,
+.remember-option .form-hint {
+  margin: 0;
+}
+
+/* PrimeVue runs unstyled and marks this variant only through data-p, which the
+   shared button styles do not target: the secondary look is defined here. */
+.local-vault-button {
+  min-height: 2.25rem;
+  padding: 0.4rem 0.8rem;
+  border-color: var(--synapse-color-border);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface-raised);
+  box-shadow: none;
+  font-size: 0.85rem;
+}
+
+.local-vault-option .local-vault-button:hover:not(:disabled) {
+  border-color: var(--synapse-color-accent);
+  color: var(--synapse-color-accent-strong);
+  background: var(--synapse-color-surface-accent);
 }
 
 .account-form-divider {
-  border-top: 1px solid var(--synapse-border, currentColor);
-  margin-bottom: 1rem;
-  opacity: 0.25;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  color: var(--synapse-color-text-muted);
+  font-size: 0.8rem;
+}
+
+.account-form-divider::before,
+.account-form-divider::after {
+  flex: 1;
+  border-top: 1px solid var(--synapse-color-border);
+  content: "";
+}
+
+.instance-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.instance-summary-label {
+  color: var(--synapse-color-text-muted);
+}
+
+.instance-summary-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.instance-summary button {
+  padding: 0;
+  border: 0;
+  color: var(--synapse-color-accent);
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.instance-summary button:hover {
+  text-decoration: underline;
+}
+
+.remember-option {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.remember-option .form-hint {
+  padding-left: 1.6rem;
 }
 </style>
