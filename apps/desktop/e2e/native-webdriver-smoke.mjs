@@ -396,6 +396,13 @@ try {
       By.xpath(`//button[normalize-space(.)=${JSON.stringify(text)}]`),
     );
   const field = (id) => driver.findElement(By.id(id));
+  // A remembered instance is collapsed into a summary on the login screen.
+  async function loginInstanceField() {
+    if ((await driver.findElements(By.id("login-instance"))).length === 0) {
+      await (await button("Modifier")).click();
+    }
+    return field("login-instance");
+  }
   async function waitVault() {
     await driver.wait(
       until.elementLocated(
@@ -528,7 +535,7 @@ try {
   }
   await launch();
   await driver.wait(until.elementLocated(By.id("login-email")), timeout);
-  await (await button("Utiliser un coffre local sans compte")).click();
+  await (await button("Ouvrir un coffre local")).click();
   const localFolder = path.join(temporary, "local-folder");
   await createVault(localFolder, true);
   console.log("Native local vault created in chosen temporary folder");
@@ -619,8 +626,8 @@ try {
   assert.equal((await api("/auth/activate", { token })).status, 204);
   await driver.findElement(By.css('[aria-label="Se déconnecter"]')).click();
   await driver.wait(until.elementLocated(By.id("login-email")), timeout);
-  await (await field("login-instance")).clear();
-  await (await field("login-instance")).sendKeys(backend.baseUrl);
+  await (await loginInstanceField()).clear();
+  await (await loginInstanceField()).sendKeys(backend.baseUrl);
   await (await field("login-email")).sendKeys(email);
   await (await field("login-password")).sendKeys(password);
   await (await field("login-remember-device")).click();

@@ -163,9 +163,7 @@ async function submit() {
         <form class="form-stack" @submit.prevent="submit">
           <div v-if="!editingInstance" class="instance-summary">
             <span class="instance-summary-label">Instance</span>
-            <span class="instance-summary-url" :title="instanceUrl">{{
-              instanceLabel
-            }}</span>
+            <span class="instance-summary-url">{{ instanceLabel }}</span>
             <button type="button" @click="editInstance">Modifier</button>
           </div>
           <div v-else class="form-field">
