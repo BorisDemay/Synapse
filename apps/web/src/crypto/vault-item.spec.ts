@@ -58,4 +58,18 @@ describe("vault item envelope", () => {
       "0198e5de.md",
     );
   });
+
+  it("refuses header values that could inject extra header fields", () => {
+    expect(() =>
+      encodeNotePlaintext("notes/a.md\ncontent-type: text/html", "# Secret"),
+    ).toThrow();
+    expect(() =>
+      encodeVaultItem({
+        bytes: new Uint8Array([1]),
+        contentType: "image/png\nkind: note",
+        kind: "attachment",
+        path: "attachments/a.png",
+      }),
+    ).toThrow();
+  });
 });

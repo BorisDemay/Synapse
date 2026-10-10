@@ -228,6 +228,49 @@ async fn signup_requires_matching_email_activation_before_login() {
     );
 }
 
+/// A relay that never answers: the signup transaction must not wait for it
+/// indefinitely, and a timeout must leave no account or activation behind.
+struct HangingMailer;
+
+impl synapse_server::auth::mail::Mailer for HangingMailer {
+    fn send(
+        &self,
+        _message: synapse_server::auth::mail::MailMessage,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), synapse_server::auth::mail::MailError>>
+    {
+        Box::pin(std::future::pending())
+    }
+}
+
+#[tokio::test]
+async fn signup_gives_up_on_a_hanging_mail_relay_and_leaves_no_account() {
+    let _guard = auth_test_lock().await;
+    let pool = test_pool().await;
+    reset_auth_tables(&pool).await;
+    let mut settings = test_settings(Some(pool.clone()), Arc::new(HangingMailer));
+    settings.allow_public_signup = true;
+    let app = synapse_server::router_with_settings(settings);
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(30),
+        app.oneshot(request_json(
+            "/auth/signup",
+            r#"{"email":"hang@example.test","password":"a secure password"}"#,
+        )),
+    )
+    .await
+    .expect("signup answers before the test deadline")
+    .expect("response");
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE email = $1")
+        .bind("hang@example.test")
+        .fetch_one(&pool)
+        .await
+        .expect("account count reads");
+    assert_eq!(accounts, 0);
+}
+
 #[tokio::test]
 async fn public_signup_also_requires_activation_before_login() {
     let _guard = auth_test_lock().await;

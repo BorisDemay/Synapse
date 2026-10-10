@@ -4,6 +4,8 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::IntoResponse,
 };
+use std::time::Duration;
+
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,9 @@ use crate::{
         password, session,
     },
 };
+
+/// Upper bound for the activation mail sent inside the signup transaction.
+const ACTIVATION_MAIL_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -243,15 +248,20 @@ pub async fn signup(
     if stored.is_err() {
         return signup_error();
     }
-    if send_activation_mail(
-        state.mailer.as_ref(),
-        &state.public_origin,
-        &email,
-        &activation_token,
+    // The transaction stays open during the send: bound it so a slow relay
+    // cannot hold a pooled connection indefinitely. A timeout rolls back, like
+    // any other mail failure.
+    let sent = tokio::time::timeout(
+        ACTIVATION_MAIL_TIMEOUT,
+        send_activation_mail(
+            state.mailer.as_ref(),
+            &state.public_origin,
+            &email,
+            &activation_token,
+        ),
     )
-    .await
-    .is_err()
-    {
+    .await;
+    if !matches!(sent, Ok(Ok(()))) {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
     if transaction.commit().await.is_err() {

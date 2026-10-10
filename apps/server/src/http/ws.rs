@@ -263,12 +263,15 @@ async fn serve(
             },
             notice = notifications.recv() => match notice {
                 Ok(notice) => {
+                    // The hub broadcasts every vault's notices: discard the
+                    // other vaults before any database work, then re-check the
+                    // session and membership for the notice that concerns us.
+                    if notice.vault_id != vault_id {
+                        continue;
+                    }
                     if !session_and_membership_active(&pool, &token, &clock, user_id, vault_id).await {
                         let _ = socket.send(Message::Close(None)).await;
                         return;
-                    }
-                    if notice.vault_id != vault_id {
-                        continue;
                     }
                     let Ok(cursor) = pull::issue_cursor(&pool, vault_id, user_id, notice.revision).await else {
                         let _ = socket.send(Message::Close(None)).await;

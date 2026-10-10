@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -87,7 +87,7 @@ impl std::error::Error for ApplyError {}
 
 pub async fn apply(
     pool: &PgPool,
-    blob_store: &dyn BlobStore,
+    blob_store: Arc<dyn BlobStore>,
     user_id: Uuid,
     route_vault_id: Uuid,
     operation: PushOperation,
@@ -221,8 +221,15 @@ pub async fn apply(
     // PostgreSQL cannot atomically commit a filesystem write. The blob is made
     // durable before its SQL reference; a failed SQL transaction leaves at most
     // an unreachable content-addressed blob, which reconciliation may remove.
-    blob_store
-        .put_ciphertext(&operation.ciphertext, &operation.nonce, &ciphertext_hash)
+    // The write is synchronous and fsyncs: run it off the async runtime so a
+    // slow disk cannot stall the worker thread while the transaction is open.
+    let store = Arc::clone(&blob_store);
+    let ciphertext = operation.ciphertext.clone();
+    let nonce = operation.nonce.clone();
+    let stored_hash = ciphertext_hash.clone();
+    tokio::task::spawn_blocking(move || store.put_ciphertext(&ciphertext, &nonce, &stored_hash))
+        .await
+        .map_err(|_| ApplyError::Storage)?
         .map_err(|_| ApplyError::Storage)?;
 
     sqlx::query(
