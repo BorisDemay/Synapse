@@ -38,6 +38,7 @@ export { default as UpdateBanner } from "./components/UpdateBanner.vue";
 export {
   createUpdateCoordinator,
   startUpdateChecks,
+  UPDATE_COORDINATOR_KEY,
 } from "./update/coordinator";
 export type {
   UpdateCoordinator,

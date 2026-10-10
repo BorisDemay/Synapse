@@ -1,4 +1,10 @@
-import { readonly, ref, type DeepReadonly, type Ref } from "vue";
+import {
+  readonly,
+  ref,
+  type DeepReadonly,
+  type InjectionKey,
+  type Ref,
+} from "vue";
 
 export type UpdateState =
   | "idle"
@@ -42,6 +48,12 @@ export interface UpdateCoordinator {
   check(): Promise<void>;
   apply(): Promise<void>;
 }
+
+/** Provided by each application shell so shared screens (settings) can reach
+ * the platform's coordinator without knowing whether it is web or desktop. */
+export const UPDATE_COORDINATOR_KEY: InjectionKey<UpdateCoordinator> = Symbol(
+  "synapse-update-coordinator",
+);
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message

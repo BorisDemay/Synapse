@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import { DialogFocusController } from "../dialog-focus";
 import { pushOverlay, type OverlayHandle } from "../overlay-stack";
@@ -10,6 +10,7 @@ import {
 } from "../panel-resize";
 import { useSidebarLayout } from "../sidebar-layout";
 import { useTheme, type ThemePreference } from "../theme";
+import { UPDATE_COORDINATOR_KEY } from "../update/coordinator";
 
 export interface SettingsSession {
   createdAt: string;
@@ -29,7 +30,8 @@ type SettingsCategoryId =
   | "vault"
   | "device"
   | "account"
-  | "users";
+  | "users"
+  | "updates";
 
 interface SettingsCategory {
   id: SettingsCategoryId;
@@ -203,6 +205,45 @@ const compactChoice = computed({
   set: (value: boolean) => setCompact(value),
 });
 
+const updateCoordinator = inject(UPDATE_COORDINATOR_KEY, undefined);
+/** Un échec ou « à jour » n'est annoncé qu'après une vérification demandée
+ * ici : les vérifications automatiques restent silencieuses. */
+const updateChecked = ref(false);
+const updateBusy = computed(() => {
+  const state = updateCoordinator?.snapshot.value.state;
+  return (
+    state === "checking" || state === "downloading" || state === "applying"
+  );
+});
+const updateStatus = computed(() => {
+  const snapshot = updateCoordinator?.snapshot.value;
+  if (!snapshot) return "";
+  switch (snapshot.state) {
+    case "checking":
+      return "Vérification en cours…";
+    case "downloading":
+      return "Téléchargement de la mise à jour…";
+    case "applying":
+      return "Mise à jour en cours…";
+    case "ready":
+      return `La version ${snapshot.metadata?.version ?? ""} est disponible.`;
+    case "error":
+      if (snapshot.metadata) {
+        return "La mise à jour n’a pas pu être appliquée. Relancez une vérification.";
+      }
+      return updateChecked.value
+        ? "Vérification impossible. Vérifiez la connexion à votre instance, puis réessayez."
+        : "";
+    default:
+      return updateChecked.value ? "Synapse est à jour." : "";
+  }
+});
+
+async function checkForUpdates() {
+  await updateCoordinator?.check();
+  updateChecked.value = true;
+}
+
 const hasSessions = computed(() => props.sessions.length > 0);
 const showDeviceCategory = computed(
   () => props.deviceSupported || hasSessions.value,
@@ -221,6 +262,9 @@ const categories = computed<SettingsCategory[]>(() => {
   }
   if (props.admin && !props.offline) {
     items.push({ id: "users", label: "Utilisateurs" });
+  }
+  if (updateCoordinator) {
+    items.push({ id: "updates", label: "Mises à jour" });
   }
   return items;
 });
@@ -852,6 +896,52 @@ function selectInvitationLink(event: Event) {
           </template>
 
           <section
+            v-if="activeCategory === 'updates' && updateCoordinator"
+            class="settings-section"
+            aria-labelledby="settings-updates"
+          >
+            <h3 id="settings-updates" class="settings-section-title">
+              Mises à jour
+            </h3>
+            <div class="settings-subsection">
+              <p>
+                Synapse vérifie régulièrement si votre instance propose une
+                nouvelle version. Vous pouvez aussi le demander ici.
+              </p>
+              <button
+                class="settings-action"
+                type="button"
+                data-test="check-updates"
+                :disabled="updateBusy"
+                @click="checkForUpdates"
+              >
+                Vérifier les mises à jour
+              </button>
+              <p
+                class="settings-update-status"
+                role="status"
+                data-test="update-status"
+                :data-kind="
+                  updateCoordinator.snapshot.value.state === 'error'
+                    ? 'error'
+                    : 'info'
+                "
+              >
+                {{ updateStatus }}
+              </p>
+              <button
+                v-if="updateCoordinator.snapshot.value.state === 'ready'"
+                class="settings-action"
+                type="button"
+                data-test="apply-update"
+                @click="updateCoordinator.apply()"
+              >
+                {{ updateCoordinator.activationLabel }}
+              </button>
+            </div>
+          </section>
+
+          <section
             v-if="activeCategory === 'users' && admin && !offline"
             class="settings-section"
             aria-labelledby="settings-users"
@@ -1214,6 +1304,18 @@ function selectInvitationLink(event: Event) {
 }
 
 .settings-error {
+  color: var(--synapse-color-danger);
+}
+
+.settings-section .settings-update-status {
+  min-height: 1.3em;
+  margin: 0;
+  color: var(--synapse-color-text);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.settings-section .settings-update-status[data-kind="error"] {
   color: var(--synapse-color-danger);
 }
 
