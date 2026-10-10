@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import LocalFolderPanel from "./LocalFolderPanel.vue";
+import {
+  chooseLocalVaultFolder,
+  isLocalFolderSupported,
+  localFolderStatus,
+  mirrorVaultSnapshot,
+} from "../platform/local-folder";
 import DeletedItemsPanel from "./DeletedItemsPanel.vue";
 import QuickAssistantPrompt from "../components/QuickAssistantPrompt.vue";
 import {
@@ -1392,6 +1397,46 @@ async function saveVaultPreferences(templatesPath: string) {
   }
 }
 
+/** Rebinds the desktop Markdown replica to another folder and writes the
+ * current vault into it. A lock during the native picker cancels the write. */
+async function chooseLocalFolder() {
+  const vaultId = vault.currentVaultId;
+  if (!vaultId || !vault.isUnlocked) return;
+  localFolderStatus.error = "";
+  let cancelled = false;
+  const stop = vault.$onAction(({ name }) => {
+    if (name === "lock" || name === "lockAndRequirePassphrase")
+      cancelled = true;
+  });
+  try {
+    const path = await chooseLocalVaultFolder(vaultId);
+    if (
+      cancelled ||
+      !path ||
+      !vault.isUnlocked ||
+      vault.currentVaultId !== vaultId
+    )
+      return;
+    await mirrorVaultSnapshot(vaultId, [
+      ...vault.markdownExportNotes().map((note) => ({
+        kind: "note" as const,
+        path: note.path!,
+        markdown: note.content,
+      })),
+      ...vault.markdownExportAttachments().map((file) => ({
+        kind: "attachment" as const,
+        path: file.path,
+        bytes: Array.from(file.bytes),
+      })),
+    ]);
+  } catch {
+    localFolderStatus.error =
+      "Impossible de choisir ce dossier. Choisissez un dossier vide.";
+  } finally {
+    stop();
+  }
+}
+
 async function exportNotes() {
   settingsError.value = "";
   try {
@@ -2558,7 +2603,6 @@ watch(settingsOpen, (open) => {
       />
     </template>
   </AppShell>
-  <LocalFolderPanel />
   <DeletedItemsPanel
     v-if="deletedItemsOpen"
     :open="deletedItemsOpen"
@@ -2582,6 +2626,10 @@ watch(settingsOpen, (open) => {
     :invitation-link="invitationLink"
     :status-message="''"
     :templates-path="vault.preferences.templatesPath"
+    :local-folder-supported="isLocalFolderSupported()"
+    :local-folder-path="localFolderStatus.path"
+    :local-folder-error="localFolderStatus.error"
+    @choose-local-folder="chooseLocalFolder"
     @change-passphrase="changePassphrase"
     @change-password="changePassword"
     @close="settingsOpen = false"

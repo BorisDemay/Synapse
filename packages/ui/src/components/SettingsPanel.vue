@@ -11,6 +11,7 @@ import {
 import { useSidebarLayout } from "../sidebar-layout";
 import { useTheme, type ThemePreference } from "../theme";
 import { UPDATE_COORDINATOR_KEY } from "../update/coordinator";
+import { displayLocalPath } from "../vault/local-path";
 
 export interface SettingsSession {
   createdAt: string;
@@ -46,6 +47,10 @@ const props = withDefaults(
     deviceTrusted: boolean;
     errorMessage?: string;
     exportSupported?: boolean;
+    /** Dossier où la plateforme écrit la copie Markdown en clair (desktop). */
+    localFolderError?: string;
+    localFolderPath?: string;
+    localFolderSupported?: boolean;
     offline?: boolean;
     open: boolean;
     sessions?: SettingsSession[];
@@ -58,6 +63,9 @@ const props = withDefaults(
     accountEmail: "",
     errorMessage: "",
     exportSupported: true,
+    localFolderError: "",
+    localFolderPath: "",
+    localFolderSupported: false,
     offline: false,
     sessions: () => [],
     users: () => [],
@@ -70,6 +78,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   changePassphrase: [current: string, next: string];
   changePassword: [current: string, next: string];
+  chooseLocalFolder: [];
   close: [];
   deleteAccount: [password: string];
   exportNotes: [];
@@ -703,6 +712,35 @@ function selectInvitationLink(event: Event) {
             >
               Importer un dossier Markdown
             </button>
+            <div
+              v-if="localFolderSupported"
+              class="settings-subsection"
+              data-test="local-folder"
+            >
+              <h4>Copie Markdown locale</h4>
+              <p>
+                Chaque note enregistrée est aussi écrite en clair dans un
+                dossier de cet appareil. Ces fichiers restent lisibles après
+                verrouillage du coffre.
+              </p>
+              <p
+                v-if="localFolderPath"
+                class="settings-local-path"
+                data-test="local-folder-path"
+              >
+                {{ displayLocalPath(localFolderPath) }}
+              </p>
+              <button
+                class="settings-action"
+                type="button"
+                @click="emit('chooseLocalFolder')"
+              >
+                Changer le dossier Markdown
+              </button>
+              <p v-if="localFolderError" class="settings-error" role="alert">
+                {{ localFolderError }}
+              </p>
+            </div>
             <form
               class="settings-form"
               data-form="vault-preferences"
@@ -1305,6 +1343,18 @@ function selectInvitationLink(event: Event) {
 
 .settings-error {
   color: var(--synapse-color-danger);
+}
+
+.settings-section .settings-local-path {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--synapse-color-border);
+  border-radius: var(--synapse-radius-sm);
+  color: var(--synapse-color-text);
+  background: var(--synapse-color-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .settings-section .settings-update-status {

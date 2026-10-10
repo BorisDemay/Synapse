@@ -399,6 +399,17 @@ describe("VaultView folder import action", () => {
     click.mockRestore();
   });
 
+  it("ne pose plus le dossier Markdown local sous l'application", async () => {
+    const { wrapper } = await mountVault();
+
+    expect(wrapper.find('[aria-label="Copie Markdown locale"]').exists()).toBe(
+      false,
+    );
+    expect(
+      wrapper.getComponent({ name: "SettingsPanel" }).props(),
+    ).toMatchObject({ localFolderPath: "", localFolderSupported: false });
+  });
+
   it("opens the ZIP picker from the ZIP import action", async () => {
     const { wrapper } = await mountVault();
     const picker = wrapper.get("input[accept='.zip']")
