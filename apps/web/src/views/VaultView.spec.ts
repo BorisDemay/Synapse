@@ -891,6 +891,66 @@ describe("VaultView writing-first workspace", () => {
     ).toBe("Racine");
   });
 
+  it("ne prend jamais la première ligne du texte comme titre", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("sans-titre", {
+      content: "Une première ligne de texte.\n\nSuite.",
+      path: "01a0d483-e5b2-7ebd-88e4-a98e29eca135.md",
+      revision: 1,
+    });
+    wrapper
+      .findComponent({ name: "VaultTree" })
+      .vm.$emit("select", "sans-titre");
+    await flushPromises();
+
+    const title = wrapper.get('input[aria-label="Titre de la note"]')
+      .element as HTMLInputElement;
+    expect(title.value).toBe("");
+    expect(title.placeholder).toBe("Nouvelle note");
+  });
+
+  it("propose le nom de fichier d'une note importée sans titre, sans l'écrire", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("importee", {
+      content: "Éplucher les pommes.",
+      path: "recettes/Tarte aux pommes.md",
+      revision: 1,
+    });
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "importee");
+    await flushPromises();
+
+    const title = wrapper.get('input[aria-label="Titre de la note"]')
+      .element as HTMLInputElement;
+    expect(title.value).toBe("");
+    expect(title.placeholder).toBe("Tarte aux pommes");
+  });
+
+  it("écrit le titre saisi sans toucher au texte d'une note sans titre", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("sans-titre", {
+      content: "Une première ligne de texte.",
+      path: "01a0d483-e5b2-7ebd-88e4-a98e29eca135.md",
+      revision: 1,
+    });
+    const save = vi.spyOn(vault, "saveNote").mockResolvedValue({} as never);
+    wrapper
+      .findComponent({ name: "VaultTree" })
+      .vm.$emit("select", "sans-titre");
+    await flushPromises();
+
+    const title = wrapper.get('input[aria-label="Titre de la note"]');
+    await title.setValue("Mon titre");
+    await title.trigger("change");
+    await flushPromises();
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "# Mon titre\n\nUne première ligne de texte.",
+        id: "sans-titre",
+      }),
+    );
+  });
+
   it("keeps full note paths so folders survive in the tree", async () => {
     const { wrapper, vault } = await mountVault({ stubVaultTree: false });
     vault.notes.set("nested", {

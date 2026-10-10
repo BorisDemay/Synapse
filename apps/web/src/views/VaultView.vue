@@ -214,19 +214,27 @@ const pendingSaves = reactive(
 const localSaveFailed = ref(false);
 let saveInFlight: Promise<boolean> | undefined;
 
-function noteTitle(markdown: string, fallback: string): string {
+/** Le titre est un champ à part, stocké comme premier titre « # » du markdown.
+ * Le texte de la note n'en tient jamais lieu : sans titre, elle reste sans titre. */
+function noteHeading(markdown: string): string {
   const heading = markdown
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.startsWith("# "));
-  if (heading) {
-    return heading.replace(/^#+\s+/, "").trim() || fallback;
+  return heading?.replace(/^#+\s+/, "").trim() ?? "";
+}
+
+const INTERNAL_FILE_STEM =
+  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$|^[0-9a-f]{8}$/i;
+
+/** Nom affiché d'une note sans titre : son nom de fichier s'il a été choisi
+ * (import), jamais un identifiant interne. */
+function untitledNoteLabel(path: string | undefined, id: string): string {
+  const stem = path?.split("/").pop()?.replace(/\.md$/i, "").trim();
+  if (!stem || stem === id || INTERNAL_FILE_STEM.test(stem)) {
+    return "Nouvelle note";
   }
-  const firstLine = markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-  return firstLine?.slice(0, 48) || fallback;
+  return stem;
 }
 
 /** Keeps the full vault-relative path: folders drive the tree, templates and
@@ -239,7 +247,7 @@ const queryNotes = computed<QueryNote[]>(() =>
   Array.from(vault.notes.entries()).map(([id, note]) => ({
     content: note.content,
     id,
-    label: noteTitle(note.content, "Nouvelle note"),
+    label: noteHeading(note.content) || untitledNoteLabel(note.path, id),
     path: fullNotePath(note.path, id),
   })),
 );
@@ -365,12 +373,12 @@ const treeSelectedId = computed(() =>
     : null,
 );
 
-const currentQueryNote = computed(() =>
-  queryNotes.value.find((note) => note.id === noteId.value),
+const currentNoteHeading = computed(() => noteHeading(content.value));
+const untitledNotePlaceholder = computed(() =>
+  untitledNoteLabel(vault.notes.get(noteId.value)?.path, noteId.value),
 );
-
-const currentNoteTitle = computed(() =>
-  noteTitle(content.value, currentQueryNote.value?.label ?? "Nouvelle note"),
+const currentNoteTitle = computed(
+  () => currentNoteHeading.value || untitledNotePlaceholder.value,
 );
 
 /** Marge Papier : dérivée du texte en cours d'édition, pas de la version
@@ -421,7 +429,7 @@ async function commitNoteTitle() {
   const draft = noteTitleDraft.value;
   noteTitleDraft.value = null;
   const next = draft.trim();
-  if (!next || next === currentNoteTitle.value) return;
+  if (!next || next === currentNoteHeading.value) return;
   const lines = content.value.split("\n");
   const headingIndex = lines.findIndex((line) => line.trim().startsWith("# "));
   if (headingIndex >= 0) {
@@ -2224,7 +2232,8 @@ watch(settingsOpen, (open) => {
           <input
             class="note-title-input"
             type="text"
-            :value="noteTitleDraft ?? currentNoteTitle"
+            :value="noteTitleDraft ?? currentNoteHeading"
+            :placeholder="untitledNotePlaceholder"
             aria-label="Titre de la note"
             @input="onNoteTitleInput"
             @change="commitNoteTitle"
