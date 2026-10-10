@@ -521,6 +521,9 @@ async fn discovery_refuses_a_symlinked_markdown_without_mutation() {
     assert_eq!(mirror.written(), written_before);
 }
 
+// Two names differing only by case are one file on the default Windows
+// filesystem, so this on-disk collision can only be staged on Linux.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn discovery_refuses_case_colliding_markdown_without_mutation() {
     let directory = tempdir().expect("tempdir");
