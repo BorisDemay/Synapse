@@ -48,4 +48,22 @@ describe("note title editor projection", () => {
     expect(noteBodyForEditor(markdown)).toBe(markdown);
     expect(restoreNoteTitle(markdown, "Corps modifié")).toBe("Corps modifié");
   });
+
+  it("keeps a heading typed at the top of an untitled note in the body", () => {
+    const restored = restoreNoteTitle("", "# test", "Nouvelle note");
+    expect(restored).toBe("# Nouvelle note\n\n# test");
+    expect(noteBodyForEditor(restored)).toBe("# test");
+  });
+
+  it("keeps a typed top heading in the body after front matter", () => {
+    const body = "---\ntags: [a]\n---\n\n# test\n";
+    const restored = restoreNoteTitle("Texte", body, "Recette");
+    expect(restored).toBe("---\ntags: [a]\n---\n\n# Recette\n\n# test\n");
+    expect(noteBodyForEditor(restored)).toBe(body);
+  });
+
+  it("leaves an untitled note untitled while its body has no top heading", () => {
+    expect(restoreNoteTitle("", "Du texte", "Nouvelle note")).toBe("Du texte");
+    expect(restoreNoteTitle("", "# ", "Nouvelle note")).toBe("# ");
+  });
 });

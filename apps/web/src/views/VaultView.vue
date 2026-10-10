@@ -2403,6 +2403,7 @@ watch(settingsOpen, (open) => {
               ref="editorSurface"
               :model-value="content"
               :hide-first-heading="true"
+              :untitled-title="untitledNotePlaceholder"
               @update:model-value="updateDraft"
               :attachment-urls="blobUrls"
               :wikilink-suggestions="wikilinkSuggestions"

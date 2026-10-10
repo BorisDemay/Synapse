@@ -29,9 +29,21 @@ export function noteBodyForEditor(markdown: string): string {
   return splitHeaderTitle(markdown).body;
 }
 
-export function restoreNoteTitle(markdown: string, editedBody: string): string {
+/** `untitledTitle` names a note that has no title yet. Without a hidden H1, a
+ * heading typed at the top of the body would be read back as the title: the
+ * title is materialised first so that the typed heading stays in the body. */
+export function restoreNoteTitle(
+  markdown: string,
+  editedBody: string,
+  untitledTitle?: string,
+): string {
   const { heading, hasFrontMatter } = splitHeaderTitle(markdown);
-  if (!heading) return editedBody;
+  if (!heading) {
+    const title = untitledTitle?.trim();
+    if (!title || !splitHeaderTitle(editedBody).heading) return editedBody;
+    const bodyPrefix = frontMatterPrefix(editedBody);
+    return `${bodyPrefix}# ${title}\n\n${editedBody.slice(bodyPrefix.length)}`;
+  }
   const prefix = hasFrontMatter ? frontMatterPrefix(editedBody) : "";
   const body = editedBody.slice(prefix.length);
   const separator = body && !heading.endsWith("\n") ? "\n\n" : "";

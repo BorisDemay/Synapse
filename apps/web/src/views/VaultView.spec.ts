@@ -148,7 +148,12 @@ async function mountVault(options?: {
         },
         MarkdownEditor: {
           name: "MarkdownEditor",
-          props: ["modelValue", "hideFirstHeading", "attachmentUrls"],
+          props: [
+            "modelValue",
+            "hideFirstHeading",
+            "untitledTitle",
+            "attachmentUrls",
+          ],
           template: '<div data-test="markdown-editor">{{ modelValue }}</div>',
           setup(
             _props: unknown,
@@ -949,6 +954,21 @@ describe("VaultView writing-first workspace", () => {
         id: "sans-titre",
       }),
     );
+  });
+
+  it("donne à l'éditeur le titre à matérialiser si le corps commence par un titre", async () => {
+    const { wrapper, vault } = await mountVault();
+    vault.notes.set("importee", {
+      content: "Éplucher les pommes.",
+      path: "recettes/Tarte aux pommes.md",
+      revision: 1,
+    });
+    wrapper.findComponent({ name: "VaultTree" }).vm.$emit("select", "importee");
+    await flushPromises();
+
+    expect(
+      wrapper.findComponent({ name: "MarkdownEditor" }).props("untitledTitle"),
+    ).toBe("Tarte aux pommes");
   });
 
   it("keeps full note paths so folders survive in the tree", async () => {

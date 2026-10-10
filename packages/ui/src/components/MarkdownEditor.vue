@@ -20,6 +20,8 @@ const props = withDefaults(
   defineProps<{
     attachmentUrls?: Record<string, string>;
     hideFirstHeading?: boolean;
+    /** Titre affiché d'une note sans titre, voir restoreNoteTitle. */
+    untitledTitle?: string;
     modelValue: string;
     wikilinkSuggestions?: readonly { label: string; path: string }[];
   }>(),
@@ -169,7 +171,7 @@ function handleInput(value: string) {
   // local blob URL, even when the Markdown value itself has not changed.
   rewriteAttachmentUrls();
   const fullMarkdown = props.hideFirstHeading
-    ? restoreNoteTitle(currentValue, value)
+    ? restoreNoteTitle(currentValue, value, props.untitledTitle)
     : value;
   if (fullMarkdown === currentValue) {
     return;
