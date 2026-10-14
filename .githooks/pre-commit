@@ -1,3 +1,4 @@
 #!/bin/sh
-# Opus review of agent commits; see docs/agent-tooling.md.
-exec python3 "$(git rev-parse --show-toplevel)/.claude/hooks/commit-review.py"
+# Opus review of agent commits; see docs/agent-tooling.md. The script is resolved
+# next to this hook, so worktrees on older branches run the same review.
+exec python3 "$(dirname "$0")/../.claude/hooks/commit-review.py"

@@ -44,10 +44,18 @@ report = git_dir / "synapse-commit-review.md"
 if stamp.exists() and stamp.read_text() == digest:
     sys.exit(0)
 
-claude = next((c for c in (os.environ.get("CLAUDE_BIN"), "/usr/local/lib/claude/claude",
-                           shutil.which("claude")) if c and Path(c).exists()), None)
-if not claude:
+claude = os.environ.get("CLAUDE_BIN") or next(
+    (c for c in ("/usr/local/lib/claude/claude", shutil.which("claude")) if c and Path(c).exists()), None)
+if not claude or not Path(claude).exists():
     fail("Claude Code CLI not found; set CLAUDE_BIN. Commit not reviewed.")
+
+if not (root / ".claude" / "agents" / "security-reviewer.md").is_file():
+    fail(f"{root} has no .claude/agents/security-reviewer.md (a branch older than the review?). "
+         "Bring the branch up to date with main first.")
+try:
+    timeout = int(os.environ.get("SYNAPSE_REVIEW_TIMEOUT", "840"))
+except ValueError:
+    fail("SYNAPSE_REVIEW_TIMEOUT must be a number of seconds.")
 
 LIMIT = 300_000
 if len(diff) > LIMIT:
@@ -78,7 +86,7 @@ try:
     result = subprocess.run(
         [claude, "-p", "--agent", "security-reviewer", "--model", "opus",
          "--tools", "Read,Grep,Glob", "--strict-mcp-config", "--no-session-persistence"],
-        input=prompt, cwd=root, env=env, capture_output=True, text=True, timeout=840)
+        input=prompt, cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
 except subprocess.TimeoutExpired:
     fail("the review timed out; commit not reviewed. Retry, or ask the user.")
 
