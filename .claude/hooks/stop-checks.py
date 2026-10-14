@@ -10,6 +10,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+if os.environ.get("SYNAPSE_COMMIT_REVIEW"):
+    sys.exit(0)  # headless commit reviewer: read-only, nothing to check
+
 payload = json.load(sys.stdin)
 if payload.get("stop_hook_active"):
     sys.exit(0)

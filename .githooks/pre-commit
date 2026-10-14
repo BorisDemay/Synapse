@@ -1,0 +1,3 @@
+#!/bin/sh
+# Opus review of agent commits; see docs/agent-tooling.md.
+exec python3 "$(git rev-parse --show-toplevel)/.claude/hooks/commit-review.py"

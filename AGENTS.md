@@ -26,6 +26,7 @@
   - avant de figer un plan touchant la sécurité ou la synchronisation, le soumettre à `security-reviewer` ;
   - après la même erreur deux fois, cesser de réessayer : relire la sortie complète, rétablir la cause racine et changer d’approche ;
   - avant de déclarer terminée une modification de ce périmètre, faire relire le diff par `security-reviewer` et traiter ses constats.
+  - chaque *commit* de l’agent est relu automatiquement par `security-reviewer` sur Opus (hook Git `.githooks/pre-commit`, activé par `git config core.hooksPath .githooks`) ; lancer le *commit* avec un délai d’au moins 15 minutes, corriger les constats d’un verdict `BLOCK` et ne jamais contourner le hook.
   Une revue ne remplace jamais les commandes de validation.
 - Choix du modèle (Claude Code) : Opus pour la cryptographie, la synchronisation, les sessions, les autorisations et les migrations ; Sonnet suffit pour l’interface, la documentation et la livraison.
 - Pour une petite modification d’interface isolée, exécuter uniquement les tests ciblés et, si pertinent, le typecheck ou le lint du package touché. Réserver la suite complète, les tests navigateur, le build global et les validations multi-plateformes aux préparations de merge ou de release, sauf demande explicite de l’utilisateur.

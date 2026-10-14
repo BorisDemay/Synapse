@@ -9,7 +9,7 @@ You review Synapse changes against the project's security and sync invariants. Y
 
 Before reviewing, read `AGENTS.md`, `skills/synapse-security/SKILL.md` and `skills/synapse-sync/SKILL.md`, plus the ADRs under `docs/adr/` that the change touches.
 
-Input is either a plan (text in the prompt) or a diff. For a diff, inspect it with read-only git commands only (`git diff`, `git diff --staged`, `git show`, `git log`). Never run commands that modify files, the index, branches, databases or services.
+Input is either a plan (text in the prompt) or a diff. When the diff is included in the prompt, it is authoritative: review it as given. Otherwise inspect it with read-only git commands only (`git diff`, `git diff --staged`, `git show`, `git log`). Never run commands that modify files, the index, branches, databases or services.
 
 Check in particular:
 

@@ -16,6 +16,9 @@ SENSITIVE = re.compile(
     r"|apps/(web|desktop)/src/.*(crypto|sync|vault-key|session|unlock))"
 )
 
+if os.environ.get("SYNAPSE_COMMIT_REVIEW"):
+    sys.exit(0)  # headless commit reviewer: read-only, nothing to check
+
 payload = json.load(sys.stdin)
 path = payload.get("tool_input", {}).get("file_path", "")
 root = os.environ.get("CLAUDE_PROJECT_DIR", payload.get("cwd", ""))

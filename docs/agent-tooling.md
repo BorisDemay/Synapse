@@ -26,7 +26,11 @@ Les fichiers sous `skills/` sont des procédures versionnées du projet. Ils ne 
 | `.claude/agents/log-digester.md` | Haiku : résumé des échecs d’une sortie longue de tests, build ou CI |
 | `.claude/hooks/protect-secrets.py` | `PreToolUse` : refuse l’édition de `.env*` (hors `.example`) et de fichiers de clés |
 | `.claude/hooks/sensitive-area.py` | `PostToolUse` : rappelle une fois par session la revue `security-reviewer` après une édition en zone sécurité ou synchronisation |
+| `.githooks/pre-commit` → `.claude/hooks/commit-review.py` | Hook Git `pre-commit` : quand Claude Code lance le *commit* (`CLAUDECODE=1`), fait relire l’index par `security-reviewer` sur Opus, en mode non interactif et en lecture seule (`Read`, `Grep`, `Glob`). Git l’exécute sur l’index réellement validé (`-a`, chemins et worktrees compris). Un verdict `BLOCK` ou une revue impossible annule le *commit*. Un verdict `PASS` est mis en cache pour ce diff ; le rapport est écrit dans `.git/synapse-commit-review.md`. Les *commits* faits à la main ne sont pas relus |
+| `.claude/hooks/commit-guard.py` | `PreToolUse` (Bash) : refuse `--no-verify`, `-n` et toute modification de `core.hooksPath`, et bloque les *commits* tant que le hook n’est pas activé dans le clone ou le worktree |
 | `.claude/hooks/stop-checks.py` | `Stop` : `typecheck` des packages JS et `cargo check` des crates modifiés ; un échec renvoie l’erreur à l’agent. Les tests restent à exécuter selon `AGENTS.md` |
+
+Activation, une fois par clone : `git config core.hooksPath .githooks`. Une revue prend environ une minute : lancer le *commit* avec un délai d’exécution d’au moins 15 minutes. Tests des hooks : `python3 -m unittest discover -s .claude/hooks`. Ces hooks supposent un agent coopératif : ils empêchent les contournements accidentels, pas un contournement délibéré.
 
 Les hooks utilisent `python3` et ajoutent les toolchains installées sous `/root` au `PATH` lorsqu’elles existent. Le hook `PreToolUse` ne couvre pas les écritures faites via le shell.
 
