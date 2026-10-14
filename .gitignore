@@ -16,6 +16,7 @@ node_modules/
 /synapse-mail/
 
 # Local coding-agent configuration and process notes
+.claude/settings.local.json
 .agents/
 .codex/
 .hermes/

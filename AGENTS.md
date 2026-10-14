@@ -21,7 +21,13 @@
 
 - Appliquer TDD : écrire un test qui échoue pour la bonne raison, l’exécuter, écrire le minimum pour le faire passer, exécuter le test ciblé puis la suite concernée, refactoriser seulement quand tout est vert.
 - Travailler par petites tranches verticales. Une tâche du plan peut être subdivisée, mais ne pas être fusionnée avec des fonctionnalités non demandées.
-- Ne déléguer à un sous-agent que lorsque l’utilisateur le demande explicitement. Sans cette demande, travailler directement dans la session principale, y compris pour les recherches bornées, la génération de tests et les revues mécaniques.
+- Sous-agents : seuls ceux définis sous `.claude/agents/` peuvent être utilisés sans demande explicite, et uniquement dans leur périmètre : `docs` (documentation d’API tierce, version épinglée), `security-reviewer` (revue d’un plan ou d’un diff touchant E2EE, clés, sessions, autorisations, stockage, synchronisation, conflits ou migrations) et `log-digester` (sortie longue de tests, build ou CI). Toute autre délégation exige une demande explicite de l’utilisateur. Les recherches dans le dépôt, la génération de tests et les revues mécaniques se font directement dans la session principale.
+- Points de contrôle :
+  - avant de figer un plan touchant la sécurité ou la synchronisation, le soumettre à `security-reviewer` ;
+  - après la même erreur deux fois, cesser de réessayer : relire la sortie complète, rétablir la cause racine et changer d’approche ;
+  - avant de déclarer terminée une modification de ce périmètre, faire relire le diff par `security-reviewer` et traiter ses constats.
+  Une revue ne remplace jamais les commandes de validation.
+- Choix du modèle (Claude Code) : Opus pour la cryptographie, la synchronisation, les sessions, les autorisations et les migrations ; Sonnet suffit pour l’interface, la documentation et la livraison.
 - Pour une petite modification d’interface isolée, exécuter uniquement les tests ciblés et, si pertinent, le typecheck ou le lint du package touché. Réserver la suite complète, les tests navigateur, le build global et les validations multi-plateformes aux préparations de merge ou de release, sauf demande explicite de l’utilisateur.
 - Ne jamais déclarer une fonctionnalité terminée sans sortie réelle des commandes de validation proportionnées à la portée de la modification.
 - Ne créer un commit, pousser, fusionner, redémarrer les serveurs ou réconcilier un worktree que lorsque l’utilisateur le demande explicitement. Ne jamais committer secrets, données de test sensibles, binaires ou fichiers générés non reproductibles.

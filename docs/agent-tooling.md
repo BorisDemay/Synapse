@@ -14,6 +14,28 @@ Les fichiers sous `skills/` sont des procédures versionnées du projet. Ils ne 
 | `skills/synapse-sync/SKILL.md` | Réplication offline-first, protocole, files d’opérations, conflits et WebSocket |
 | `skills/synapse-delivery/SKILL.md` | Vue, Tauri, Rust, Docker, CI, tests et livraison |
 
+## Claude Code
+
+`.claude/` contient la configuration partagée de Claude Code. `settings.local.json` reste personnel et n’est pas versionné.
+
+| Élément | Rôle |
+|---|---|
+| `.claude/skills` | Lien vers `skills/`, pour que Claude Code découvre les compétences du projet sans les dupliquer |
+| `.claude/agents/docs.md` | Haiku, lecture seule : documentation d’API tierce pour la version épinglée |
+| `.claude/agents/security-reviewer.md` | Opus, lecture seule : revue d’un plan ou d’un diff de sécurité ou de synchronisation contre les invariants d’`AGENTS.md` |
+| `.claude/agents/log-digester.md` | Haiku : résumé des échecs d’une sortie longue de tests, build ou CI |
+| `.claude/hooks/protect-secrets.py` | `PreToolUse` : refuse l’édition de `.env*` (hors `.example`) et de fichiers de clés |
+| `.claude/hooks/sensitive-area.py` | `PostToolUse` : rappelle une fois par session la revue `security-reviewer` après une édition en zone sécurité ou synchronisation |
+| `.claude/hooks/stop-checks.py` | `Stop` : `typecheck` des packages JS et `cargo check` des crates modifiés ; un échec renvoie l’erreur à l’agent. Les tests restent à exécuter selon `AGENTS.md` |
+
+Les hooks utilisent `python3` et ajoutent les toolchains installées sous `/root` au `PATH` lorsqu’elles existent. Le hook `PreToolUse` ne couvre pas les écritures faites via le shell.
+
+Si `npx` n’est pas dans le `PATH` du processus Claude Code, enregistrer Playwright MCP en portée locale (non versionnée), qui prend le pas sur `.mcp.json` :
+
+```sh
+claude mcp add --scope local playwright -e PATH=<dossier de node>:/usr/bin:/bin -- <dossier de node>/npx -y @playwright/mcp@0.0.79
+```
+
 ## MCP
 
 `.mcp.json` contient uniquement Playwright MCP. Il est open source, gratuit et utile pour inspecter l’interface lors des tests locaux.
